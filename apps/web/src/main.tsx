@@ -29,6 +29,7 @@ import { MeetingsPage } from "./views/MeetingsPage.js";
 import { DocsPage, DocPage } from "./views/DocsPage.js";
 import { DashboardsPage } from "./views/DashboardsPage.js";
 import { TaskOpenPage } from "./views/TaskOpenPage.js";
+import { SpaceOverviewPage } from "./views/SpaceOverviewPage.js";
 import { AuthPage } from "./views/AuthPage.js";
 import { CreateOrgPage } from "./views/CreateOrgPage.js";
 import { AuthProvider, useAuth } from "./lib/auth.js";
@@ -93,13 +94,18 @@ const listRoute = createRoute({
   path: "/l/$listId",
   component: WorkspacePage,
   // Optional key, so plain links to a list don't have to spell out `search`.
-  validateSearch: (s: Record<string, unknown>): { task?: string } =>
-    typeof s.task === "string" ? { task: s.task } : {},
+  validateSearch: (
+    s: Record<string, unknown>,
+  ): { task?: string; view?: "list" | "board" | "table" } => ({
+    ...(typeof s.task === "string" ? { task: s.task } : {}),
+    ...(s.view === "list" || s.view === "board" || s.view === "table" ? { view: s.view } : {}),
+  }),
 });
 const taskOpenRoute = createRoute({ getParentRoute: () => rootRoute, path: "/t/$taskId", component: TaskOpenPage });
 const docsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/docs", component: DocsPage });
 const docRoute = createRoute({ getParentRoute: () => rootRoute, path: "/docs/$docId", component: DocPage });
 const dashboardsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/dashboards", component: DashboardsPage });
+const spaceRoute = createRoute({ getParentRoute: () => rootRoute, path: "/s/$spaceId", component: SpaceOverviewPage });
 const chatIndexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/chat",
@@ -176,6 +182,7 @@ const routeTree = rootRoute.addChildren([
   docsRoute,
   docRoute,
   dashboardsRoute,
+  spaceRoute,
 ]);
 const router = createRouter({ routeTree });
 

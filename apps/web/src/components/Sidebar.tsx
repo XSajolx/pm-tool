@@ -204,25 +204,34 @@ function SpaceNode({ space }: { space: SpaceTree }) {
   const color = space.color ?? "#6366f1";
   return (
     <div className="mb-0.5">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium text-slate-700 hover:bg-muted"
-      >
-        <svg
-          className={cn("h-3 w-3 text-slate-400 transition", open && "rotate-90")}
-          viewBox="0 0 24 24"
-          fill="none"
+      <div className="flex items-center rounded-md hover:bg-muted">
+        <button
+          onClick={() => setOpen((o) => !o)}
+          title={open ? "Collapse" : "Expand"}
+          className="px-2 py-1.5"
         >
-          <path d="M9 6l6 6-6 6" stroke="currentColor" strokeWidth="2" />
-        </svg>
-        <span
-          className="flex h-4 w-4 items-center justify-center rounded text-[10px] font-bold text-white"
-          style={{ background: color }}
+          <svg
+            className={cn("h-3 w-3 text-slate-400 transition", open && "rotate-90")}
+            viewBox="0 0 24 24"
+            fill="none"
+          >
+            <path d="M9 6l6 6-6 6" stroke="currentColor" strokeWidth="2" />
+          </svg>
+        </button>
+        <Link
+          to="/s/$spaceId"
+          params={{ spaceId: space.id }}
+          className="flex min-w-0 flex-1 items-center gap-2 py-1.5 pr-2 text-sm font-medium text-slate-700 [&.active]:text-indigo-700"
         >
-          {space.name[0]}
-        </span>
-        {space.name}
-      </button>
+          <span
+            className="flex h-4 w-4 shrink-0 items-center justify-center rounded text-[10px] font-bold text-white"
+            style={{ background: color }}
+          >
+            {space.name[0]}
+          </span>
+          <span className="truncate">{space.name}</span>
+        </Link>
+      </div>
       {open && (
         <div className="ml-4 border-l border-border pl-1">
           {space.lists.map((l) => (

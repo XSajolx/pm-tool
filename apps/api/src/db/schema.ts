@@ -1422,3 +1422,26 @@ export const documentsRelations = relations(documents, ({ one }) => ({
 }));
 
 export type Document = typeof documents.$inferSelect;
+
+/* ------------------------------------------------------------------ *
+ * Bookmarks — saved links on a Space's overview page.
+ * ------------------------------------------------------------------ */
+export const bookmarks = pgTable(
+  "bookmarks",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    spaceId: uuid("space_id")
+      .notNull()
+      .references(() => spaces.id, { onDelete: "cascade" }),
+    title: varchar("title", { length: 255 }).notNull(),
+    url: text("url").notNull(),
+    createdById: uuid("created_by_id").references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("bookmarks_space_idx").on(t.spaceId)],
+);
+
+export type Bookmark = typeof bookmarks.$inferSelect;

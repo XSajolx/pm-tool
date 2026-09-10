@@ -96,6 +96,24 @@ export interface Tag {
   color: string;
 }
 
+export interface SpaceOverview {
+  space: { id: string; name: string; color: string | null };
+  project: { id: string; name: string } | null;
+  folders: { id: string; name: string; lists: OverviewList[] }[];
+  lists: OverviewList[];
+  workload: { statusId: string | null; name: string; color: string; count: number }[];
+  docs: { id: string; title: string; updatedAt: string }[];
+  bookmarks: { id: string; title: string; url: string }[];
+}
+
+export interface OverviewList {
+  id: string;
+  name: string;
+  folderId: string | null;
+  tasksTotal: number;
+  tasksDone: number;
+}
+
 export interface DocSummary {
   id: string;
   title: string;
@@ -889,11 +907,24 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
-  createList: (spaceId: string, name: string) =>
+  createList: (spaceId: string, name: string, folderId?: string) =>
     request<{ id: string; name: string; spaceId: string }>(`/spaces/${spaceId}/lists`, {
+      method: "POST",
+      body: JSON.stringify({ name, folderId }),
+    }),
+  getSpaceOverview: (spaceId: string) => request<SpaceOverview>(`/spaces/${spaceId}/overview`),
+  createFolder: (spaceId: string, name: string) =>
+    request<{ id: string; name: string; spaceId: string }>(`/spaces/${spaceId}/folders`, {
       method: "POST",
       body: JSON.stringify({ name }),
     }),
+  addBookmark: (spaceId: string, body: { title: string; url: string }) =>
+    request<{ id: string; title: string; url: string }>(`/spaces/${spaceId}/bookmarks`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  removeBookmark: (spaceId: string, id: string) =>
+    request<{ id: string }>(`/spaces/${spaceId}/bookmarks/${id}`, { method: "DELETE" }),
   getTags: (spaceId: string) => request<Tag[]>(`/spaces/${spaceId}/tags`),
   createTag: (spaceId: string, body: { name: string; color?: string }) =>
     request<Tag>(`/spaces/${spaceId}/tags`, { method: "POST", body: JSON.stringify(body) }),

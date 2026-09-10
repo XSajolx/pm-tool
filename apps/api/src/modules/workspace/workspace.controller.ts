@@ -9,7 +9,9 @@ const spaceSchema = z.object({
   name: z.string().min(1).max(255),
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
 });
-const listSchema = z.object({ name: z.string().min(1).max(255) });
+const listSchema = z.object({ name: z.string().min(1).max(255), folderId: z.string().uuid().optional() });
+const folderSchema = z.object({ name: z.string().min(1).max(255) });
+const bookmarkSchema = z.object({ title: z.string().min(1).max(255), url: z.string().min(3).max(2048) });
 const tagSchema = z.object({
   name: z.string().min(1).max(64),
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
@@ -41,7 +43,35 @@ export class WorkspaceController {
   @Roles("owner", "admin", "member")
   @UsePipes(new ZodValidationPipe(listSchema))
   createList(@Auth() auth: AuthContext, @Param("id") spaceId: string, @Body() dto: z.infer<typeof listSchema>) {
-    return this.workspace.createList(auth.orgId, spaceId, dto.name);
+    return dto.folderId
+      ? this.workspace.createListInFolder(auth.orgId, spaceId, dto.folderId, dto.name)
+      : this.workspace.createList(auth.orgId, spaceId, dto.name);
+  }
+
+  /** Everything the space overview page renders, in one call. */
+  @Get("spaces/:id/overview")
+  overview(@Auth() auth: AuthContext, @Param("id") spaceId: string) {
+    return this.workspace.spaceOverview(auth.orgId, spaceId);
+  }
+
+  @Post("spaces/:id/folders")
+  @Roles("owner", "admin", "member")
+  @UsePipes(new ZodValidationPipe(folderSchema))
+  createFolder(@Auth() auth: AuthContext, @Param("id") spaceId: string, @Body() dto: z.infer<typeof folderSchema>) {
+    return this.workspace.createFolder(auth.orgId, spaceId, dto.name);
+  }
+
+  @Post("spaces/:id/bookmarks")
+  @Roles("owner", "admin", "member")
+  @UsePipes(new ZodValidationPipe(bookmarkSchema))
+  addBookmark(@Auth() auth: AuthContext, @Param("id") spaceId: string, @Body() dto: z.infer<typeof bookmarkSchema>) {
+    return this.workspace.addBookmark(auth.orgId, auth.userId, spaceId, dto);
+  }
+
+  @Delete("spaces/:id/bookmarks/:bookmarkId")
+  @Roles("owner", "admin", "member")
+  removeBookmark(@Auth() auth: AuthContext, @Param("id") spaceId: string, @Param("bookmarkId") bookmarkId: string) {
+    return this.workspace.removeBookmark(auth.orgId, spaceId, bookmarkId);
   }
 
   @Get("spaces/:id/statuses")

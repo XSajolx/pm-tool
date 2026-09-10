@@ -2,7 +2,19 @@ import { BadRequestException, Inject, Injectable, NotFoundException } from "@nes
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
-import { lists, memberships, spaces, statuses, tags, users } from "../../db/schema.js";
+import {
+  bookmarks,
+  documents,
+  folders,
+  lists,
+  memberships,
+  projects,
+  spaces,
+  statuses,
+  tags,
+  tasks,
+  users,
+} from "../../db/schema.js";
 import type { Role } from "../auth/auth.types.js";
 
 /** The statuses every new space starts with — same set the seed and Projects use. */
@@ -190,6 +202,140 @@ export class WorkspaceService {
     if (m.role === "owner") throw new BadRequestException("The owner cannot be removed");
     await this.db.delete(memberships).where(eq(memberships.id, m.id));
     return { userId, removed: true };
+  }
+
+  /* ---- Space overview ---- */
+
+  /**
+   * Everything the overview page shows, in a handful of grouped queries:
+   * folders → lists with task counts, status workload for the pie, the project
+   * wrapping the space (if any) with its docs, and bookmarks.
+   */
+  async spaceOverview(orgId: string, spaceId: string) {
+    const space = await this.assertSpace(orgId, spaceId);
+
+    const [folderRows, listRows, taskCounts, workload, project, bookmarkRows] = await Promise.all([
+      this.db.query.folders.findMany({
+        where: and(eq(folders.organizationId, orgId), eq(folders.spaceId, spaceId), isNull(folders.archivedAt)),
+        orderBy: (f) => [asc(f.position)],
+      }),
+      this.db.query.lists.findMany({
+        where: and(eq(lists.organizationId, orgId), eq(lists.spaceId, spaceId), isNull(lists.archivedAt)),
+        orderBy: (l) => [asc(l.position)],
+      }),
+      this.db
+        .select({
+          listId: tasks.listId,
+          total: sql<number>`count(*)::int`,
+          done: sql<number>`count(*) filter (where ${statuses.category} = 'done')::int`,
+        })
+        .from(tasks)
+        .innerJoin(lists, eq(lists.id, tasks.listId))
+        .leftJoin(statuses, eq(statuses.id, tasks.statusId))
+        .where(and(eq(tasks.organizationId, orgId), eq(lists.spaceId, spaceId), isNull(tasks.archivedAt)))
+        .groupBy(tasks.listId),
+      this.db
+        .select({
+          statusId: tasks.statusId,
+          name: statuses.name,
+          color: statuses.color,
+          count: sql<number>`count(*)::int`,
+        })
+        .from(tasks)
+        .innerJoin(lists, eq(lists.id, tasks.listId))
+        .leftJoin(statuses, eq(statuses.id, tasks.statusId))
+        .where(and(eq(tasks.organizationId, orgId), eq(lists.spaceId, spaceId), isNull(tasks.archivedAt)))
+        .groupBy(tasks.statusId, statuses.name, statuses.color),
+      this.db.query.projects.findFirst({
+        where: and(eq(projects.organizationId, orgId), eq(projects.spaceId, spaceId), isNull(projects.archivedAt)),
+      }),
+      this.db.query.bookmarks.findMany({
+        where: and(eq(bookmarks.organizationId, orgId), eq(bookmarks.spaceId, spaceId)),
+        orderBy: (b) => [asc(b.createdAt)],
+      }),
+    ]);
+
+    const docs = project
+      ? await this.db.query.documents.findMany({
+          where: and(eq(documents.organizationId, orgId), eq(documents.projectId, project.id), isNull(documents.archivedAt)),
+          orderBy: (d) => [asc(d.title)],
+        })
+      : [];
+
+    const countByList = new Map(taskCounts.map((c) => [c.listId, c]));
+    const shapeList = (l: typeof listRows[number]) => ({
+      id: l.id,
+      name: l.name,
+      folderId: l.folderId,
+      tasksTotal: countByList.get(l.id)?.total ?? 0,
+      tasksDone: countByList.get(l.id)?.done ?? 0,
+    });
+
+    return {
+      space: { id: space.id, name: space.name, color: space.color },
+      project: project ? { id: project.id, name: project.name } : null,
+      folders: folderRows.map((f) => ({
+        id: f.id,
+        name: f.name,
+        lists: listRows.filter((l) => l.folderId === f.id).map(shapeList),
+      })),
+      lists: listRows.filter((l) => !l.folderId).map(shapeList),
+      workload: workload.map((w) => ({
+        statusId: w.statusId,
+        name: w.name ?? "No status",
+        color: w.color ?? "#cbd5e1",
+        count: w.count,
+      })),
+      docs: docs.map((d) => ({ id: d.id, title: d.title, updatedAt: d.updatedAt })),
+      bookmarks: bookmarkRows.map((b) => ({ id: b.id, title: b.title, url: b.url })),
+    };
+  }
+
+  async createFolder(orgId: string, spaceId: string, name: string) {
+    await this.assertSpace(orgId, spaceId);
+    const [max] = await this.db
+      .select({ m: sql<number>`coalesce(max(${folders.position}), 0)` })
+      .from(folders)
+      .where(eq(folders.spaceId, spaceId));
+    const [row] = await this.db
+      .insert(folders)
+      .values({ organizationId: orgId, spaceId, name, position: Number(max?.m ?? 0) + 1 })
+      .returning();
+    return { id: row!.id, name: row!.name, spaceId };
+  }
+
+  /** Lists can be created straight into a folder from the overview. */
+  async createListInFolder(orgId: string, spaceId: string, folderId: string, name: string) {
+    const folder = await this.db.query.folders.findFirst({
+      where: and(eq(folders.id, folderId), eq(folders.spaceId, spaceId), eq(folders.organizationId, orgId)),
+    });
+    if (!folder) throw new NotFoundException("Folder not found");
+    const [max] = await this.db
+      .select({ m: sql<number>`coalesce(max(${lists.position}), 0)` })
+      .from(lists)
+      .where(eq(lists.folderId, folderId));
+    const [list] = await this.db
+      .insert(lists)
+      .values({ organizationId: orgId, spaceId, folderId, name, position: Number(max?.m ?? 0) + 1 })
+      .returning();
+    return { id: list!.id, name: list!.name, spaceId };
+  }
+
+  async addBookmark(orgId: string, userId: string, spaceId: string, dto: { title: string; url: string }) {
+    await this.assertSpace(orgId, spaceId);
+    const url = /^https?:\/\//i.test(dto.url) ? dto.url : `https://${dto.url}`;
+    const [row] = await this.db
+      .insert(bookmarks)
+      .values({ organizationId: orgId, spaceId, title: dto.title.trim(), url, createdById: userId })
+      .returning();
+    return { id: row!.id, title: row!.title, url: row!.url };
+  }
+
+  async removeBookmark(orgId: string, spaceId: string, id: string) {
+    await this.db
+      .delete(bookmarks)
+      .where(and(eq(bookmarks.id, id), eq(bookmarks.spaceId, spaceId), eq(bookmarks.organizationId, orgId)));
+    return { id, deleted: true };
   }
 
   private async assertSpace(orgId: string, spaceId: string) {

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useSearch } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type Priority, type Task } from "../lib/api.js";
@@ -9,6 +9,7 @@ import { BoardView } from "./BoardView.js";
 import { ListView } from "./ListView.js";
 import { TableView } from "./TableView.js";
 import { cn } from "../lib/utils.js";
+import { recordRecent } from "../lib/recent.js";
 
 type ViewKey = "list" | "board" | "table";
 const VIEWS: { key: ViewKey; label: string; icon: string }[] = [
@@ -20,9 +21,9 @@ const VIEWS: { key: ViewKey; label: string; icon: string }[] = [
 export function WorkspacePage() {
   const { listId } = useParams({ from: "/l/$listId" });
   const qc = useQueryClient();
-  const [view, setView] = useState<ViewKey>("list");
-  // Deep links (/t/:id) land here with ?task=<id> so the panel opens on arrival.
-  const search = useSearch({ strict: false }) as { task?: string };
+  // Deep links land here with ?task= (open the panel) and/or ?view= (layout).
+  const search = useSearch({ strict: false }) as { task?: string; view?: ViewKey };
+  const [view, setView] = useState<ViewKey>(search.view ?? "list");
   const [openTaskId, setOpenTaskId] = useState<string | null>(search.task ?? null);
   const [draft, setDraft] = useState("");
   const [assigneeFilter, setAssigneeFilter] = useState("all");
@@ -44,6 +45,13 @@ export function WorkspacePage() {
   }, [spaces, listId]);
 
   const spaceId = ctx?.space.id;
+
+  // Feed the space overview's "Recent" card.
+  useEffect(() => {
+    if (ctx) {
+      recordRecent({ listId, listName: ctx.listName, spaceId: ctx.space.id, spaceName: ctx.space.name });
+    }
+  }, [ctx, listId]);
 
   const { data: statuses = [] } = useQuery({
     queryKey: ["statuses", spaceId],
