@@ -1,0 +1,202 @@
+import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { and, asc, eq, isNull, sql } from "drizzle-orm";
+import { DRIZZLE } from "../../db/drizzle.module.js";
+import type { DB } from "../../db/index.js";
+import { lists, memberships, spaces, statuses, tags, users } from "../../db/schema.js";
+import type { Role } from "../auth/auth.types.js";
+
+/** The statuses every new space starts with — same set the seed and Projects use. */
+const DEFAULT_STATUSES = [
+  { name: "To Do", category: "not_started", color: "#94a3b8", position: 1 },
+  { name: "In Progress", category: "active", color: "#3b82f6", position: 2 },
+  { name: "In Review", category: "active", color: "#f59e0b", position: 3 },
+  { name: "Done", category: "done", color: "#22c55e", position: 4 },
+] as const;
+
+@Injectable()
+export class WorkspaceService {
+  constructor(@Inject(DRIZZLE) private readonly db: DB) {}
+
+  /** The sidebar tree: spaces → (folders →) lists, all tenant-scoped. */
+  async spaceTree(orgId: string) {
+    const rows = await this.db.query.spaces.findMany({
+      where: and(eq(spaces.organizationId, orgId), isNull(spaces.archivedAt)),
+      with: {
+        folders: { with: { lists: true } },
+        lists: true,
+      },
+      orderBy: (s) => [asc(s.position)],
+    });
+
+    return rows.map((s) => ({
+      id: s.id,
+      name: s.name,
+      color: s.color,
+      // Lists sitting directly on the space (not inside a folder).
+      lists: s.lists
+        .filter((l) => !l.folderId)
+        .sort((a, b) => a.position - b.position)
+        .map((l) => ({ id: l.id, name: l.name })),
+      folders: s.folders.map((f) => ({
+        id: f.id,
+        name: f.name,
+        lists: f.lists
+          .sort((a, b) => a.position - b.position)
+          .map((l) => ({ id: l.id, name: l.name })),
+      })),
+    }));
+  }
+
+  /** A new space is usable immediately: default statuses plus a first list. */
+  async createSpace(orgId: string, dto: { name: string; color?: string }) {
+    return this.db.transaction(async (tx) => {
+      const [space] = await tx
+        .insert(spaces)
+        .values({
+          organizationId: orgId,
+          name: dto.name,
+          color: dto.color ?? "#6366f1",
+          position: Date.now(),
+        })
+        .returning();
+      await tx.insert(statuses).values(
+        DEFAULT_STATUSES.map((s) => ({ ...s, organizationId: orgId, spaceId: space!.id })),
+      );
+      const [list] = await tx
+        .insert(lists)
+        .values({ organizationId: orgId, spaceId: space!.id, name: "Tasks", position: 1 })
+        .returning();
+      return { id: space!.id, name: space!.name, color: space!.color, firstListId: list!.id };
+    });
+  }
+
+  async createList(orgId: string, spaceId: string, name: string) {
+    await this.assertSpace(orgId, spaceId);
+    const [max] = await this.db
+      .select({ m: sql<number>`coalesce(max(${lists.position}), 0)` })
+      .from(lists)
+      .where(eq(lists.spaceId, spaceId));
+    const [list] = await this.db
+      .insert(lists)
+      .values({ organizationId: orgId, spaceId, name, position: Number(max?.m ?? 0) + 1 })
+      .returning();
+    return { id: list!.id, name: list!.name, spaceId };
+  }
+
+  async statusesForSpace(orgId: string, spaceId: string) {
+    return this.db.query.statuses.findMany({
+      where: and(eq(statuses.organizationId, orgId), eq(statuses.spaceId, spaceId)),
+      orderBy: (s) => [asc(s.position)],
+    });
+  }
+
+  /* ---- Tags (labels) live on the space, like statuses ---- */
+
+  async tagsForSpace(orgId: string, spaceId: string) {
+    return this.db.query.tags.findMany({
+      where: and(eq(tags.organizationId, orgId), eq(tags.spaceId, spaceId), isNull(tags.archivedAt)),
+      orderBy: (t) => [asc(t.name)],
+    });
+  }
+
+  async createTag(orgId: string, spaceId: string, dto: { name: string; color?: string }) {
+    await this.assertSpace(orgId, spaceId);
+    const [row] = await this.db
+      .insert(tags)
+      .values({ organizationId: orgId, spaceId, name: dto.name.trim(), color: dto.color ?? "#6b7280" })
+      .onConflictDoNothing()
+      .returning();
+    if (row) return row;
+    // Same name already exists on this space — return it rather than 409ing.
+    const existing = await this.db.query.tags.findFirst({
+      where: and(eq(tags.spaceId, spaceId), eq(tags.name, dto.name.trim())),
+    });
+    return existing!;
+  }
+
+  /** Org members for assignee pickers / avatars. */
+  async members(orgId: string) {
+    const rows = await this.db.query.memberships.findMany({
+      where: eq(memberships.organizationId, orgId),
+      with: { user: true },
+    });
+    return rows.map((m) => ({
+      id: m.user.id,
+      name: m.user.name,
+      email: m.user.email,
+      avatarUrl: m.user.avatarUrl,
+      role: m.role,
+      /** True until they have signed in — the row was created by an invite. */
+      pending: m.user.authSubject.startsWith("invite|"),
+    }));
+  }
+
+  /**
+   * Invite by email. If the person already has an account we add the
+   * membership; otherwise we create a placeholder user row keyed by email.
+   * The first time they sign in with that email, auth's provisioning claims the
+   * row (it matches on email before creating a new user), so everything
+   * assigned or shared with them in the meantime is already theirs.
+   */
+  async invite(orgId: string, dto: { email: string; name?: string; role?: Role }) {
+    const email = dto.email.trim().toLowerCase();
+    if (!email.includes("@")) throw new BadRequestException("A valid email is required");
+    const role: Role = dto.role ?? "member";
+    if (role === "owner") throw new BadRequestException("Ownership is transferred, not granted by invite");
+
+    let user = await this.db.query.users.findFirst({ where: eq(users.email, email) });
+    if (!user) {
+      const [created] = await this.db
+        .insert(users)
+        .values({
+          authSubject: `invite|${email}`,
+          email,
+          name: dto.name?.trim() || email.split("@")[0]!,
+        })
+        .returning();
+      user = created!;
+    }
+
+    await this.db
+      .insert(memberships)
+      .values({ organizationId: orgId, userId: user.id, role })
+      .onConflictDoNothing();
+
+    return {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role,
+      pending: user.authSubject.startsWith("invite|"),
+    };
+  }
+
+  async setMemberRole(orgId: string, userId: string, role: Role) {
+    if (role === "owner") throw new BadRequestException("Ownership is transferred, not granted");
+    const [row] = await this.db
+      .update(memberships)
+      .set({ role, updatedAt: new Date() })
+      .where(and(eq(memberships.organizationId, orgId), eq(memberships.userId, userId)))
+      .returning();
+    if (!row) throw new NotFoundException("Member not found");
+    return { userId, role };
+  }
+
+  async removeMember(orgId: string, userId: string) {
+    const m = await this.db.query.memberships.findFirst({
+      where: and(eq(memberships.organizationId, orgId), eq(memberships.userId, userId)),
+    });
+    if (!m) throw new NotFoundException("Member not found");
+    if (m.role === "owner") throw new BadRequestException("The owner cannot be removed");
+    await this.db.delete(memberships).where(eq(memberships.id, m.id));
+    return { userId, removed: true };
+  }
+
+  private async assertSpace(orgId: string, spaceId: string) {
+    const s = await this.db.query.spaces.findFirst({
+      where: and(eq(spaces.id, spaceId), eq(spaces.organizationId, orgId)),
+    });
+    if (!s) throw new NotFoundException("Space not found");
+    return s;
+  }
+}

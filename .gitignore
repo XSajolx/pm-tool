@@ -1,0 +1,13 @@
+node_modules/
+dist/
+build/
+.turbo/
+coverage/
+*.log
+.env
+.env.local
+.env.*.local
+.DS_Store
+.vite/
+*.tsbuildinfo
+.playwright-mcp/

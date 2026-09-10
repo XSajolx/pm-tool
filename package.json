@@ -1,0 +1,27 @@
+{
+  "name": "pm-tool",
+  "version": "0.0.1",
+  "private": true,
+  "description": "ClickUp-style project management tool for 4S Digital",
+  "packageManager": "pnpm@10.32.1",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "typecheck": "turbo run typecheck",
+    "db:generate": "pnpm --filter @pm/api db:generate",
+    "db:migrate": "pnpm --filter @pm/api db:migrate",
+    "db:push": "pnpm --filter @pm/api db:push",
+    "db:seed": "pnpm --filter @pm/api db:seed",
+    "db:studio": "pnpm --filter @pm/api db:studio"
+  },
+  "devDependencies": {
+    "turbo": "^2.3.3",
+    "typescript": "^5.7.2",
+    "prettier": "^3.4.2"
+  }
+}
