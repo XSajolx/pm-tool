@@ -7,7 +7,11 @@
  */
 import { supabase } from "./supabase.js";
 
-export const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3333";
+export const API_URL: string =
+  import.meta.env.VITE_API_URL || (import.meta.env.DEV ? "http://localhost:3333" : "");
+
+/** False on a deployed build until VITE_API_URL is set — the shell shows a banner. */
+export const API_CONFIGURED = Boolean(API_URL);
 
 const ORG_STORAGE_KEY = "pm:activeOrgId";
 

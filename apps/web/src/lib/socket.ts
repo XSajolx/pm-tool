@@ -1,5 +1,5 @@
 import { io, type Socket } from "socket.io-client";
-import { API_URL } from "./api.js";
+import { API_CONFIGURED, API_URL } from "./api.js";
 import { supabase } from "./supabase.js";
 
 let socket: Socket | null = null;
@@ -15,6 +15,7 @@ let socket: Socket | null = null;
 export function getSocket(): Socket {
   if (!socket) {
     socket = io(API_URL, {
+      autoConnect: API_CONFIGURED,
       transports: ["websocket", "polling"],
       auth: (cb) => {
         void supabase.auth.getSession().then(({ data }) => {

@@ -33,7 +33,7 @@ import { SpaceOverviewPage } from "./views/SpaceOverviewPage.js";
 import { AuthPage } from "./views/AuthPage.js";
 import { CreateOrgPage } from "./views/CreateOrgPage.js";
 import { AuthProvider, useAuth } from "./lib/auth.js";
-import { api, ApiError } from "./lib/api.js";
+import { api, ApiError, API_CONFIGURED } from "./lib/api.js";
 import { NotFound } from "./components/NotFound.js";
 import "./index.css";
 
@@ -52,9 +52,17 @@ function Protected() {
   if (!memberships.length) return <CreateOrgPage />;
 
   return (
-    <div className="flex h-screen overflow-hidden">
-      <Sidebar />
-      <Outlet />
+    <div className="flex h-screen flex-col overflow-hidden">
+      {!API_CONFIGURED && (
+        <div className="shrink-0 border-b border-amber-200 bg-amber-50 px-4 py-1.5 text-center text-xs text-amber-800">
+          Preview build — the API isn't connected yet, so lists, CRM and time screens can't load data.
+          Sign-in works; everything else lights up once <code>VITE_API_URL</code> points at a hosted API.
+        </div>
+      )}
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        <Sidebar />
+        <Outlet />
+      </div>
     </div>
   );
 }
@@ -185,7 +193,11 @@ const routeTree = rootRoute.addChildren([
   dashboardsRoute,
   spaceRoute,
 ]);
-const router = createRouter({ routeTree });
+// Vite's BASE_URL is "/" locally and "/pm-tool/" on GitHub Pages.
+const router = createRouter({
+  routeTree,
+  basepath: import.meta.env.BASE_URL.replace(/\/$/, "") || "/",
+});
 
 declare module "@tanstack/react-router" {
   interface Register {
