@@ -48,6 +48,7 @@ async function accessToken(forceRefresh = false) {
 }
 
 async function request<T>(path: string, init?: RequestInit, retry = true): Promise<T> {
+  if (!API_CONFIGURED) throw new ApiError(0, "API not connected");
   const token = await accessToken();
   const res = await fetch(`${API_URL}/api${path}`, {
     ...init,

@@ -49,7 +49,7 @@ function Protected() {
   if (!session) return <AuthPage />;
   // Signed in, but `/auth/me` hasn't answered yet.
   if (!user) return <Splash />;
-  if (!memberships.length) return <CreateOrgPage />;
+  if (!memberships.length && API_CONFIGURED) return <CreateOrgPage />;
 
   return (
     <div className="flex h-screen flex-col overflow-hidden">
@@ -213,7 +213,8 @@ const queryClient = new QueryClient({
       // A 4xx is an answer, not a blip: retrying a 404 three times just makes
       // "not found" take seven seconds to appear. Network-ish failures still retry.
       retry: (count, err) =>
-        !(err instanceof ApiError && err.status >= 400 && err.status < 500) && count < 2,
+        !(err instanceof ApiError && (err.status === 0 || (err.status >= 400 && err.status < 500))) &&
+        count < 2,
     },
   },
 });

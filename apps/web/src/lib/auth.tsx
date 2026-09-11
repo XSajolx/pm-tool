@@ -10,7 +10,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import type { Session } from "@supabase/supabase-js";
 import { supabase, supabaseConfigured } from "./supabase.js";
-import { api, setActiveOrg, getActiveOrg, type AuthedUser, type Membership } from "./api.js";
+import { api, API_CONFIGURED, setActiveOrg, getActiveOrg, type AuthedUser, type Membership } from "./api.js";
 
 interface AuthState {
   /** null while we're still restoring a persisted session. */
@@ -100,6 +100,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Resolve our own user record once a token exists.
   useEffect(() => {
     if (!session) return;
+    if (!API_CONFIGURED) {
+      // Preview deployment: no API to provision against. Show who Supabase says
+      // you are and let the shell render; every data screen explains itself.
+      const email = session.user.email ?? "";
+      const meta = session.user.user_metadata as { name?: string } | undefined;
+      setUser({ id: session.user.id, email, name: meta?.name ?? email.split("@")[0] ?? "You" });
+      setMemberships([]);
+      setLoading(false);
+      return;
+    }
     let active = true;
     setLoading(true);
     loadMe()
