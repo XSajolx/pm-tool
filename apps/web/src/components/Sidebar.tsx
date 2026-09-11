@@ -46,7 +46,7 @@ export function Sidebar() {
     .toUpperCase();
 
   return (
-    <aside className="flex h-screen w-60 shrink-0 flex-col border-r border-border bg-[#fbfbfa]">
+    <aside className="flex h-screen w-60 shrink-0 flex-col overflow-hidden border-r border-border bg-[#fbfbfa]">
       {/* Workspace switcher */}
       <div className="relative border-b border-border">
         <button
@@ -91,6 +91,8 @@ export function Sidebar() {
         )}
       </div>
 
+      {/* Scrollable middle: nav sections + spaces */}
+      <div className="min-h-0 flex-1 overflow-y-auto">
       {/* Primary nav */}
       <nav className="px-2 py-2">
         <Link
@@ -142,10 +144,11 @@ export function Sidebar() {
         </span>
         <button onClick={() => setSpaceDialog(true)} title="New space" className="text-muted-foreground hover:text-slate-700">＋</button>
       </div>
-      <div className="flex-1 overflow-y-auto px-1">
+      <div className="px-1 pb-2">
         {spaces.map((s) => (
           <SpaceNode key={s.id} space={s} />
         ))}
+      </div>
       </div>
 
       {spaceDialog && <NewSpaceDialog onClose={() => setSpaceDialog(false)} />}

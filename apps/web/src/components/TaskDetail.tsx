@@ -4,6 +4,8 @@ import { api, type Member, type Priority, type Status } from "../lib/api.js";
 import { Avatar, PRIORITY } from "./ui.js";
 import { TaskCollaboration } from "./TaskCollaboration.js";
 import { CycleField, SubtasksSection, TagsField, TrackTimeButton } from "./TaskExtras.js";
+import { useEscape } from "../lib/useEscape.js";
+import { useAuth } from "../lib/auth.js";
 
 interface Props {
   taskId: string;
@@ -16,6 +18,19 @@ interface Props {
 
 export function TaskDetail({ taskId, listId, spaceId, statuses, members, onClose }: Props) {
   const qc = useQueryClient();
+  const { role } = useAuth();
+  const canDelete = role === "owner" || role === "admin";
+  useEscape(onClose);
+
+  // Archive, not hard delete: the row keeps its history and can be restored later.
+  const remove = useMutation({
+    mutationFn: () => api.deleteTask(taskId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["tasks", listId] });
+      qc.invalidateQueries({ queryKey: ["space-overview"] });
+      onClose();
+    },
+  });
   const { data: task } = useQuery({ queryKey: ["task", taskId], queryFn: () => api.getTask(taskId) });
 
   const invalidate = () => {
@@ -59,6 +74,15 @@ export function TaskDetail({ taskId, listId, spaceId, statuses, members, onClose
             {task?.reference}
             {spaceId && <TrackTimeButton taskId={taskId} spaceId={spaceId} />}
           </span>
+          {canDelete && (
+            <button
+              onClick={() => window.confirm("Delete this task? It will be archived and disappear from the list.") && remove.mutate()}
+              disabled={remove.isPending}
+              className="mr-1 rounded px-2 py-1 text-xs text-slate-500 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
+            >
+              Delete
+            </button>
+          )}
           <button onClick={onClose} className="rounded p-1 text-slate-400 hover:bg-muted">
             <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none">
               <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2" />

@@ -16,6 +16,7 @@ import { api, type Deal, type DealStage } from "../lib/api.js";
 import { useAuth } from "../lib/auth.js";
 import { fmtMoney, fmtShortDate } from "../lib/format.js";
 import { NotesPanel } from "../components/NotesPanel.js";
+import { useEscape } from "../lib/useEscape.js";
 import { CrmField, input } from "./CompaniesPage.js";
 import { cn } from "../lib/utils.js";
 
@@ -241,6 +242,7 @@ function NewDealDialog({ onClose }: { onClose: () => void }) {
 /** Side panel for one deal: stage, value, probability, convert-to-project, notes. */
 function DealDrawer({ dealId, onClose }: { dealId: string; onClose: () => void }) {
   const qc = useQueryClient();
+  useEscape(onClose);
   const { role } = useAuth();
   const isAdmin = role === "owner" || role === "admin";
   const { data: deal } = useQuery({ queryKey: ["deal", dealId], queryFn: () => api.getDeal(dealId) });

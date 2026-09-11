@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api.js";
 import { fmtMoney, fmtShortDate } from "../lib/format.js";
 import { NotesPanel } from "../components/NotesPanel.js";
+import { NotFound } from "../components/NotFound.js";
 import { STAGE_LABEL } from "./DealsPage.js";
 import { cn } from "../lib/utils.js";
 
@@ -14,13 +15,14 @@ export function CompanyPage() {
   const { companyId } = useParams({ from: "/crm/companies/$companyId" });
   const [tab, setTab] = useState<Tab>("contacts");
 
-  const { data: company } = useQuery({ queryKey: ["company", companyId], queryFn: () => api.getCompany(companyId) });
+  const { data: company, isError } = useQuery({ queryKey: ["company", companyId], queryFn: () => api.getCompany(companyId) });
   const { data: estimates = [] } = useQuery({
     queryKey: ["estimates", "company", companyId],
     queryFn: () => api.getEstimates({ companyId }),
     enabled: tab === "estimates",
   });
 
+  if (isError) return <NotFound what="company" />;
   if (!company) {
     return <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">Loading…</div>;
   }

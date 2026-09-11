@@ -4,6 +4,7 @@ import { api, type ProjectStatus } from "../lib/api.js";
 import { useAuth } from "../lib/auth.js";
 import { fmtDuration, fmtMoney, fmtShortDate } from "../lib/format.js";
 import { PROJECT_STATUS } from "./ProjectsPage.js";
+import { NotFound } from "../components/NotFound.js";
 import { cn } from "../lib/utils.js";
 
 /** One project: headline numbers, its lists, who has logged time, recent entries. */
@@ -13,7 +14,7 @@ export function ProjectPage() {
   const { role } = useAuth();
   const canManage = role === "owner" || role === "admin";
 
-  const { data: project } = useQuery({
+  const { data: project, isError } = useQuery({
     queryKey: ["project", projectId],
     queryFn: () => api.getProject(projectId),
   });
@@ -39,6 +40,7 @@ export function ProjectPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["timer"] }),
   });
 
+  if (isError) return <NotFound what="project" />;
   if (!project) {
     return <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">Loading…</div>;
   }

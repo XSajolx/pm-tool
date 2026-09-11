@@ -3,6 +3,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api.js";
 import { cn } from "../lib/utils.js";
+import { useEscape } from "../lib/useEscape.js";
 
 const COLORS = ["#6366f1", "#0ea5e9", "#22c55e", "#f59e0b", "#ef4444", "#a855f7", "#14b8a6"];
 const input =
@@ -142,6 +143,7 @@ export function InviteDialog({ onClose }: { onClose: () => void }) {
 }
 
 function Dialog({ title, subtitle, onClose, children }: { title: string; subtitle?: string; onClose: () => void; children: React.ReactNode }) {
+  useEscape(onClose);
   return (
     <>
       <div className="fixed inset-0 z-40 bg-black/20" onClick={onClose} />

@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type SpaceOverview } from "../lib/api.js";
 import { readRecent } from "../lib/recent.js";
+import { NotFound } from "../components/NotFound.js";
 import { relativeTime } from "../components/TaskCollaboration.js";
 import { cn } from "../lib/utils.js";
 
@@ -15,11 +16,12 @@ type Layout = "list" | "board" | "table";
  */
 export function SpaceOverviewPage() {
   const { spaceId } = useParams({ from: "/s/$spaceId" });
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["space-overview", spaceId],
     queryFn: () => api.getSpaceOverview(spaceId),
   });
 
+  if (isError) return <NotFound what="space" />;
   if (isLoading || !data) {
     return <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">Loading…</div>;
   }

@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api.js";
 import { useAuth } from "../lib/auth.js";
 import { relativeTime } from "../components/TaskCollaboration.js";
+import { NotFound } from "../components/NotFound.js";
 
 /** Internal documents — optionally attached to a project. */
 export function DocsPage() {
@@ -83,7 +84,7 @@ export function DocPage() {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const { user, role } = useAuth();
-  const { data: doc } = useQuery({ queryKey: ["document", docId], queryFn: () => api.getDocument(docId) });
+  const { data: doc, isError } = useQuery({ queryKey: ["document", docId], queryFn: () => api.getDocument(docId) });
   const { data: projects = [] } = useQuery({ queryKey: ["projects"], queryFn: () => api.getProjects() });
 
   const [title, setTitle] = useState("");
@@ -110,6 +111,7 @@ export function DocPage() {
     },
   });
 
+  if (isError) return <NotFound what="document" />;
   if (!doc) return <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">Loading…</div>;
   const canDelete = doc.createdBy?.id === user?.id || role === "owner" || role === "admin";
 

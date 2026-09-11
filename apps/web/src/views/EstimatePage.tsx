@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type EstimateItem, type EstimateStatus } from "../lib/api.js";
 import { fmtMoney, fmtShortDate } from "../lib/format.js";
 import { ESTIMATE_STATUS } from "./EstimatesPage.js";
+import { NotFound } from "../components/NotFound.js";
 import { CrmField, input } from "./CompaniesPage.js";
 import { cn } from "../lib/utils.js";
 
@@ -29,7 +30,7 @@ const ACTIONS: Record<EstimateStatus, { label: string; to: EstimateStatus; tone:
 export function EstimatePage() {
   const { estimateId } = useParams({ from: "/crm/estimates/$estimateId" });
   const qc = useQueryClient();
-  const { data: est } = useQuery({ queryKey: ["estimate", estimateId], queryFn: () => api.getEstimate(estimateId) });
+  const { data: est, isError } = useQuery({ queryKey: ["estimate", estimateId], queryFn: () => api.getEstimate(estimateId) });
   const { data: companies = [] } = useQuery({ queryKey: ["companies", ""], queryFn: () => api.getCompanies() });
   const { data: deals = [] } = useQuery({ queryKey: ["deals"], queryFn: api.getDeals });
 
@@ -88,6 +89,7 @@ export function EstimatePage() {
     onSuccess: refresh,
   });
 
+  if (isError) return <NotFound what="estimate" />;
   if (!est) return <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">Loading…</div>;
 
   const editable = est.status === "draft";

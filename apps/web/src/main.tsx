@@ -33,7 +33,8 @@ import { SpaceOverviewPage } from "./views/SpaceOverviewPage.js";
 import { AuthPage } from "./views/AuthPage.js";
 import { CreateOrgPage } from "./views/CreateOrgPage.js";
 import { AuthProvider, useAuth } from "./lib/auth.js";
-import { api } from "./lib/api.js";
+import { api, ApiError } from "./lib/api.js";
+import { NotFound } from "./components/NotFound.js";
 import "./index.css";
 
 /**
@@ -51,7 +52,7 @@ function Protected() {
   if (!memberships.length) return <CreateOrgPage />;
 
   return (
-    <div className="flex">
+    <div className="flex h-screen overflow-hidden">
       <Sidebar />
       <Outlet />
     </div>
@@ -66,7 +67,7 @@ function Splash() {
   );
 }
 
-const rootRoute = createRootRoute({ component: Protected });
+const rootRoute = createRootRoute({ component: Protected, notFoundComponent: () => <NotFound /> });
 
 /** Landing: jump to the first available list. */
 function Index() {
@@ -193,7 +194,16 @@ declare module "@tanstack/react-router" {
 }
 
 const queryClient = new QueryClient({
-  defaultOptions: { queries: { staleTime: 5_000, refetchOnWindowFocus: false } },
+  defaultOptions: {
+    queries: {
+      staleTime: 5_000,
+      refetchOnWindowFocus: false,
+      // A 4xx is an answer, not a blip: retrying a 404 three times just makes
+      // "not found" take seven seconds to appear. Network-ish failures still retry.
+      retry: (count, err) =>
+        !(err instanceof ApiError && err.status >= 400 && err.status < 500) && count < 2,
+    },
+  },
 });
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
