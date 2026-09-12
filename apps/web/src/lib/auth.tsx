@@ -136,7 +136,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
-      options: { data: { name } },
+      options: {
+        data: { name },
+        // Confirmation links must come back to wherever the app is served
+        // (localhost in dev, https://xsajolx.github.io/pm-tool/ on Pages);
+        // the origin also has to be on Supabase's Redirect URLs allow-list.
+        emailRedirectTo: `${window.location.origin}${import.meta.env.BASE_URL}`,
+      },
     });
     if (error) throw new Error(error.message);
     // With "Confirm email" enabled, Supabase returns a user but no session.
