@@ -15,7 +15,9 @@ let socket: Socket | null = null;
 export function getSocket(): Socket {
   if (!socket) {
     socket = io(API_URL, {
-      autoConnect: API_CONFIGURED,
+      // VITE_REALTIME=off for hosts that can't hold a websocket (e.g. the API on
+      // Vercel serverless): chat still works over REST, it just doesn't push.
+      autoConnect: API_CONFIGURED && import.meta.env.VITE_REALTIME !== "off",
       transports: ["websocket", "polling"],
       auth: (cb) => {
         void supabase.auth.getSession().then(({ data }) => {

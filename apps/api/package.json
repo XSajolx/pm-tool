@@ -25,6 +25,7 @@
     "@nestjs/websockets": "^10.4.22",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.38.3",
+    "express": "^4.22.1",
     "jose": "^6.2.12",
     "postgres": "^3.4.5",
     "reflect-metadata": "^0.2.2",

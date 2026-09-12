@@ -18,7 +18,13 @@ if (!connectionString) {
 
 // A single pooled client per process. Behind a load balancer each API replica
 // keeps its own small pool; the DB (Neon/Supabase/RDS) handles the aggregate.
-const client = postgres(connectionString, { max: 10 });
+// Serverless hosts should set DB_POOL_MAX low (1-2) and point DATABASE_URL at
+// Supabase's transaction pooler (port 6543), which cannot handle prepared
+// statements — hence `prepare` is switched off for that port.
+const client = postgres(connectionString, {
+  max: Number(process.env.DB_POOL_MAX ?? 10),
+  prepare: !/:6543\//.test(connectionString),
+});
 
 export const db = drizzle(client, { schema });
 export { schema };
