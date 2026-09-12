@@ -36,6 +36,7 @@ import { AuthProvider, useAuth } from "./lib/auth.js";
 import { api, ApiError, API_CONFIGURED } from "./lib/api.js";
 import { NotFound } from "./components/NotFound.js";
 import "./index.css";
+import "./doc-editor.css";
 
 /**
  * The gate every route passes through. Rather than redirecting to /login we swap

@@ -13,3 +13,5 @@ coverage/
 .vercel/
 .playwright-mcp/
 .mcp.json
+
+.vercel

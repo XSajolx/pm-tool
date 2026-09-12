@@ -5,10 +5,24 @@ import { DocumentsService } from "./documents.service.js";
 import { Auth, Roles } from "../auth/auth.decorators.js";
 import type { AuthContext } from "../auth/auth.types.js";
 
+const settingsSchema = z
+  .object({
+    font: z.enum(["sans", "serif", "mono"]).optional(),
+    fontSize: z.enum(["sm", "md", "lg"]).optional(),
+    width: z.enum(["narrow", "wide"]).optional(),
+  })
+  .strict();
+
 const schema = z.object({
   title: z.string().min(1).max(255),
-  body: z.string().max(200_000).optional(),
+  body: z.string().max(500_000).optional(),
+  // TipTap document JSON. The body cap above bounds it indirectly (body mirrors content).
+  content: z.record(z.unknown()).nullable().optional(),
   projectId: z.string().uuid().nullable().optional(),
+  parentId: z.string().uuid().nullable().optional(),
+  icon: z.string().max(16).nullable().optional(),
+  cover: z.string().max(64).nullable().optional(),
+  settings: settingsSchema.optional(),
 });
 
 @Controller("documents")
@@ -16,8 +30,8 @@ export class DocumentsController {
   constructor(private readonly documents: DocumentsService) {}
 
   @Get()
-  list(@Auth() auth: AuthContext, @Query("projectId") projectId?: string) {
-    return this.documents.list(auth.orgId, projectId);
+  list(@Auth() auth: AuthContext, @Query("projectId") projectId?: string, @Query("q") q?: string) {
+    return this.documents.list(auth.orgId, { projectId: projectId || undefined, q: q || undefined });
   }
 
   @Get(":id")
@@ -30,6 +44,12 @@ export class DocumentsController {
   @UsePipes(new ZodValidationPipe(schema))
   create(@Auth() auth: AuthContext, @Body() dto: z.infer<typeof schema>) {
     return this.documents.create(auth.orgId, auth.userId, dto);
+  }
+
+  @Post(":id/duplicate")
+  @Roles("owner", "admin", "member")
+  duplicate(@Auth() auth: AuthContext, @Param("id") id: string) {
+    return this.documents.duplicate(auth.orgId, auth.userId, id);
   }
 
   @Patch(":id")

@@ -119,25 +119,60 @@ export interface OverviewList {
   tasksDone: number;
 }
 
+export interface DocSettings {
+  font?: "sans" | "serif" | "mono";
+  fontSize?: "sm" | "md" | "lg";
+  width?: "narrow" | "wide";
+}
+
 export interface DocSummary {
   id: string;
   title: string;
+  icon: string | null;
+  cover: string | null;
+  parentId: string | null;
   excerpt: string;
   project: { id: string; name: string } | null;
   updatedAt: string;
   updatedBy: { id: string; name: string } | null;
 }
 
+export interface DocRef {
+  id: string;
+  title: string;
+  icon: string | null;
+}
+
 export interface Doc {
   id: string;
   title: string;
+  /** Plain text mirror of `content`; the only content for docs written before the block editor. */
   body: string;
+  /** TipTap JSON, null for legacy plain-text docs. */
+  content: Record<string, unknown> | null;
+  icon: string | null;
+  cover: string | null;
+  settings: DocSettings;
   projectId: string | null;
+  parentId: string | null;
+  parent: DocRef | null;
+  children: (DocRef & { updatedAt: string })[];
   project: { id: string; name: string } | null;
   createdBy: { id: string; name: string } | null;
   updatedBy: { id: string; name: string } | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface DocWrite {
+  title?: string;
+  body?: string;
+  content?: Record<string, unknown> | null;
+  projectId?: string | null;
+  parentId?: string | null;
+  icon?: string | null;
+  cover?: string | null;
+  settings?: DocSettings;
 }
 
 export interface Status {
@@ -958,13 +993,19 @@ export const api = {
     request<{ id: string; created: boolean }>(`/chat/dm`, { method: "POST", body: JSON.stringify({ userId }) }),
 
   // ---- Documents ----
-  getDocuments: (projectId?: string) =>
-    request<DocSummary[]>(`/documents${projectId ? "?projectId=" + projectId : ""}`),
+  getDocuments: (opts: { projectId?: string; q?: string } = {}) => {
+    const qs = new URLSearchParams();
+    if (opts.projectId) qs.set("projectId", opts.projectId);
+    if (opts.q) qs.set("q", opts.q);
+    const query = qs.toString();
+    return request<DocSummary[]>(`/documents${query ? "?" + query : ""}`);
+  },
   getDocument: (id: string) => request<Doc>(`/documents/${id}`),
-  createDocument: (body: { title: string; body?: string; projectId?: string | null }) =>
+  createDocument: (body: DocWrite & { title: string }) =>
     request<Doc>(`/documents`, { method: "POST", body: JSON.stringify(body) }),
-  updateDocument: (id: string, body: { title?: string; body?: string; projectId?: string | null }) =>
+  updateDocument: (id: string, body: DocWrite) =>
     request<Doc>(`/documents/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  duplicateDocument: (id: string) => request<Doc>(`/documents/${id}/duplicate`, { method: "POST" }),
   deleteDocument: (id: string) => request<{ id: string }>(`/documents/${id}`, { method: "DELETE" }),
 };
 

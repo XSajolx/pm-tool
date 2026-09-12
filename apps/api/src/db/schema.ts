@@ -12,20 +12,7 @@
  * primary handles writes, read-replicas serve reads, and if a single org grows huge you
  * shard by `organization_id`.
  */
-import {
-  pgTable,
-  pgEnum,
-  uuid,
-  text,
-  varchar,
-  boolean,
-  timestamp,
-  doublePrecision,
-  jsonb,
-  integer,
-  uniqueIndex,
-  index,
-} from "drizzle-orm/pg-core";
+import { AnyPgColumn, boolean, doublePrecision, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid, varchar } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 
 /* ------------------------------------------------------------------ *
@@ -1395,8 +1382,18 @@ export const documents = pgTable(
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
     projectId: uuid("project_id").references(() => projects.id, { onDelete: "set null" }),
+    /** Nested pages: a doc may live under another doc. Deleting a parent orphans children to top level. */
+    parentId: uuid("parent_id").references((): AnyPgColumn => documents.id, { onDelete: "set null" }),
     title: varchar("title", { length: 255 }).notNull(),
+    /** Plain-text rendering of `content` — used for excerpts and search. */
     body: text("body").notNull().default(""),
+    /** Rich content as TipTap/ProseMirror JSON. Null for legacy plain-text docs (see `body`). */
+    content: jsonb("content").$type<Record<string, unknown>>(),
+    icon: varchar("icon", { length: 16 }),
+    /** Cover as a CSS colour/gradient key; image covers need file storage (later). */
+    cover: varchar("cover", { length: 64 }),
+    /** Per-doc presentation: font family, font size, page width. */
+    settings: jsonb("settings").$type<DocumentSettings>().notNull().default({}),
     createdById: uuid("created_by_id").references(() => users.id),
     updatedById: uuid("updated_by_id").references(() => users.id),
     ...timestamps,
@@ -1404,11 +1401,24 @@ export const documents = pgTable(
   (t) => [
     index("documents_org_idx").on(t.organizationId),
     index("documents_project_idx").on(t.projectId),
+    index("documents_parent_idx").on(t.parentId),
   ],
 );
 
-export const documentsRelations = relations(documents, ({ one }) => ({
+export interface DocumentSettings {
+  font?: "sans" | "serif" | "mono";
+  fontSize?: "sm" | "md" | "lg";
+  width?: "narrow" | "wide";
+}
+
+export const documentsRelations = relations(documents, ({ one, many }) => ({
   project: one(projects, { fields: [documents.projectId], references: [projects.id] }),
+  parent: one(documents, {
+    fields: [documents.parentId],
+    references: [documents.id],
+    relationName: "document_children",
+  }),
+  children: many(documents, { relationName: "document_children" }),
   createdBy: one(users, {
     fields: [documents.createdById],
     references: [users.id],
