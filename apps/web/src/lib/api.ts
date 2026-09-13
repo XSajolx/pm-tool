@@ -263,6 +263,8 @@ export interface AppNotification {
   triggeredBy: { id: string; name: string; avatarUrl: string | null } | null;
   /** How much conversation is on the task - the bubble in the inbox row. */
   replyCount: number;
+  /** Extras for non-task entities, e.g. { channelId } on a chat mention (row 41). */
+  data?: Record<string, unknown> | null;
 }
 
 export interface UnreadCounts {
@@ -783,10 +785,10 @@ export const api = {
   getChannels: () => request<ChatChannel[]>(`/chat/channels`),
   getMessages: (channelId: string) =>
     request<ChatMessage[]>(`/chat/channels/${channelId}/messages`),
-  sendMessage: (channelId: string, body: string, parentMessageId?: string) =>
+  sendMessage: (channelId: string, body: string, parentMessageId?: string, mentionedUserIds?: string[]) =>
     request<ChatMessage>(`/chat/channels/${channelId}/messages`, {
       method: "POST",
-      body: JSON.stringify({ body, parentMessageId }),
+      body: JSON.stringify({ body, parentMessageId, mentionedUserIds }),
     }),
   /** Row 40: a message's thread (root + replies). */
   getThread: (channelId: string, messageId: string) =>

@@ -31,11 +31,14 @@ export class ChatController {
   async send(
     @Auth() auth: AuthContext,
     @Param("id") id: string,
-    @Body() body: { body: string; parentMessageId?: string | null },
+    @Body() body: { body: string; parentMessageId?: string | null; mentionedUserIds?: string[] },
   ) {
     const msg = await this.chat.sendMessage(auth.orgId, id, auth.userId, body.body, body.parentMessageId);
     // Replies are broadcast too; the client routes them into the open thread.
     this.gateway.broadcast(id, msg);
+    // Row 41: @mentions land in the inbox and are pushed live to whoever is online.
+    const rows = await this.chat.notifyMentions(auth.orgId, auth.userId, id, msg, body.mentionedUserIds ?? [], this.gateway.onlineUserIds());
+    for (const row of rows) this.gateway.emitToUser(row.receiverId, "notification:new", row);
     return msg;
   }
 

@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, type ChatChannel, type ChatMessage } from "../lib/api.js";
+import { api, type ChatChannel, type ChatMember, type ChatMessage } from "../lib/api.js";
 import { useAuth } from "../lib/auth.js";
 import { getSocket } from "../lib/socket.js";
 import { ChatActions, PeoplePicker } from "../components/ChatActions.js";
@@ -126,7 +126,6 @@ function ChannelRow({
 function MessagePane({ channelId, channel }: { channelId: string; channel?: ChatChannel }) {
   const qc = useQueryClient();
   const meId = useAuth().user!.id;
-  const [draft, setDraft] = useState("");
   const [threadId, setThreadId] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -159,9 +158,14 @@ function MessagePane({ channelId, channel }: { channelId: string; channel?: Chat
       );
     };
     socket.on("message:new", onNew);
+    // After a reconnect (API restart, flaky network) the server has forgotten
+    // our room, so join again or live messages silently stop.
+    const rejoin = () => socket.emit("join", channelId);
+    socket.on("connect", rejoin);
     return () => {
       socket.emit("leave", channelId);
       socket.off("message:new", onNew);
+      socket.off("connect", rejoin);
     };
   }, [channelId, qc]);
 
@@ -170,9 +174,11 @@ function MessagePane({ channelId, channel }: { channelId: string; channel?: Chat
   }, [messages.length]);
 
   const send = useMutation({
-    mutationFn: (body: string) => api.sendMessage(channelId, body),
-    onSuccess: () => setDraft(""),
+    mutationFn: ({ body, ids }: { body: string; ids: string[] }) => api.sendMessage(channelId, body, undefined, ids),
+    // The socket echoes it too; this just makes sure it shows even if the socket is down.
+    onSuccess: (msg) => qc.setQueryData<ChatMessage[]>(["messages", channelId], (old = []) => (old.some((m) => m.id === msg.id) ? old : [...old, msg])),
   });
+  const members = channel?.members ?? [];
 
   const title =
     channel?.type === "dm"
@@ -197,6 +203,7 @@ function MessagePane({ channelId, channel }: { channelId: string; channel?: Chat
                 key={m.id}
                 m={m}
                 meId={meId}
+                members={members}
                 grouped={Boolean(prev && prev.author.id === m.author.id && !prev.replyCount)}
                 onReply={() => setThreadId(m.id)}
                 threadOpen={threadId === m.id}
@@ -206,32 +213,10 @@ function MessagePane({ channelId, channel }: { channelId: string; channel?: Chat
           <div ref={bottomRef} />
         </div>
 
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (draft.trim()) send.mutate(draft.trim());
-          }}
-          className="border-t border-border p-3"
-        >
-          <div className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 focus-within:ring-2 focus-within:ring-indigo-500/30">
-            <input
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              placeholder={`Message ${title}`}
-              className="flex-1 text-sm outline-none"
-            />
-            <button
-              type="submit"
-              disabled={!draft.trim()}
-              className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-indigo-700 disabled:opacity-40"
-            >
-              Send
-            </button>
-          </div>
-        </form>
+        <MentionComposer members={members} placeholder={`Message ${title}`} pending={send.isPending} onSend={(body, ids) => send.mutate({ body, ids })} />
       </div>
 
-      {threadId && <ThreadPane channelId={channelId} messageId={threadId} meId={meId} onClose={() => setThreadId(null)} />}
+      {threadId && <ThreadPane channelId={channelId} messageId={threadId} meId={meId} members={members} onClose={() => setThreadId(null)} />}
     </div>
   );
 }
@@ -247,6 +232,7 @@ function fmtTime(iso: string) {
 function MessageRow({
   m,
   meId,
+  members,
   grouped,
   onReply,
   threadOpen,
@@ -254,6 +240,7 @@ function MessageRow({
 }: {
   m: ChatMessage;
   meId: string;
+  members: ChatMember[];
   grouped?: boolean;
   onReply?: () => void;
   threadOpen?: boolean;
@@ -287,7 +274,7 @@ function MessageRow({
             <span className="text-[11px] text-muted-foreground">{fmtTime(m.createdAt)}</span>
           </div>
         )}
-        <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-700">{m.body}</p>
+        <MessageBody body={m.body} members={members} meId={meId} />
         {onReply && (m.replyCount ?? 0) > 0 && (
           <button type="button" onClick={onReply} className="mt-1 flex items-center gap-1.5 text-xs font-medium text-indigo-600 hover:underline">
             💬 {m.replyCount} {m.replyCount === 1 ? "reply" : "replies"}
@@ -312,9 +299,8 @@ function MessageRow({
 type ThreadData = { root: ChatMessage; replies: ChatMessage[] };
 
 /** Row 40: side panel with the original message and its replies. */
-function ThreadPane({ channelId, messageId, meId, onClose }: { channelId: string; messageId: string; meId: string; onClose: () => void }) {
+function ThreadPane({ channelId, messageId, meId, members, onClose }: { channelId: string; messageId: string; meId: string; members: ChatMember[]; onClose: () => void }) {
   const qc = useQueryClient();
-  const [draft, setDraft] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
   const { data } = useQuery({ queryKey: ["thread", channelId, messageId], queryFn: () => api.getThread(channelId, messageId) });
 
@@ -323,9 +309,8 @@ function ThreadPane({ channelId, messageId, meId, onClose }: { channelId: string
   }, [data?.replies.length]);
 
   const reply = useMutation({
-    mutationFn: (body: string) => api.sendMessage(channelId, body, messageId),
+    mutationFn: ({ body, ids }: { body: string; ids: string[] }) => api.sendMessage(channelId, body, messageId, ids),
     onSuccess: () => {
-      setDraft("");
       qc.invalidateQueries({ queryKey: ["thread", channelId, messageId] });
       qc.invalidateQueries({ queryKey: ["messages", channelId] });
     },
@@ -342,7 +327,7 @@ function ThreadPane({ channelId, messageId, meId, onClose }: { channelId: string
       <div className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
         {data ? (
           <>
-            <MessageRow m={data.root} meId={meId} compact />
+            <MessageRow m={data.root} meId={meId} members={members} compact />
             <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
               <span className="h-px flex-1 bg-border" />
               {data.replies.length} {data.replies.length === 1 ? "reply" : "replies"}
@@ -350,7 +335,7 @@ function ThreadPane({ channelId, messageId, meId, onClose }: { channelId: string
             </div>
             {data.replies.map((r, i) => {
               const prev = data.replies[i - 1];
-              return <MessageRow key={r.id} m={r} meId={meId} compact grouped={Boolean(prev && prev.author.id === r.author.id)} />;
+              return <MessageRow key={r.id} m={r} meId={meId} members={members} compact grouped={Boolean(prev && prev.author.id === r.author.id)} />;
             })}
           </>
         ) : (
@@ -358,22 +343,172 @@ function ThreadPane({ channelId, messageId, meId, onClose }: { channelId: string
         )}
         <div ref={endRef} />
       </div>
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (draft.trim() && !reply.isPending) reply.mutate(draft.trim());
-        }}
-        className="border-t border-border p-3"
-      >
-        <div className="flex items-center gap-2 rounded-lg border border-border bg-white px-3 py-2 focus-within:ring-2 focus-within:ring-indigo-500/30">
-          <input autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Reply in thread…" className="min-w-0 flex-1 text-sm outline-none" />
-          <button type="submit" disabled={!draft.trim() || reply.isPending} className="rounded-md bg-indigo-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-40">
-            Reply
-          </button>
-        </div>
-      </form>
+      <MentionComposer members={members} placeholder="Reply in thread…" buttonLabel="Reply" autoFocus pending={reply.isPending} onSend={(body, ids) => reply.mutate({ body, ids })} />
     </aside>
   );
+}
+
+/** The text after a trailing "@", lower-cased — or null when not mentioning. */
+function mentionToken(text: string): string | null {
+  const m = /(?:^|\s)@([^\s@]*)$/.exec(text);
+  return m ? m[1]!.toLowerCase() : null;
+}
+
+type Suggestion = { id: string; name: string; hint: string; special: boolean };
+const SPECIAL_MENTIONS: Suggestion[] = [
+  { id: "channel", name: "channel", hint: "everyone here", special: true },
+  { id: "here", name: "here", special: true, hint: "members online now" },
+];
+
+/**
+ * Row 41: a one-line composer with an @mention picker. The picker lists only
+ * people who can see this channel, plus @channel and @here. Enter/Tab picks,
+ * arrows move, Escape dismisses. Picked ids ride along with the message so
+ * the server doesn't have to guess from names.
+ */
+function MentionComposer({
+  members,
+  placeholder,
+  onSend,
+  pending,
+  autoFocus,
+  buttonLabel = "Send",
+}: {
+  members: ChatMember[];
+  placeholder: string;
+  onSend: (body: string, mentionedUserIds: string[]) => void;
+  pending?: boolean;
+  autoFocus?: boolean;
+  buttonLabel?: string;
+}) {
+  const meId = useAuth().user!.id;
+  const [draft, setDraft] = useState("");
+  const [ids, setIds] = useState<string[]>([]);
+  const [cursor, setCursor] = useState(0);
+  const [dismissed, setDismissed] = useState<string | null>(null);
+  const token = mentionToken(draft);
+  const suggestions: Suggestion[] =
+    token === null || dismissed === token
+      ? []
+      : [
+          ...members
+            .filter((m) => m.id !== meId && m.name.toLowerCase().startsWith(token))
+            .slice(0, 6)
+            .map((m) => ({ id: m.id, name: m.name, hint: "", special: false })),
+          ...SPECIAL_MENTIONS.filter((s) => s.name.startsWith(token)),
+        ];
+  useEffect(() => setCursor(0), [token]);
+
+  function pick(s: Suggestion) {
+    setDraft((d) => d.replace(/@[^\s@]*$/, `@${s.name} `));
+    if (!s.special) setIds((v) => (v.includes(s.id) ? v : [...v, s.id]));
+  }
+  function submit() {
+    const body = draft.trim();
+    if (!body || pending) return;
+    onSend(body, ids);
+    setDraft("");
+    setIds([]);
+  }
+
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        submit();
+      }}
+      className="border-t border-border p-3"
+    >
+      <div className="relative">
+        {suggestions.length > 0 && (
+          <div className="absolute bottom-full left-0 z-20 mb-1 w-64 rounded-md border border-border bg-white py-1 shadow-lg">
+            {suggestions.map((s, i) => (
+              <button
+                key={s.id}
+                type="button"
+                onMouseDown={(e) => {
+                  e.preventDefault(); // keep the input focused
+                  pick(s);
+                }}
+                className={cn("flex w-full items-center gap-2 px-2 py-1.5 text-left text-sm text-slate-700 hover:bg-muted", i === cursor && "bg-muted")}
+              >
+                <span className={cn("flex h-5 w-5 items-center justify-center rounded-full text-[9px] font-semibold", s.special ? "bg-amber-100 text-amber-800" : "bg-indigo-100 text-indigo-700")}>
+                  {s.special ? "@" : s.name.split(" ").map((p) => p[0]).slice(0, 2).join("")}
+                </span>
+                <span>@{s.name}</span>
+                {s.hint && <span className="ml-auto text-[10px] text-muted-foreground">{s.hint}</span>}
+              </button>
+            ))}
+          </div>
+        )}
+        <div className="flex items-center gap-2 rounded-lg border border-border bg-white px-3 py-2 focus-within:ring-2 focus-within:ring-indigo-500/30">
+          <input
+            autoFocus={autoFocus}
+            value={draft}
+            onChange={(e) => {
+              setDraft(e.target.value);
+              setDismissed(null);
+            }}
+            onKeyDown={(e) => {
+              if (!suggestions.length) return;
+              if (e.key === "ArrowDown") {
+                e.preventDefault();
+                setCursor((c) => (c + 1) % suggestions.length);
+              } else if (e.key === "ArrowUp") {
+                e.preventDefault();
+                setCursor((c) => (c - 1 + suggestions.length) % suggestions.length);
+              } else if (e.key === "Tab" || e.key === "Enter") {
+                e.preventDefault();
+                pick(suggestions[cursor] ?? suggestions[0]!);
+              } else if (e.key === "Escape") {
+                e.preventDefault();
+                setDismissed(token);
+              }
+            }}
+            placeholder={`${placeholder} · @ to mention`}
+            className="min-w-0 flex-1 text-sm outline-none"
+          />
+          <button type="submit" disabled={!draft.trim() || pending} className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-indigo-700 disabled:opacity-40">
+            {buttonLabel}
+          </button>
+        </div>
+      </div>
+    </form>
+  );
+}
+
+function escapeRe(s: string) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Row 41: a message body with @Name / @channel / @here highlighted; mentions of *you* are amber. */
+function MessageBody({ body, members, meId }: { body: string; members: ChatMember[]; meId: string }) {
+  const names = members
+    .flatMap((m) => [
+      { text: m.name, id: m.id },
+      { text: m.name.split(" ")[0]!, id: m.id },
+    ])
+    .sort((a, b) => b.text.length - a.text.length);
+  const alts = ["channel", "here", ...names.map((n) => n.text)].map(escapeRe);
+  const re = new RegExp(`@(${alts.join("|")})(?![\\w])`, "gi");
+  const parts: ReactNode[] = [];
+  let last = 0;
+  let i = 0;
+  for (const match of body.matchAll(re)) {
+    const start = match.index ?? 0;
+    if (start > last) parts.push(body.slice(last, start));
+    const token = match[1]!.toLowerCase();
+    const special = token === "channel" || token === "here";
+    const isMe = names.some((n) => n.text.toLowerCase() === token && n.id === meId);
+    parts.push(
+      <span key={i++} className={cn("rounded px-1 font-medium", isMe || special ? "bg-amber-100 text-amber-900" : "bg-indigo-50 text-indigo-700")}>
+        {match[0]}
+      </span>,
+    );
+    last = start + match[0].length;
+  }
+  if (last < body.length) parts.push(body.slice(last));
+  return <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-700">{parts}</p>;
 }
 
 /**

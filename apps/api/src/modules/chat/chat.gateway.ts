@@ -81,6 +81,11 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     void client.leave(channelId);
   }
 
+  /** Row 41: everyone with at least one open socket — the audience for @here. */
+  onlineUserIds() {
+    return new Set([...this.identities.values()].map((i) => i.userId));
+  }
+
   /** Called by the controller after a message is persisted. */
   broadcast(channelId: string, message: unknown) {
     this.server.to(channelId).emit("message:new", message);

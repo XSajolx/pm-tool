@@ -267,6 +267,9 @@ function NotificationList({
                       if (!n.readAt) markRead.mutate(n.id);
                       if (n.entityType === "task") {
                         navigate({ to: "/t/$taskId", params: { taskId: n.entityId } });
+                      } else if (n.entityType === "message" && typeof n.data?.channelId === "string") {
+                        // Row 41: a chat mention opens the channel it happened in.
+                        navigate({ to: "/chat/$channelId", params: { channelId: n.data.channelId } });
                       }
                     }}
                     onFlag={() => flag.mutate(n.id)}

@@ -2,7 +2,7 @@ import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundEx
 import { and, asc, count, eq, inArray, isNull, max } from "drizzle-orm";
 import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
-import { channels, channelMembers, memberships, messages } from "../../db/schema.js";
+import { channels, channelMembers, memberships, messages, notificationPreferences, notifications } from "../../db/schema.js";
 
 /** "Website Redesign" → "website-redesign" (channel names are slugs). */
 function slug(name: string) {
@@ -223,6 +223,86 @@ export class ChatService {
       .returning();
     await this.db.insert(channelMembers).values([...want].map((userId) => ({ channelId: ch!.id, userId, organizationId: orgId })));
     return { id: ch!.id, created: true };
+  }
+
+  /**
+   * Row 41: who a message addresses. Only people who can see the channel count:
+   * explicit picks from the composer, "@Full Name" / "@First" typed in the
+   * body, plus the @channel and @here broadcasts.
+   */
+  private async resolveMentions(channelId: string, body: string, explicitIds: string[], actorId: string) {
+    const rows = await this.db.query.channelMembers.findMany({
+      where: eq(channelMembers.channelId, channelId),
+      with: { user: { columns: { id: true, name: true } } },
+    });
+    const members = rows.map((m) => ({ id: m.user.id, name: m.user.name }));
+    const memberIds = new Set(members.map((m) => m.id));
+    const everyone = /(^|\s)@channel(?![\w-])/i.test(body);
+    const here = /(^|\s)@here(?![\w-])/i.test(body);
+    const direct = new Set<string>();
+    for (const id of explicitIds) if (memberIds.has(id)) direct.add(id);
+    const lower = body.toLowerCase();
+    for (const m of [...members].sort((a, b) => b.name.length - a.name.length)) {
+      const full = `@${m.name.toLowerCase()}`;
+      const first = `@${m.name.split(" ")[0]!.toLowerCase()}`;
+      if (lower.includes(full) || lower.includes(first)) direct.add(m.id);
+    }
+    direct.delete(actorId);
+    return { members, direct: [...direct], everyone, here };
+  }
+
+  /**
+   * Row 41: write inbox notifications for a message's mentions and return the
+   * rows so the caller can push them live. Direct mentions win over @channel /
+   * @here; @here reaches only members who are online right now. Honours each
+   * receiver's "mention" preference.
+   */
+  async notifyMentions(
+    orgId: string,
+    actorId: string,
+    channelId: string,
+    msg: { id: string; body: string; parentMessageId: string | null },
+    explicitIds: string[],
+    online: Set<string>,
+  ) {
+    const ch = await this.channel(orgId, channelId);
+    const { members, direct, everyone, here } = await this.resolveMentions(channelId, msg.body, explicitIds, actorId);
+    const receivers = new Map<string, "you" | "channel" | "here">();
+    if (everyone) for (const m of members) receivers.set(m.id, "channel");
+    if (here) for (const m of members) if (online.has(m.id)) receivers.set(m.id, "here");
+    for (const id of direct) receivers.set(id, "you");
+    receivers.delete(actorId);
+    if (!receivers.size) return [];
+
+    const ids = [...receivers.keys()];
+    const prefs = await this.db
+      .select()
+      .from(notificationPreferences)
+      .where(and(eq(notificationPreferences.organizationId, orgId), inArray(notificationPreferences.userId, ids)));
+    const muted = new Set(prefs.filter((p) => !p.mention).map((p) => p.userId));
+    const actor = members.find((m) => m.id === actorId);
+    const where = ch.type === "dm" ? "a direct message" : `#${ch.name}`;
+    const excerpt = msg.body.length > 140 ? `${msg.body.slice(0, 137)}…` : msg.body;
+
+    const values = ids
+      .filter((id) => !muted.has(id))
+      .map((receiverId) => {
+        const how = receivers.get(receiverId)!;
+        return {
+          organizationId: orgId,
+          receiverId,
+          triggeredById: actorId,
+          entityType: "message",
+          entityId: msg.id,
+          verb: "mentioned",
+          category: "primary",
+          title: how === "you" ? `${actor?.name ?? "Someone"} mentioned you in ${where}` : `${actor?.name ?? "Someone"} mentioned @${how} in ${where}`,
+          body: `${how === "you" ? "" : `@${how} `}in ${where}: ${excerpt}`,
+          data: { channelId, messageId: msg.id, parentMessageId: msg.parentMessageId, channelName: ch.name, how },
+        };
+      });
+    if (!values.length) return [];
+    return this.db.insert(notifications).values(values).returning();
   }
 
   /** Any org member can join a public named channel. Private and project channels are invite-only. */
