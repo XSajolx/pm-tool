@@ -1,8 +1,8 @@
 import { ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, eq, or } from "drizzle-orm";
+import { and, asc, eq, or } from "drizzle-orm";
 import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
-import { views } from "../../db/schema.js";
+import { users, views } from "../../db/schema.js";
 
 export interface SaveViewDto {
   name: string;
@@ -24,16 +24,19 @@ export class ViewsService {
    */
   async listFor(orgId: string, userId: string, listId?: string) {
     const scope = listId ? eq(views.listId, listId) : undefined;
-    return this.db
-      .select()
+    const rows = await this.db
+      .select({ view: views, authorName: users.name })
       .from(views)
+      .leftJoin(users, eq(users.id, views.createdById))
       .where(
         and(
           eq(views.organizationId, orgId),
           or(eq(views.createdById, userId), eq(views.isShared, true)),
           ...(scope ? [scope] : []),
         ),
-      );
+      )
+      .orderBy(asc(views.name));
+    return rows.map(({ view, authorName }) => ({ ...view, authorName }));
   }
 
   async create(orgId: string, userId: string, dto: SaveViewDto) {

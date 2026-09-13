@@ -347,6 +347,7 @@ export interface SavedView {
   filters: Record<string, unknown>;
   isShared: boolean;
   createdById: string;
+  authorName?: string | null;
 }
 
 export interface IntakeQueue {
@@ -829,11 +830,14 @@ export const api = {
     request<SavedView[]>(`/views?listId=${encodeURIComponent(listId)}`),
   createView: (body: {
     name: string;
-    listId: string;
-    layout: string;
+    listId?: string;
+    spaceId?: string;
+    layout?: SavedView["layout"];
     filters: Record<string, unknown>;
     isShared?: boolean;
   }) => request<SavedView>(`/views`, { method: "POST", body: JSON.stringify(body) }),
+  updateView: (id: string, body: Partial<{ name: string; layout: SavedView["layout"]; filters: Record<string, unknown>; isShared: boolean }>) =>
+    request<SavedView>(`/views/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteView: (id: string) => request<void>(`/views/${id}`, { method: "DELETE" }),
 
   // ---- Intake ----

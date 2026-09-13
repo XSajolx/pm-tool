@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type SavedView } from "../lib/api.js";
 import { cn } from "../lib/utils.js";
+import { useAuth } from "../lib/auth.js";
 
 export interface ToolbarFilters {
   priority: string;
@@ -48,33 +49,48 @@ function SavedViews({
   onApply,
 }: Omit<Props, "spaceId">) {
   const qc = useQueryClient();
+  const { user } = useAuth();
   const [open, setOpen] = useState(false);
   const [naming, setNaming] = useState(false);
   const [name, setName] = useState("");
+  const [shared, setShared] = useState(false);
 
   const { data: views = [] } = useQuery({
     queryKey: ["views", listId],
     queryFn: () => api.getViews(listId),
   });
+  const invalidate = () => qc.invalidateQueries({ queryKey: ["views", listId] });
 
   const save = useMutation({
     mutationFn: () =>
       api.createView({
         name: name.trim(),
         listId,
-        layout,
+        layout: layout as SavedView["layout"],
         filters: filters as unknown as Record<string, unknown>,
+        isShared: shared,
       }),
     onSuccess: () => {
       setName("");
+      setShared(false);
       setNaming(false);
-      qc.invalidateQueries({ queryKey: ["views", listId] });
+      invalidate();
     },
+  });
+  // "Update" overwrites a view you own with whatever the toolbar shows right now.
+  const update = useMutation({
+    mutationFn: (id: string) =>
+      api.updateView(id, { layout: layout as SavedView["layout"], filters: filters as unknown as Record<string, unknown> }),
+    onSuccess: invalidate,
+  });
+  const toggleShare = useMutation({
+    mutationFn: (v: SavedView) => api.updateView(v.id, { isShared: !v.isShared }),
+    onSuccess: invalidate,
   });
 
   const remove = useMutation({
     mutationFn: (id: string) => api.deleteView(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["views", listId] }),
+    onSuccess: invalidate,
   });
 
   return (
@@ -101,31 +117,58 @@ function SavedViews({
       </button>
 
       {open && (
-        <div className="absolute left-0 top-full z-30 mt-1 w-60 rounded-md border border-border bg-white p-1.5 shadow-lg">
+        <div className="absolute left-0 top-full z-30 mt-1 w-80 rounded-md border border-border bg-white p-1.5 shadow-lg">
           {views.length ? (
-            views.map((v) => (
-              <div key={v.id} className="group flex items-center gap-1">
-                <button
-                  onClick={() => {
-                    onApply(v);
-                    setOpen(false);
-                  }}
-                  className="min-w-0 flex-1 truncate rounded px-2 py-1.5 text-left text-sm text-slate-700 hover:bg-muted"
-                >
-                  {v.name}
-                  <span className="ml-1.5 text-xs capitalize text-muted-foreground">
-                    {v.layout}
-                  </span>
-                </button>
-                <button
-                  onClick={() => remove.mutate(v.id)}
-                  title="Delete view"
-                  className="shrink-0 px-1 text-slate-300 opacity-0 transition group-hover:opacity-100 hover:text-red-500"
-                >
-                  ✕
-                </button>
-              </div>
-            ))
+            views.map((v) => {
+              const mine = v.createdById === user?.id;
+              return (
+                <div key={v.id} className="group flex items-center gap-1">
+                  <button
+                    onClick={() => {
+                      onApply(v);
+                      setOpen(false);
+                    }}
+                    className="min-w-0 flex-1 truncate rounded px-2 py-1.5 text-left text-sm text-slate-700 hover:bg-muted"
+                    title={describeView(v)}
+                  >
+                    {v.name}
+                    <span className="ml-1.5 text-xs capitalize text-muted-foreground">{v.layout}</span>
+                    {v.isShared ? (
+                      <span className="ml-1.5 rounded-full bg-indigo-50 px-1.5 text-[10px] font-medium text-indigo-700">
+                        {mine ? "Shared" : `by ${v.authorName?.split(" ")[0] ?? "teammate"}`}
+                      </span>
+                    ) : (
+                      <span className="ml-1.5 text-[10px] text-muted-foreground">Personal</span>
+                    )}
+                  </button>
+                  {mine && (
+                    <>
+                      <button
+                        onClick={() => update.mutate(v.id)}
+                        title="Overwrite with the current filters, sort and grouping"
+                        className="shrink-0 px-1 text-[11px] text-slate-400 opacity-0 transition group-hover:opacity-100 hover:text-indigo-600"
+                      >
+                        Update
+                      </button>
+                      <button
+                        onClick={() => toggleShare.mutate(v)}
+                        title={v.isShared ? "Make personal" : "Share with the project"}
+                        className="shrink-0 px-1 text-[11px] text-slate-400 opacity-0 transition group-hover:opacity-100 hover:text-indigo-600"
+                      >
+                        {v.isShared ? "Unshare" : "Share"}
+                      </button>
+                      <button
+                        onClick={() => remove.mutate(v.id)}
+                        title="Delete view"
+                        className="shrink-0 px-1 text-slate-300 opacity-0 transition group-hover:opacity-100 hover:text-red-500"
+                      >
+                        ✕
+                      </button>
+                    </>
+                  )}
+                </div>
+              );
+            })
           ) : (
             <p className="px-2 py-1.5 text-xs text-muted-foreground">
               No saved views yet.
@@ -139,21 +182,28 @@ function SavedViews({
                   e.preventDefault();
                   if (name.trim()) save.mutate();
                 }}
-                className="flex gap-1 p-1"
+                className="flex flex-col gap-1.5 p-1"
               >
-                <input
-                  autoFocus
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="View name"
-                  className="min-w-0 flex-1 rounded border border-border px-2 py-1 text-xs outline-none focus:border-indigo-500"
-                />
-                <button
-                  type="submit"
-                  className="shrink-0 rounded bg-indigo-600 px-2 py-1 text-xs font-medium text-white hover:bg-indigo-700"
-                >
-                  Save
-                </button>
+                <div className="flex gap-1">
+                  <input
+                    autoFocus
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="View name (e.g. Unassigned this week)"
+                    className="min-w-0 flex-1 rounded border border-border px-2 py-1 text-xs outline-none focus:border-indigo-500"
+                  />
+                  <button
+                    type="submit"
+                    className="shrink-0 rounded bg-indigo-600 px-2 py-1 text-xs font-medium text-white hover:bg-indigo-700"
+                  >
+                    Save
+                  </button>
+                </div>
+                <label className="flex items-center gap-1.5 px-0.5 text-[11px] text-slate-600">
+                  <input type="checkbox" checked={shared} onChange={(e) => setShared(e.target.checked)} className="accent-indigo-600" />
+                  Share with the project (everyone sees it)
+                </label>
+                <p className="px-0.5 text-[10px] text-muted-foreground">Saves the current layout, filters, grouping and sort.</p>
               </form>
             ) : (
               <button
@@ -281,4 +331,16 @@ function CycleChip({ spaceId }: { spaceId: string }) {
       )}
     </div>
   );
+}
+
+/** One-line summary of what a saved view applies, for the hover title. */
+function describeView(v: SavedView) {
+  const f = v.filters as Record<string, string | undefined>;
+  const parts: string[] = [`Layout: ${v.layout}`];
+  if (f.priority && f.priority !== "all") parts.push(`priority ${f.priority}`);
+  if (f.assignee && f.assignee !== "all") parts.push(f.assignee === "unassigned" ? "unassigned" : "one assignee");
+  if (f.tag && f.tag !== "all") parts.push("one tag");
+  if (f.groupBy && f.groupBy !== "status") parts.push(`group by ${f.groupBy}`);
+  if (f.sort && f.sort !== "manual") parts.push(`sort by ${f.sort} ${f.sortDir ?? "asc"}`);
+  return parts.join(" · ");
 }
