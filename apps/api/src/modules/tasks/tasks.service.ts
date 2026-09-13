@@ -5,6 +5,7 @@ import type { DB } from "../../db/index.js";
 import {
   cycleTasks,
   lists,
+  milestones,
   projectStages,
   statuses,
   tags,
@@ -27,6 +28,7 @@ const TRACKED_FIELDS = [
   "startDate",
   "listId",
   "stageId",
+  "milestoneId",
   "timeEstimateMinutes",
 ];
 
@@ -64,6 +66,7 @@ export class TasksService {
       with: {
         status: true,
         stage: { columns: { id: true, name: true, status: true } },
+        milestone: { columns: { id: true, name: true, targetDate: true, reachedAt: true } },
         assignees: { with: { user: true } },
         subtasks: true,
       },
@@ -79,6 +82,7 @@ export class TasksService {
       with: {
         status: true,
         stage: { columns: { id: true, name: true, status: true } },
+        milestone: { columns: { id: true, name: true, targetDate: true, reachedAt: true } },
         assignees: { with: { user: true } },
         subtasks: {
           with: { status: true, assignees: { with: { user: true } } },
@@ -156,8 +160,21 @@ export class TasksService {
     }
   }
 
+  /** Milestones follow the same rule as stages: same project as the task's space. */
+  private async assertMilestoneForList(orgId: string, listId: string, milestoneId: string) {
+    const list = await this.db.query.lists.findFirst({ where: and(eq(lists.id, listId), eq(lists.organizationId, orgId)) });
+    const milestone = await this.db.query.milestones.findFirst({
+      where: and(eq(milestones.id, milestoneId), eq(milestones.organizationId, orgId), isNull(milestones.archivedAt)),
+      with: { project: { columns: { spaceId: true } } },
+    });
+    if (!list || !milestone || milestone.project.spaceId !== list.spaceId) {
+      throw new BadRequestException("That milestone belongs to a different project");
+    }
+  }
+
   async create(orgId: string, userId: string, dto: CreateTaskDto) {
     if (dto.stageId) await this.assertStageForList(orgId, dto.listId, dto.stageId);
+    if (dto.milestoneId) await this.assertMilestoneForList(orgId, dto.listId, dto.milestoneId);
     let statusId = dto.statusId;
     if (dto.parentTaskId) {
       // Subtasks are one level deep: a subtask cannot have its own subtasks.
@@ -190,6 +207,7 @@ export class TasksService {
         priority: dto.priority ?? undefined,
         parentTaskId: dto.parentTaskId,
         stageId: dto.stageId ?? undefined,
+        milestoneId: dto.milestoneId ?? undefined,
         startDate: dto.startDate ? new Date(dto.startDate) : undefined,
         dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
         timeEstimateMinutes: dto.timeEstimateMinutes ?? undefined,
@@ -241,6 +259,7 @@ export class TasksService {
     });
     if (!before) throw new NotFoundException("Task not found");
     if (dto.stageId) await this.assertStageForList(orgId, before.listId, dto.stageId);
+    if (dto.milestoneId) await this.assertMilestoneForList(orgId, before.listId, dto.milestoneId);
 
     // `assigneeIds` is not a column; it is synced separately below.
     const { assigneeIds, ...fields } = dto;

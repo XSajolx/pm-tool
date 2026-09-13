@@ -208,6 +208,8 @@ export interface Task {
   assignees: { user: Member }[];
   stageId?: string | null;
   stage?: { id: string; name: string; status: StageStatus } | null;
+  milestoneId?: string | null;
+  milestone?: { id: string; name: string; targetDate: string | null; reachedAt: string | null } | null;
   parentTaskId?: string | null;
   subtasks: {
     id: string;
@@ -282,7 +284,26 @@ export type TaskPatch = Partial<{
   dueDate: string | null;
   timeEstimateMinutes: number | null;
   stageId: string | null;
+  milestoneId: string | null;
   assigneeIds: string[];
+}>;
+
+export interface Milestone {
+  id: string;
+  projectId: string;
+  name: string;
+  description: string | null;
+  targetDate: string | null;
+  reachedAt: string | null;
+  clientVisible: boolean;
+  progress: { total: number; done: number };
+}
+export type MilestoneWrite = Partial<{
+  name: string;
+  description: string | null;
+  targetDate: string | null;
+  reachedAt: string | null;
+  clientVisible: boolean;
 }>;
 
 export type StageStatus = "not_started" | "active" | "completed";
@@ -874,6 +895,14 @@ export const api = {
   getProjects: (archived = false) =>
     request<Project[]>(`/projects${archived ? "?archived=true" : ""}`),
   getProject: (id: string) => request<Project>(`/projects/${id}`),
+  // ---- Milestones ----
+  getMilestones: (projectId: string) => request<Milestone[]>(`/projects/${projectId}/milestones`),
+  getMilestonesForSpace: (spaceId: string) => request<Milestone[]>(`/milestones?spaceId=${encodeURIComponent(spaceId)}`),
+  createMilestone: (projectId: string, body: MilestoneWrite & { name: string }) =>
+    request<Milestone>(`/projects/${projectId}/milestones`, { method: "POST", body: JSON.stringify(body) }),
+  updateMilestone: (id: string, body: MilestoneWrite) =>
+    request<Milestone>(`/milestones/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  deleteMilestone: (id: string) => request<{ id: string }>(`/milestones/${id}`, { method: "DELETE" }),
   // ---- Project stages ----
   getStages: (projectId: string) => request<Stage[]>(`/projects/${projectId}/stages`),
   getStagesForSpace: (spaceId: string) => request<Stage[]>(`/stages?spaceId=${encodeURIComponent(spaceId)}`),

@@ -248,3 +248,41 @@ export function StageField({ task, spaceId }: { task: Task; spaceId?: string }) 
     </div>
   );
 }
+
+/** Milestone picker: milestones of the project that owns this task's space. */
+export function MilestoneField({ task, spaceId }: { task: Task; spaceId?: string }) {
+  const qc = useQueryClient();
+  const { data: milestones = [] } = useQuery({
+    queryKey: ["milestones", "space", spaceId],
+    queryFn: () => api.getMilestonesForSpace(spaceId!),
+    enabled: Boolean(spaceId),
+  });
+  const set = useMutation({
+    mutationFn: (milestoneId: string) => api.updateTask(task.id, { milestoneId: milestoneId || null }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["task", task.id] });
+      qc.invalidateQueries({ queryKey: ["tasks"] });
+      qc.invalidateQueries({ queryKey: ["milestones"] });
+    },
+  });
+  if (!spaceId || !milestones.length) return null;
+  return (
+    <div className="grid grid-cols-[90px_1fr] items-center gap-2">
+      <span className="text-xs font-medium text-muted-foreground">Milestone</span>
+      <select
+        value={task.milestoneId ?? task.milestone?.id ?? ""}
+        onChange={(e) => set.mutate(e.target.value)}
+        className="rounded-md border border-border bg-white px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-indigo-500/30"
+      >
+        <option value="">No milestone</option>
+        {milestones.map((m) => (
+          <option key={m.id} value={m.id}>
+            {m.reachedAt ? "✓ " : ""}
+            {m.name}
+            {m.targetDate ? ` · ${new Date(m.targetDate).toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" })}` : ""}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}

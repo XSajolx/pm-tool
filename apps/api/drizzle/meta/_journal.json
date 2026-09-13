@@ -85,6 +85,13 @@
       "when": 1789339708369,
       "tag": "0011_premium_leader",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1789340319752,
+      "tag": "0012_giant_trish_tilby",
+      "breakpoints": true
     }
   ]
 }

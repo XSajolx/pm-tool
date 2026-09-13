@@ -12,6 +12,8 @@ export const createTaskSchema = z.object({
   parentTaskId: z.string().uuid().optional(),
   /** Project stage; null clears. Must belong to the project that owns the task's space. */
   stageId: z.string().uuid().nullable().optional(),
+  /** Milestone this task counts toward; null clears. Same project rule as stages. */
+  milestoneId: z.string().uuid().nullable().optional(),
   startDate: isoDate.nullable().optional(),
   dueDate: isoDate.nullable().optional(),
   /** Whole minutes; null clears the estimate. */

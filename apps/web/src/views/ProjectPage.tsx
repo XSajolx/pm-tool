@@ -1,7 +1,7 @@
 import { Link, useParams } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { api, type Project, type ProjectStatus, type Stage } from "../lib/api.js";
+import { api, type Milestone, type Project, type ProjectStatus, type Stage } from "../lib/api.js";
 import { Avatar } from "../components/ui.js";
 import { useAuth } from "../lib/auth.js";
 import { fmtDuration, fmtMoney, fmtShortDate } from "../lib/format.js";
@@ -144,6 +144,7 @@ export function ProjectPage() {
 
         <ProjectDetails project={project} canManage={canManage} onSaved={refresh} />
         <ProjectStages projectId={project.id} canManage={canManage} />
+        <ProjectMilestones projectId={project.id} canManage={canManage} />
 
         <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
           {/* Lists */}
@@ -557,6 +558,140 @@ function StageName({ stage, canEdit, onRename }: { stage: Stage; canEdit: boolea
         if (e.key === "Escape") setEditing(false);
       }}
       className="w-full rounded border border-indigo-300 px-1 text-sm font-semibold outline-none"
+    />
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * Milestones: target date, linked-task progress, "reached" set by hand,
+ * optional client visibility.
+ * ------------------------------------------------------------------ */
+function ProjectMilestones({ projectId, canManage }: { projectId: string; canManage: boolean }) {
+  const qc = useQueryClient();
+  const { data: milestones = [] } = useQuery({ queryKey: ["milestones", projectId], queryFn: () => api.getMilestones(projectId) });
+  const [name, setName] = useState("");
+  const [target, setTarget] = useState("");
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ["milestones"] });
+    qc.invalidateQueries({ queryKey: ["tasks"] });
+  };
+  const create = useMutation({
+    mutationFn: () => api.createMilestone(projectId, { name: name.trim(), targetDate: target ? `${target}T00:00:00.000Z` : null }),
+    onSuccess: () => {
+      setName("");
+      setTarget("");
+      refresh();
+    },
+  });
+  const update = useMutation({
+    mutationFn: ({ id, ...body }: { id: string } & Parameters<typeof api.updateMilestone>[1]) => api.updateMilestone(id, body),
+    onSuccess: refresh,
+  });
+  const remove = useMutation({ mutationFn: (id: string) => api.deleteMilestone(id), onSuccess: refresh });
+  const today = new Date().toISOString().slice(0, 10);
+
+  return (
+    <div className="mt-6 rounded-lg border border-border bg-white p-4">
+      <div className="mb-3 flex items-center gap-3">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Milestones</p>
+        <span className="text-[11px] text-muted-foreground">
+          {milestones.filter((m) => m.reachedAt).length}/{milestones.length} reached
+        </span>
+      </div>
+      {milestones.length ? (
+        <ul className="divide-y divide-border">
+          {milestones.map((m) => {
+            const pct = m.progress.total ? Math.round((m.progress.done / m.progress.total) * 100) : 0;
+            const overdue = !m.reachedAt && m.targetDate && m.targetDate.slice(0, 10) < today;
+            return (
+              <li key={m.id} className="flex flex-wrap items-center gap-3 py-2">
+                <input
+                  type="checkbox"
+                  checked={Boolean(m.reachedAt)}
+                  disabled={!canManage}
+                  title={m.reachedAt ? "Mark as not reached" : "Mark as reached today"}
+                  onChange={(e) => update.mutate({ id: m.id, reachedAt: e.target.checked ? new Date().toISOString() : null })}
+                  className="h-4 w-4 cursor-pointer accent-green-600"
+                />
+                <div className="min-w-0 flex-1">
+                  <MilestoneName milestone={m} canEdit={canManage} onRename={(v) => update.mutate({ id: m.id, name: v })} />
+                  <p className="text-[11px] text-muted-foreground">
+                    {m.reachedAt
+                      ? `Reached ${fmtShortDate(m.reachedAt)}`
+                      : m.targetDate
+                        ? `Target ${fmtShortDate(m.targetDate)}`
+                        : "No target date"}
+                    {overdue ? " · past target" : ""}
+                    {" · "}
+                    {m.progress.done}/{m.progress.total} tasks done
+                  </p>
+                </div>
+                <div className="h-1.5 w-28 overflow-hidden rounded-full bg-slate-100" title={`${pct}% of linked tasks done`}>
+                  <div className={cn("h-full rounded-full", m.reachedAt ? "bg-green-500" : "bg-indigo-500")} style={{ width: `${pct}%` }} />
+                </div>
+                {canManage && (
+                  <>
+                    <input
+                      type="date"
+                      value={m.targetDate ? m.targetDate.slice(0, 10) : ""}
+                      onChange={(e) => update.mutate({ id: m.id, targetDate: e.target.value ? `${e.target.value}T00:00:00.000Z` : null })}
+                      className="rounded-md border border-border px-2 py-0.5 text-xs"
+                      title="Target date"
+                    />
+                    <label className="flex items-center gap-1 text-[11px] text-slate-600" title="Show on the client portal">
+                      <input type="checkbox" checked={m.clientVisible} onChange={(e) => update.mutate({ id: m.id, clientVisible: e.target.checked })} className="accent-indigo-600" />
+                      Client-visible
+                    </label>
+                    <button type="button" onClick={() => remove.mutate(m.id)} className="text-[11px] text-slate-400 hover:text-red-500">
+                      Remove
+                    </button>
+                  </>
+                )}
+                {!canManage && m.clientVisible && <span className="rounded-full bg-indigo-50 px-2 text-[10px] text-indigo-700">Client-visible</span>}
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <p className="text-xs text-muted-foreground">No milestones yet.</p>
+      )}
+      {canManage && (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (name.trim()) create.mutate();
+          }}
+          className="mt-3 flex flex-wrap items-center gap-2"
+        >
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Milestone name (e.g. Design sign-off)" className="w-64 rounded-md border border-border bg-white px-2 py-1 text-sm outline-none focus:border-indigo-400" />
+          <input type="date" value={target} onChange={(e) => setTarget(e.target.value)} className="rounded-md border border-border bg-white px-2 py-1 text-sm" title="Target date" />
+          <button type="submit" disabled={!name.trim() || create.isPending} className="rounded-md border border-border px-3 py-1 text-xs text-slate-700 hover:bg-muted disabled:opacity-50">
+            Add milestone
+          </button>
+        </form>
+      )}
+    </div>
+  );
+}
+
+function MilestoneName({ milestone, canEdit, onRename }: { milestone: Milestone; canEdit: boolean; onRename: (v: string) => void }) {
+  const [text, setText] = useState(milestone.name);
+  const [editing, setEditing] = useState(false);
+  if (!editing) {
+    return (
+      <button type="button" disabled={!canEdit} onClick={() => { setText(milestone.name); setEditing(true); }} className={cn("block truncate text-left text-sm font-medium disabled:cursor-default", milestone.reachedAt ? "text-slate-500 line-through" : "text-slate-900")} title={canEdit ? "Rename" : undefined}>
+        {milestone.name}
+      </button>
+    );
+  }
+  return (
+    <input
+      autoFocus
+      value={text}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={() => { setEditing(false); if (text.trim() && text.trim() !== milestone.name) onRename(text.trim()); }}
+      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); if (e.key === "Escape") setEditing(false); }}
+      className="w-full rounded border border-indigo-300 px-1 text-sm font-medium outline-none"
     />
   );
 }

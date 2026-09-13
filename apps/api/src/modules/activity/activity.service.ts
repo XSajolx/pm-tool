@@ -20,6 +20,7 @@ export interface RecordActivity {
     | "list"
     | "cycle"
     | "stage"
+    | "milestone"
     | "intake_item"
     | "company"
     | "contact"
