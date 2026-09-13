@@ -9,7 +9,7 @@ const createSchema = z.object({
   name: z.string().min(1).max(128),
   listId: z.string().uuid().optional(),
   spaceId: z.string().uuid().optional(),
-  layout: z.enum(["list", "board", "table"]).optional(),
+  layout: z.enum(["list", "board", "table", "calendar"]).optional(),
   filters: z.record(z.unknown()),
   isShared: z.boolean().optional(),
 });

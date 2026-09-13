@@ -6,6 +6,9 @@ import { cn } from "../lib/utils.js";
 export interface ToolbarFilters {
   priority: string;
   assignee: string;
+  groupBy?: string;
+  sort?: string;
+  sortDir?: string;
 }
 
 interface Props {

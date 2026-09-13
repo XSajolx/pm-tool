@@ -1,22 +1,34 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useSearch } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, type Priority, type Task } from "../lib/api.js";
+import { api, type Priority, type Task, type TaskPatch } from "../lib/api.js";
 import { Button, PRIORITY } from "../components/ui.js";
 import { TaskDetail } from "../components/TaskDetail.js";
 import { ViewsAndCycles } from "../components/ViewsAndCycles.js";
 import { BoardView } from "./BoardView.js";
 import { ListView } from "./ListView.js";
 import { TableView } from "./TableView.js";
+import { CalendarView } from "./CalendarView.js";
+import { GROUP_OPTIONS, SORT_OPTIONS, type GroupBy, type SortDir, type SortKey } from "../components/taskViewUtils.js";
 import { cn } from "../lib/utils.js";
 import { recordRecent } from "../lib/recent.js";
 
-type ViewKey = "list" | "board" | "table";
+type ViewKey = "list" | "board" | "table" | "calendar";
 const VIEWS: { key: ViewKey; label: string; icon: string }[] = [
   { key: "list", label: "List", icon: "M4 6h16M4 12h16M4 18h10" },
   { key: "board", label: "Board", icon: "M4 4h6v16H4zM14 4h6v10h-6z" },
   { key: "table", label: "Table", icon: "M3 5h18v14H3zM3 10h18M9 5v14" },
+  { key: "calendar", label: "Calendar", icon: "M4 6h16v14H4zM4 10h16M8 3v4M16 3v4" },
 ];
+
+/** Everything a saved view persists besides its layout. */
+interface ViewSettings {
+  priority?: string;
+  assignee?: string;
+  groupBy?: GroupBy;
+  sort?: SortKey;
+  sortDir?: SortDir;
+}
 
 export function WorkspacePage() {
   const { listId } = useParams({ from: "/l/$listId" });
@@ -28,6 +40,9 @@ export function WorkspacePage() {
   const [draft, setDraft] = useState("");
   const [assigneeFilter, setAssigneeFilter] = useState("all");
   const [priorityFilter, setPriorityFilter] = useState("all");
+  const [groupBy, setGroupBy] = useState<GroupBy>("status");
+  const [sort, setSort] = useState<SortKey>("manual");
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
 
   const { data: spaces = [] } = useQuery({ queryKey: ["spaces"], queryFn: api.getSpaces });
   const { data: members = [] } = useQuery({ queryKey: ["members"], queryFn: api.getMembers });
@@ -72,25 +87,44 @@ export function WorkspacePage() {
     },
   });
 
-  // Optimistic drag-to-move between board columns.
-  const moveTask = useMutation({
-    mutationFn: ({ taskId, statusId }: { taskId: string; statusId: string }) =>
-      api.updateTask(taskId, { statusId }),
-    onMutate: async ({ taskId, statusId }) => {
+  // One optimistic PATCH for every view: board drags, calendar drags and inline
+  // cell edits all go through here, so a change made in one layout is already
+  // on screen when the user switches to another.
+  const updateTask = useMutation({
+    mutationFn: ({ taskId, patch }: { taskId: string; patch: TaskPatch }) => api.updateTask(taskId, patch),
+    onMutate: async ({ taskId, patch }) => {
       await qc.cancelQueries({ queryKey: ["tasks", listId] });
       const prev = qc.getQueryData<Task[]>(["tasks", listId]);
       qc.setQueryData<Task[]>(["tasks", listId], (old = []) =>
-        old.map((t) =>
-          t.id === taskId
-            ? { ...t, statusId, status: statuses.find((s) => s.id === statusId) ?? t.status }
-            : t,
-        ),
+        old.map((t) => {
+          if (t.id !== taskId) return t;
+          const next: Task = { ...t };
+          if (patch.statusId !== undefined) {
+            next.statusId = patch.statusId;
+            next.status = statuses.find((s) => s.id === patch.statusId) ?? t.status;
+          }
+          if (patch.priority !== undefined) next.priority = patch.priority;
+          if (patch.dueDate !== undefined) next.dueDate = patch.dueDate;
+          if (patch.startDate !== undefined) next.startDate = patch.startDate;
+          if (patch.title !== undefined) next.title = patch.title;
+          if (patch.assigneeIds !== undefined) {
+            next.assignees = patch.assigneeIds
+              .map((id) => members.find((m) => m.id === id))
+              .filter((m): m is NonNullable<typeof m> => Boolean(m))
+              .map((user) => ({ user }));
+          }
+          return next;
+        }),
       );
       return { prev };
     },
     onError: (_e, _v, c) => c?.prev && qc.setQueryData(["tasks", listId], c.prev),
-    onSettled: () => qc.invalidateQueries({ queryKey: ["tasks", listId] }),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ["tasks", listId] });
+      qc.invalidateQueries({ queryKey: ["my-tasks"] });
+    },
   });
+  const onUpdate = (taskId: string, patch: TaskPatch) => updateTask.mutate({ taskId, patch });
 
   const filtered = useMemo(
     () =>
@@ -139,16 +173,37 @@ export function WorkspacePage() {
           listId={listId}
           spaceId={spaceId}
           layout={view}
-          filters={{ priority: priorityFilter, assignee: assigneeFilter }}
+          filters={{ priority: priorityFilter, assignee: assigneeFilter, groupBy, sort, sortDir }}
           onApply={(v) => {
             setView(v.layout);
-            const f = v.filters as { priority?: string; assignee?: string };
+            const f = v.filters as ViewSettings;
             setPriorityFilter(f.priority ?? "all");
             setAssigneeFilter(f.assignee ?? "all");
+            setGroupBy(f.groupBy ?? "status");
+            setSort(f.sort ?? "manual");
+            setSortDir(f.sortDir ?? "asc");
           }}
         />
 
         <div className="ml-auto flex items-center gap-2">
+          {view === "list" && (
+            <FilterSelect label="Group" value={groupBy} onChange={(v) => setGroupBy(v as GroupBy)} options={GROUP_OPTIONS} neutral="status" />
+          )}
+          {(view === "list" || view === "table") && (
+            <>
+              <FilterSelect label="Sort" value={sort} onChange={(v) => setSort(v as SortKey)} options={SORT_OPTIONS} neutral="manual" />
+              {sort !== "manual" && (
+                <button
+                  type="button"
+                  onClick={() => setSortDir((d) => (d === "asc" ? "desc" : "asc"))}
+                  title={sortDir === "asc" ? "Ascending" : "Descending"}
+                  className="rounded-md border border-border px-2 py-1 text-sm text-slate-500 hover:bg-muted"
+                >
+                  {sortDir === "asc" ? "↑" : "↓"}
+                </button>
+              )}
+            </>
+          )}
           <FilterSelect
             label="Priority"
             value={priorityFilter}
@@ -202,12 +257,38 @@ export function WorkspacePage() {
             tasks={filtered}
             statuses={statuses}
             onOpenTask={setOpenTaskId}
-            onMoveTask={(taskId, statusId) => moveTask.mutate({ taskId, statusId })}
+            onMoveTask={(taskId, statusId) => onUpdate(taskId, { statusId })}
           />
         ) : view === "list" ? (
-          <ListView tasks={filtered} statuses={statuses} onOpenTask={setOpenTaskId} />
+          <ListView
+            tasks={filtered}
+            statuses={statuses}
+            members={members}
+            groupBy={groupBy}
+            sort={sort}
+            sortDir={sortDir}
+            onOpenTask={setOpenTaskId}
+            onUpdate={onUpdate}
+          />
+        ) : view === "calendar" ? (
+          <CalendarView tasks={filtered} onOpenTask={setOpenTaskId} onReschedule={(taskId, dueDate) => onUpdate(taskId, { dueDate })} />
         ) : (
-          <TableView tasks={filtered} statuses={statuses} onOpenTask={setOpenTaskId} />
+          <TableView
+            tasks={filtered}
+            statuses={statuses}
+            members={members}
+            sort={sort}
+            sortDir={sortDir}
+            onSort={(key) => {
+              if (key === sort) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+              else {
+                setSort(key);
+                setSortDir("asc");
+              }
+            }}
+            onOpenTask={setOpenTaskId}
+            onUpdate={onUpdate}
+          />
         )}
       </div>
 
@@ -229,13 +310,16 @@ function FilterSelect({
   value,
   onChange,
   options,
+  neutral = "all",
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   options: { value: string; label: string }[];
+  /** The value that counts as "no filter applied". */
+  neutral?: string;
 }) {
-  const active = value !== "all";
+  const active = value !== neutral;
   return (
     <label
       className={cn(

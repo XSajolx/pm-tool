@@ -332,7 +332,7 @@ export interface CycleSummary {
 export interface SavedView {
   id: string;
   name: string;
-  layout: "list" | "board" | "table";
+  layout: "list" | "board" | "table" | "calendar";
   filters: Record<string, unknown>;
   isShared: boolean;
   createdById: string;

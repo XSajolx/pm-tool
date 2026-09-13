@@ -1,14 +1,23 @@
-import type { Status, Task } from "../lib/api.js";
-import { AvatarStack, PriorityFlag, StatusPill } from "../components/ui.js";
+import { useMemo } from "react";
+import type { Member, Status, Task } from "../lib/api.js";
+import { AssigneeCell, DueCell, PriorityCell, StatusCell, type UpdateTask } from "../components/InlineEditors.js";
+import { sortTasks, type SortDir, type SortKey } from "../components/taskViewUtils.js";
 
 interface Props {
   tasks: Task[];
   statuses: Status[];
+  members: Member[];
+  sort: SortKey;
+  sortDir: SortDir;
+  onSort: (key: SortKey) => void;
   onOpenTask: (id: string) => void;
+  onUpdate: UpdateTask;
 }
 
-/** Flat spreadsheet-style Table view. */
-export function TableView({ tasks, onOpenTask }: Props) {
+/** Flat spreadsheet-style Table view: click a header to sort, edit cells inline. */
+export function TableView({ tasks, statuses, members, sort, sortDir, onSort, onOpenTask, onUpdate }: Props) {
+  const rows = useMemo(() => sortTasks(tasks, sort, sortDir, statuses), [tasks, sort, sortDir, statuses]);
+  const arrow = (key: SortKey) => (sort === key ? (sortDir === "asc" ? " ↑" : " ↓") : "");
   return (
     <div className="p-4">
       <div className="overflow-x-auto rounded-lg border border-border bg-white">
@@ -16,40 +25,49 @@ export function TableView({ tasks, onOpenTask }: Props) {
           <thead>
             <tr className="border-b border-border bg-muted/50 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
               <Th className="w-12">ID</Th>
-              <Th>Name</Th>
-              <Th className="w-40">Status</Th>
+              <Th onClick={() => onSort("title")}>Name{arrow("title")}</Th>
+              <Th className="w-40" onClick={() => onSort("status")}>
+                Status{arrow("status")}
+              </Th>
               <Th className="w-32">Assignee</Th>
-              <Th className="w-28">Due</Th>
-              <Th className="w-28">Priority</Th>
+              <Th className="w-28" onClick={() => onSort("dueDate")}>
+                Due{arrow("dueDate")}
+              </Th>
+              <Th className="w-28" onClick={() => onSort("priority")}>
+                Priority{arrow("priority")}
+              </Th>
+              <Th className="w-28">Estimate</Th>
+              <Th className="w-32">Stage</Th>
             </tr>
           </thead>
           <tbody>
-            {tasks.map((t) => (
-              <tr
-                key={t.id}
-                onClick={() => onOpenTask(t.id)}
-                className="cursor-pointer border-b border-border last:border-0 hover:bg-muted/40"
-              >
+            {rows.map((t) => (
+              <tr key={t.id} onClick={() => onOpenTask(t.id)} className="cursor-pointer border-b border-border last:border-0 hover:bg-muted/40">
                 <Td className="text-xs text-muted-foreground">{t.reference}</Td>
-                <Td className="font-medium text-slate-800">{t.title}</Td>
+                <Td className={`font-medium ${t.status?.category === "done" ? "text-slate-400 line-through" : "text-slate-800"}`}>{t.title}</Td>
                 <Td>
-                  {t.status ? (
-                    <StatusPill name={t.status.name} color={t.status.color} />
-                  ) : (
-                    <span className="text-xs text-muted-foreground">—</span>
-                  )}
+                  <StatusCell task={t} statuses={statuses} onUpdate={onUpdate} />
                 </Td>
                 <Td>
-                  <AvatarStack users={t.assignees.map((a) => a.user)} />
-                </Td>
-                <Td className="text-xs text-slate-500">
-                  {t.dueDate ? new Date(t.dueDate).toLocaleDateString() : "—"}
+                  <AssigneeCell task={t} members={members} onUpdate={onUpdate} />
                 </Td>
                 <Td>
-                  <PriorityFlag priority={t.priority} />
+                  <DueCell task={t} onUpdate={onUpdate} />
                 </Td>
+                <Td>
+                  <PriorityCell task={t} onUpdate={onUpdate} />
+                </Td>
+                <Td className="text-xs text-slate-500">{t.timeEstimateMinutes ? formatEstimate(t.timeEstimateMinutes) : "—"}</Td>
+                <Td className="text-xs text-slate-500">{t.stage?.name ?? "—"}</Td>
               </tr>
             ))}
+            {!rows.length && (
+              <tr>
+                <td colSpan={8} className="px-4 py-6 text-center text-xs text-muted-foreground">
+                  No tasks
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
@@ -57,8 +75,18 @@ export function TableView({ tasks, onOpenTask }: Props) {
   );
 }
 
-function Th({ children, className = "" }: { children: React.ReactNode; className?: string }) {
-  return <th className={`px-4 py-2 font-semibold ${className}`}>{children}</th>;
+function formatEstimate(m: number) {
+  const h = Math.floor(m / 60);
+  const rest = m % 60;
+  return h && rest ? `${h}h ${rest}m` : h ? `${h}h` : `${rest}m`;
+}
+
+function Th({ children, className = "", onClick }: { children: React.ReactNode; className?: string; onClick?: () => void }) {
+  return (
+    <th className={`px-4 py-2 font-semibold ${onClick ? "cursor-pointer select-none hover:text-slate-700" : ""} ${className}`} onClick={onClick}>
+      {children}
+    </th>
+  );
 }
 function Td({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return <td className={`px-4 py-2.5 ${className}`}>{children}</td>;

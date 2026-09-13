@@ -107,9 +107,9 @@ const listRoute = createRoute({
   // Optional key, so plain links to a list don't have to spell out `search`.
   validateSearch: (
     s: Record<string, unknown>,
-  ): { task?: string; view?: "list" | "board" | "table" } => ({
+  ): { task?: string; view?: "list" | "board" | "table" | "calendar" } => ({
     ...(typeof s.task === "string" ? { task: s.task } : {}),
-    ...(s.view === "list" || s.view === "board" || s.view === "table" ? { view: s.view } : {}),
+    ...(s.view === "list" || s.view === "board" || s.view === "table" || s.view === "calendar" ? { view: s.view } : {}),
   }),
 });
 const taskOpenRoute = createRoute({ getParentRoute: () => rootRoute, path: "/t/$taskId", component: TaskOpenPage });
