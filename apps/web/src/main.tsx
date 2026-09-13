@@ -27,6 +27,7 @@ import { EstimatesPage } from "./views/EstimatesPage.js";
 import { EstimatePage } from "./views/EstimatePage.js";
 import { MeetingsPage } from "./views/MeetingsPage.js";
 import { SettingsPage } from "./views/SettingsPage.js";
+import { MyWorkPage } from "./views/MyWorkPage.js";
 import { DocsPage, DocPage } from "./views/DocsPage.js";
 import { DashboardsPage } from "./views/DashboardsPage.js";
 import { TaskOpenPage } from "./views/TaskOpenPage.js";
@@ -170,6 +171,7 @@ const estimatesRoute = createRoute({ getParentRoute: () => rootRoute, path: "/cr
 const estimateRoute = createRoute({ getParentRoute: () => rootRoute, path: "/crm/estimates/$estimateId", component: EstimatePage });
 const meetingsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/crm/meetings", component: MeetingsPage });
 const settingsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/settings", component: SettingsPage });
+const myWorkRoute = createRoute({ getParentRoute: () => rootRoute, path: "/my-work", component: MyWorkPage });
 
 const routeTree = rootRoute.addChildren([
   indexRoute,
@@ -196,6 +198,7 @@ const routeTree = rootRoute.addChildren([
   dashboardsRoute,
   spaceRoute,
   settingsRoute,
+  myWorkRoute,
 ]);
 // Vite's BASE_URL is "/" locally and "/pm-tool/" on GitHub Pages.
 const router = createRouter({

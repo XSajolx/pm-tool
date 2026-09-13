@@ -293,7 +293,7 @@ export interface StageTemplate {
 }
 
 export interface MyTask extends Task {
-  list: { id: string; name: string } | null;
+  list: { id: string; name: string; spaceId: string; spaceName: string | null } | null;
 }
 
 export interface NotificationPreferences {
@@ -730,7 +730,9 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ resolved }),
     }),
-  getMyTasks: () => request<MyTask[]>(`/tasks/mine`),
+  getMyTasks: (includeDone = false) => request<MyTask[]>(`/tasks/mine${includeDone ? "?includeDone=true" : ""}`),
+  completeTask: (id: string) => request<Task>(`/tasks/${id}/complete`, { method: "POST" }),
+  reopenTask: (id: string) => request<Task>(`/tasks/${id}/reopen`, { method: "POST" }),
   getRelations: (taskId: string) => request<TaskRelation[]>(`/tasks/${taskId}/relations`),
   addRelation: (taskId: string, relatedTaskId: string, relation: RelationKind) =>
     request<TaskRelation[]>(`/tasks/${taskId}/relations`, {

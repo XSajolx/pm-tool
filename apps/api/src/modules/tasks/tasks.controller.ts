@@ -54,8 +54,20 @@ export class TasksController {
 
   /** Declared before ":id" so the literal path wins the match. */
   @Get("mine")
-  mine(@Auth() auth: AuthContext) {
-    return this.tasks.mine(auth.orgId, auth.userId);
+  mine(@Auth() auth: AuthContext, @Query("includeDone") includeDone?: string) {
+    return this.tasks.mine(auth.orgId, auth.userId, includeDone === "true");
+  }
+
+  @Post(":id/complete")
+  @Roles("owner", "admin", "member")
+  complete(@Auth() auth: AuthContext, @Param("id") id: string) {
+    return this.tasks.complete(auth.orgId, auth.userId, id);
+  }
+
+  @Post(":id/reopen")
+  @Roles("owner", "admin", "member")
+  reopen(@Auth() auth: AuthContext, @Param("id") id: string) {
+    return this.tasks.reopen(auth.orgId, auth.userId, id);
   }
 
   @Get(":id")

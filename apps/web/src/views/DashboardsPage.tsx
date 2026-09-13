@@ -20,7 +20,7 @@ export function DashboardsPage() {
 
   const { data: projects = [] } = useQuery({ queryKey: ["projects"], queryFn: () => api.getProjects() });
   const { data: board = [] } = useQuery({ queryKey: ["deal-board"], queryFn: api.getDealBoard });
-  const { data: myTasks = [] } = useQuery({ queryKey: ["my-tasks"], queryFn: api.getMyTasks });
+  const { data: myTasks = [] } = useQuery({ queryKey: ["my-tasks"], queryFn: () => api.getMyTasks() });
   const { data: week = [] } = useQuery({ queryKey: ["time-entries", "week", weekStart], queryFn: () => api.getTimeEntries({ from: weekStart }) });
   const { data: meetings = [] } = useQuery({ queryKey: ["meetings", true], queryFn: () => api.getMeetings({ mine: true }) });
   const { data: estimates = [] } = useQuery({ queryKey: ["estimates"], queryFn: () => api.getEstimates() });

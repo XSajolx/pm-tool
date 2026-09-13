@@ -380,7 +380,7 @@ export class TasksService {
    * due first (Postgres sorts nulls last on ASC, so undated tasks trail). The
    * list name is fetched in one extra query rather than a join per row.
    */
-  async mine(orgId: string, userId: string) {
+  async mine(orgId: string, userId: string, includeDone = false) {
     const assigned = await this.db
       .select({ taskId: taskAssignees.taskId })
       .from(taskAssignees)
@@ -398,22 +398,60 @@ export class TasksService {
         ),
         isNull(tasks.archivedAt),
       ),
-      with: { status: true, assignees: { with: { user: true } } },
+      with: {
+        status: true,
+        stage: { columns: { id: true, name: true, status: true } },
+        assignees: { with: { user: true } },
+      },
       orderBy: (t, { asc }) => [asc(t.dueDate), asc(t.createdAt)],
     });
 
-    const listIds = [...new Set(rows.map((r) => r.listId))];
+    const open = includeDone ? rows : rows.filter((t) => t.status?.category !== "done");
+    const listIds = [...new Set(open.map((r) => r.listId))];
     const listRows = listIds.length
-      ? await this.db.select().from(lists).where(inArray(lists.id, listIds))
+      ? await this.db.query.lists.findMany({
+          where: inArray(lists.id, listIds),
+          with: { space: { columns: { id: true, name: true } } },
+        })
       : [];
     const listById = new Map(listRows.map((l) => [l.id, l]));
 
-    return rows.map((t) => ({
-      ...t,
-      list: listById.get(t.listId)
-        ? { id: t.listId, name: listById.get(t.listId)!.name }
-        : null,
-    }));
+    return open.map((t) => {
+      const list = listById.get(t.listId);
+      return {
+        ...t,
+        list: list ? { id: t.listId, name: list.name, spaceId: list.spaceId, spaceName: list.space?.name ?? null } : null,
+      };
+    });
+  }
+
+  /** Move a task into the first "done" status of its space (My Work check-off). */
+  async complete(orgId: string, userId: string, id: string) {
+    const target = await this.statusOfCategory(orgId, id, ["done"]);
+    return this.update(orgId, userId, id, { statusId: target });
+  }
+
+  /** Move a task back to the first not-started (or active) status of its space. */
+  async reopen(orgId: string, userId: string, id: string) {
+    const target = await this.statusOfCategory(orgId, id, ["not_started", "active"]);
+    return this.update(orgId, userId, id, { statusId: target });
+  }
+
+  private async statusOfCategory(orgId: string, taskId: string, categories: ("not_started" | "active" | "done" | "closed")[]) {
+    const task = await this.db.query.tasks.findFirst({
+      where: and(eq(tasks.id, taskId), eq(tasks.organizationId, orgId)),
+      with: { list: { columns: { spaceId: true } } },
+    });
+    if (!task) throw new NotFoundException("Task not found");
+    const all = await this.db.query.statuses.findMany({
+      where: and(eq(statuses.spaceId, task.list.spaceId), eq(statuses.organizationId, orgId)),
+      orderBy: (s, { asc }) => [asc(s.position)],
+    });
+    for (const c of categories) {
+      const hit = all.find((s) => s.category === c);
+      if (hit) return hit.id;
+    }
+    throw new BadRequestException(`This space has no "${categories[0]}" status — add one in Settings`);
   }
 
   /* ---------------------------------------------------------------- *

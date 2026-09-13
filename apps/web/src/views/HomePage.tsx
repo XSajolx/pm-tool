@@ -549,7 +549,7 @@ function AssignedCommentRow({ c, onToggle }: { c: TaskComment; onToggle: () => v
 function MyTasksSection() {
   const { data: tasks = [], isLoading } = useQuery({
     queryKey: ["my-tasks"],
-    queryFn: api.getMyTasks,
+    queryFn: () => api.getMyTasks(),
   });
   const groups = useMemo(() => groupByDue(tasks), [tasks]);
 

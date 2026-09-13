@@ -108,6 +108,7 @@ export function Sidebar() {
           </svg>
           Chat
         </Link>
+        <NavLink to="/my-work" label="My Work" icon={checkIcon} />
         <NavLink to="/inbox" label="Home" badge={unread} icon={bellIcon} />
         <NavLink to="/intake" label="Intake" icon={inboxIcon} />
         <NavLink to="/docs" label="Docs" icon={docIcon} />
@@ -305,6 +306,12 @@ export function NavItem({ icon, label, badge }: { icon: string; label: string; b
   );
 }
 
+const checkIcon = (
+  <svg className="h-4 w-4 opacity-70" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+    <circle cx="12" cy="12" r="9" />
+    <path d="M8 12l3 3 5-6" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
 const gearIcon = (
   <svg className="h-4 w-4 opacity-70" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
     <circle cx="12" cy="12" r="3" />
