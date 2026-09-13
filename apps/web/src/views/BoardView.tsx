@@ -136,7 +136,14 @@ function CardBody({ task, dragging }: { task: Task; dragging?: boolean }) {
         <p className="text-sm leading-snug text-slate-800">{task.title}</p>
       </div>
       <div className="mt-2.5 flex items-center justify-between">
-        <span className="text-[11px] text-muted-foreground">{task.reference ?? ""}</span>
+        <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+          {task.reference ?? ""}
+          {task.subtasks.length > 0 && (
+            <span className="rounded bg-muted px-1 text-[10px]">
+              ☑ {task.subtasks.filter((s) => s.status?.category === "done").length}/{task.subtasks.length}
+            </span>
+          )}
+        </span>
         <AvatarStack users={task.assignees.map((a) => a.user)} />
       </div>
     </div>

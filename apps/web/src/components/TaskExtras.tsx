@@ -1,28 +1,53 @@
 import { useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, type Task } from "../lib/api.js";
+import { Link } from "@tanstack/react-router";
+import { api, type Task, type TaskPatch } from "../lib/api.js";
+import { AssigneeCell, DueCell } from "./InlineEditors.js";
+import { useAuth } from "../lib/auth.js";
 import { StatusPill } from "./ui.js";
 import { cn } from "../lib/utils.js";
 
 const TAG_COLORS = ["#6366f1", "#0ea5e9", "#22c55e", "#f59e0b", "#ef4444", "#a855f7", "#64748b"];
 
-/** Subtasks: a list with inline add. Creating one uses the same list as the parent. */
+/**
+ * Subtasks: one level deep. Each row has its own status (check-off), assignee
+ * and due date; the heading shows done/total. A subtask can't have subtasks,
+ * so the add form is hidden when this task is itself a subtask.
+ */
 export function SubtasksSection({ task, listId }: { task: Task; listId: string }) {
   const qc = useQueryClient();
   const [title, setTitle] = useState("");
+  const { data: members = [] } = useQuery({ queryKey: ["members"], queryFn: api.getMembers });
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ["task", task.id] });
+    qc.invalidateQueries({ queryKey: ["tasks", listId] });
+    qc.invalidateQueries({ queryKey: ["my-tasks"] });
+  };
   const create = useMutation({
-    mutationFn: () => api.createTask({ listId, title: title.trim(), parentTaskId: task.id } as Parameters<typeof api.createTask>[0] & { parentTaskId: string }),
+    mutationFn: () => api.createTask({ listId, title: title.trim(), parentTaskId: task.id }),
     onSuccess: () => {
       setTitle("");
-      qc.invalidateQueries({ queryKey: ["task", task.id] });
-      qc.invalidateQueries({ queryKey: ["tasks", listId] });
+      refresh();
     },
   });
+  const update = useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: TaskPatch }) => api.updateTask(id, patch),
+    onSuccess: refresh,
+  });
+  const toggle = useMutation({
+    mutationFn: ({ id, done }: { id: string; done: boolean }) => (done ? api.completeTask(id) : api.reopenTask(id)),
+    onSuccess: refresh,
+  });
+  const remove = useMutation({ mutationFn: (id: string) => api.deleteTask(id), onSuccess: refresh });
+  const { role } = useAuth();
+  const canDelete = role === "owner" || role === "admin";
+
   function submit(e: FormEvent) {
     e.preventDefault();
     if (title.trim()) create.mutate();
   }
   const done = task.subtasks.filter((s) => s.status?.category === "done").length;
+  const isSubtask = Boolean(task.parentTaskId);
 
   return (
     <div className="border-t border-border px-5 py-4">
@@ -31,18 +56,47 @@ export function SubtasksSection({ task, listId }: { task: Task; listId: string }
       </p>
       {task.subtasks.length ? (
         <ul className="mb-2 space-y-1">
-          {task.subtasks.map((s) => (
-            <li key={s.id} className="flex items-center gap-2 rounded-md border border-border px-2 py-1.5 text-sm">
-              <span className={cn("truncate", s.status?.category === "done" ? "text-muted-foreground line-through" : "text-slate-700")}>{s.title ?? "Subtask"}</span>
-              <span className="ml-auto shrink-0">{s.status && <StatusPill name={s.status.name} color={s.status.color} />}</span>
-            </li>
-          ))}
+          {task.subtasks.map((s) => {
+            const isDone = s.status?.category === "done";
+            // Inline editors expect a Task; a subtask row has the same shape for the fields they touch.
+            const row = { ...s, id: s.id, title: s.title ?? "", assignees: s.assignees ?? [], dueDate: s.dueDate ?? null, priority: s.priority ?? null, status: s.status ?? null, subtasks: [] } as unknown as Task;
+            return (
+              <li key={s.id} className="flex items-center gap-2 rounded-md border border-border px-2 py-1.5 text-sm">
+                <input
+                  type="checkbox"
+                  checked={isDone}
+                  title={isDone ? "Reopen" : "Mark done"}
+                  onChange={(e) => toggle.mutate({ id: s.id, done: e.target.checked })}
+                  className="h-3.5 w-3.5 cursor-pointer accent-indigo-600"
+                />
+                <Link
+                  to="/t/$taskId"
+                  params={{ taskId: s.id }}
+                  className={cn("min-w-0 flex-1 truncate hover:text-indigo-700", isDone ? "text-muted-foreground line-through" : "text-slate-700")}
+                >
+                  {s.title ?? "Subtask"}
+                </Link>
+                <AssigneeCell task={row} members={members} onUpdate={(id, patch) => update.mutate({ id, patch })} />
+                <DueCell task={row} onUpdate={(id, patch) => update.mutate({ id, patch })} />
+                <span className="shrink-0">{s.status && <StatusPill name={s.status.name} color={s.status.color} />}</span>
+                {canDelete && (
+                  <button type="button" onClick={() => remove.mutate(s.id)} title="Delete subtask" className="text-slate-300 hover:text-red-500">
+                    ✕
+                  </button>
+                )}
+              </li>
+            );
+          })}
         </ul>
       ) : null}
-      <form onSubmit={submit} className="flex gap-1.5">
-        <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Add a subtask…" className="min-w-0 flex-1 rounded-md border border-border px-2 py-1 text-sm outline-none focus:border-indigo-500" />
-        <button type="submit" disabled={!title.trim() || create.isPending} className="rounded-md bg-indigo-600 px-2.5 py-1 text-xs font-medium text-white disabled:opacity-50">Add</button>
-      </form>
+      {isSubtask ? (
+        <p className="text-xs text-muted-foreground">Subtasks go one level deep, so this subtask can't have its own.</p>
+      ) : (
+        <form onSubmit={submit} className="flex gap-1.5">
+          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Add a subtask…" className="min-w-0 flex-1 rounded-md border border-border px-2 py-1 text-sm outline-none focus:border-indigo-500" />
+          <button type="submit" disabled={!title.trim() || create.isPending} className="rounded-md bg-indigo-600 px-2.5 py-1 text-xs font-medium text-white disabled:opacity-50">Add</button>
+        </form>
+      )}
     </div>
   );
 }

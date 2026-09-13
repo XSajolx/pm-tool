@@ -206,7 +206,16 @@ export interface Task {
   assignees: { user: Member }[];
   stageId?: string | null;
   stage?: { id: string; name: string; status: StageStatus } | null;
-  subtasks: { id: string; title?: string; status?: Status | null }[];
+  parentTaskId?: string | null;
+  subtasks: {
+    id: string;
+    title?: string;
+    status?: Status | null;
+    statusId?: string | null;
+    priority?: Priority | null;
+    dueDate?: string | null;
+    assignees?: { user: Member }[];
+  }[];
   tags?: Tag[];
   cycleId?: string | null;
   listId?: string;

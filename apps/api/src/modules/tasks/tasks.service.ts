@@ -80,7 +80,10 @@ export class TasksService {
         status: true,
         stage: { columns: { id: true, name: true, status: true } },
         assignees: { with: { user: true } },
-        subtasks: { with: { status: true } },
+        subtasks: {
+          with: { status: true, assignees: { with: { user: true } } },
+          orderBy: (t, { asc }) => [asc(t.position), asc(t.createdAt)],
+        },
         comments: { with: { author: true } },
       },
     });
@@ -158,6 +161,27 @@ export class TasksService {
 
   async create(orgId: string, userId: string, dto: CreateTaskDto) {
     if (dto.stageId) await this.assertStageForList(orgId, dto.listId, dto.stageId);
+    let statusId = dto.statusId;
+    if (dto.parentTaskId) {
+      // Subtasks are one level deep: a subtask cannot have its own subtasks.
+      const parent = await this.db.query.tasks.findFirst({
+        where: and(eq(tasks.id, dto.parentTaskId), eq(tasks.organizationId, orgId)),
+        columns: { id: true, parentTaskId: true, listId: true, statusId: true },
+      });
+      if (!parent) throw new NotFoundException("Parent task not found");
+      if (parent.parentTaskId) throw new BadRequestException("Subtasks can only go one level deep");
+      // A subtask starts in the space's first status so it shows up in every view.
+      if (!statusId) {
+        const list = await this.db.query.lists.findFirst({ where: eq(lists.id, parent.listId), columns: { spaceId: true } });
+        const first = list
+          ? await this.db.query.statuses.findFirst({
+              where: and(eq(statuses.spaceId, list.spaceId), eq(statuses.organizationId, orgId)),
+              orderBy: (st, { asc }) => [asc(st.position)],
+            })
+          : null;
+        statusId = first?.id;
+      }
+    }
     const [task] = await this.db
       .insert(tasks)
       .values({
@@ -165,7 +189,7 @@ export class TasksService {
         listId: dto.listId,
         title: dto.title,
         description: dto.description,
-        statusId: dto.statusId,
+        statusId,
         priority: dto.priority ?? undefined,
         parentTaskId: dto.parentTaskId,
         stageId: dto.stageId ?? undefined,
