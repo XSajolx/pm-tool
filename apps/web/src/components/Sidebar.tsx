@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type SpaceTree } from "../lib/api.js";
 import { useAuth } from "../lib/auth.js";
 import { closeSocket, getSocket } from "../lib/socket.js";
 import { TimerBar } from "./TimerBar.js";
+import { QuickAdd, useQuickAddShortcut } from "./QuickAdd.js";
 import { InviteDialog, NewSpaceDialog } from "./SidebarDialogs.js";
 import { cn } from "../lib/utils.js";
 
@@ -35,6 +36,9 @@ export function Sidebar() {
   const [orgMenu, setOrgMenu] = useState(false);
   const [userMenu, setUserMenu] = useState(false);
   const [spaceDialog, setSpaceDialog] = useState(false);
+  const [quickAdd, setQuickAdd] = useState(false);
+  const openQuickAdd = useCallback(() => setQuickAdd(true), []);
+  useQuickAddShortcut(openQuickAdd);
   const [inviteDialog, setInviteDialog] = useState(false);
 
   const activeOrg = memberships.find((m) => m.organizationId === activeOrgId)?.organization;
@@ -95,6 +99,16 @@ export function Sidebar() {
       <div className="min-h-0 flex-1 overflow-y-auto">
       {/* Primary nav */}
       <nav className="px-2 py-2">
+        <button
+          type="button"
+          onClick={openQuickAdd}
+          title="New task (press n)"
+          className="mb-1 flex w-full items-center gap-2.5 rounded-md border border-dashed border-indigo-300 px-2 py-1.5 text-sm font-medium text-indigo-700 hover:bg-indigo-50"
+        >
+          <span className="text-base leading-none">＋</span>
+          New task
+          <kbd className="ml-auto rounded border border-indigo-200 px-1 text-[10px] font-normal text-indigo-400">n</kbd>
+        </button>
         <Link
           to="/chat"
           className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-sm text-slate-600 hover:bg-muted [&.active]:bg-indigo-50 [&.active]:font-medium [&.active]:text-indigo-700"
@@ -157,6 +171,7 @@ export function Sidebar() {
       </div>
 
       {spaceDialog && <NewSpaceDialog onClose={() => setSpaceDialog(false)} />}
+      <QuickAdd open={quickAdd} onClose={() => setQuickAdd(false)} />
       {inviteDialog && <InviteDialog onClose={() => setInviteDialog(false)} />}
 
       <TimerBar />
