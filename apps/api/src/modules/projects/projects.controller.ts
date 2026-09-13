@@ -62,4 +62,22 @@ export class ProjectsController {
   archive(@Auth() auth: AuthContext, @Param("id") id: string) {
     return this.projects.archive(auth.orgId, auth.userId, id);
   }
+
+  /* Row 39: project team (mirrored into the project channel). */
+  @Get(":id/members")
+  members(@Auth() auth: AuthContext, @Param("id") id: string) {
+    return this.projects.members(auth.orgId, id);
+  }
+
+  @Post(":id/members")
+  @Roles("owner", "admin", "member")
+  addMembers(@Auth() auth: AuthContext, @Param("id") id: string, @Body() body: { userIds: string[] }) {
+    return this.projects.addMembers(auth.orgId, auth.userId, id, body.userIds ?? []);
+  }
+
+  @Delete(":id/members/:userId")
+  @Roles("owner", "admin")
+  removeMember(@Auth() auth: AuthContext, @Param("id") id: string, @Param("userId") userId: string) {
+    return this.projects.removeMember(auth.orgId, auth.userId, id, userId);
+  }
 }

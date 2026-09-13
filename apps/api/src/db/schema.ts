@@ -551,10 +551,12 @@ export const channels = pgTable(
     name: varchar("name", { length: 120 }),
     topic: text("topic"),
     isPrivate: boolean("is_private").notNull().default(false),
+    /** Row 39: the project this channel belongs to. Membership mirrors the project team. */
+    projectId: uuid("project_id").references((): AnyPgColumn => projects.id, { onDelete: "cascade" }),
     createdById: uuid("created_by_id").references(() => users.id),
     ...timestamps,
   },
-  (t) => [index("channels_org_idx").on(t.organizationId)],
+  (t) => [index("channels_org_idx").on(t.organizationId), uniqueIndex("channels_project_uq").on(t.projectId)],
 );
 
 export const channelMembers = pgTable(
@@ -605,6 +607,7 @@ export const channelsRelations = relations(channels, ({ many, one }) => ({
     fields: [channels.organizationId],
     references: [organizations.id],
   }),
+  project: one(projects, { fields: [channels.projectId], references: [projects.id] }),
   members: many(channelMembers),
   messages: many(messages),
 }));
@@ -1116,8 +1119,37 @@ export const allocations = pgTable(
   ],
 );
 
+/**
+ * Row 39: who is on a project. The lead and creator are always implied; this
+ * table holds everyone else. Assigning someone a task in the project adds them.
+ * The project's chat channel is kept in sync with this team.
+ */
+export const projectMembers = pgTable(
+  "project_members",
+  {
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    addedAt: timestamp("added_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex("project_members_pk").on(t.projectId, t.userId), index("project_members_user_idx").on(t.userId)],
+);
+
+export const projectMembersRelations = relations(projectMembers, ({ one }) => ({
+  project: one(projects, { fields: [projectMembers.projectId], references: [projects.id] }),
+  user: one(users, { fields: [projectMembers.userId], references: [users.id] }),
+}));
+
 export const projectsRelations = relations(projects, ({ one, many }) => ({
   space: one(spaces, { fields: [projects.spaceId], references: [spaces.id] }),
+  members: many(projectMembers),
+  channel: one(channels, { fields: [projects.id], references: [channels.projectId] }),
   company: one(companies, { fields: [projects.companyId], references: [companies.id] }),
   lead: one(users, { fields: [projects.leadId], references: [users.id] }),
   stages: many(projectStages),

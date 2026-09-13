@@ -788,8 +788,17 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ body }),
     }),
-  createChannel: (name: string) =>
-    request<ChatChannel>(`/chat/channels`, { method: "POST", body: JSON.stringify({ name }) }),
+  createChannel: (body: { name: string; isPrivate?: boolean; memberIds?: string[] }) =>
+    request<ChatChannel>(`/chat/channels`, { method: "POST", body: JSON.stringify(body) }),
+  addChannelMembers: (id: string, userIds: string[]) =>
+    request<ChatMember[]>(`/chat/channels/${id}/members`, { method: "POST", body: JSON.stringify({ userIds }) }),
+  leaveChannel: (id: string) => request<{ id: string; left: boolean }>(`/chat/channels/${id}/leave`, { method: "POST" }),
+  // ---- Projects: team (row 39) ----
+  getProjectMembers: (projectId: string) => request<ProjectMember[]>(`/projects/${projectId}/members`),
+  addProjectMembers: (projectId: string, userIds: string[]) =>
+    request<ProjectMember[]>(`/projects/${projectId}/members`, { method: "POST", body: JSON.stringify({ userIds }) }),
+  removeProjectMember: (projectId: string, userId: string) =>
+    request<ProjectMember[]>(`/projects/${projectId}/members/${userId}`, { method: "DELETE" }),
 
   // ---- Activity & collaboration ----
   getActivity: (taskId: string) => request<ActivityEntry[]>(`/tasks/${taskId}/activity`),
@@ -1175,13 +1184,16 @@ export const api = {
 
   // ---- Chat: discovery ----
   browseChannels: () =>
-    request<{ id: string; name: string | null; topic: string | null; memberCount: number; joined: boolean }[]>(
+    request<{ id: string; name: string | null; topic: string | null; isPrivate: boolean; projectId: string | null; memberCount: number; joined: boolean }[]>(
       `/chat/browse`,
     ),
   joinChannel: (id: string) =>
     request<{ id: string; joined: boolean }>(`/chat/channels/${id}/join`, { method: "POST" }),
   openDm: (userId: string) =>
     request<{ id: string; created: boolean }>(`/chat/dm`, { method: "POST", body: JSON.stringify({ userId }) }),
+  /** Row 39: a group DM with several people (same set → same conversation). */
+  openGroupDm: (userIds: string[]) =>
+    request<{ id: string; created: boolean }>(`/chat/dm`, { method: "POST", body: JSON.stringify({ userIds }) }),
 
   // ---- Documents ----
   getDocuments: (opts: { projectId?: string; q?: string } = {}) => {
@@ -1210,7 +1222,21 @@ export interface ChatChannel {
   type: "channel" | "dm";
   name: string | null;
   topic: string | null;
+  /** Invite-only (row 39). Project channels are always private. */
+  isPrivate: boolean;
+  projectId: string | null;
+  project: { id: string; name: string; color: string; archived: boolean } | null;
   members: ChatMember[];
+}
+
+/** Row 39: someone on a project team. */
+export interface ProjectMember {
+  id: string;
+  name: string;
+  email: string;
+  avatarUrl: string | null;
+  isLead: boolean;
+  isCreator: boolean;
 }
 export interface ChatMessage {
   id: string;

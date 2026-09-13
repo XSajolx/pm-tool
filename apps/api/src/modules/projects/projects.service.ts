@@ -6,14 +6,17 @@ import {
   companies,
   lists,
   memberships,
+  projectMembers,
   projects,
   spaces,
   statuses,
   tasks,
   timeEntries,
+  users,
 } from "../../db/schema.js";
 import { ActivityService } from "../activity/activity.service.js";
 import { StagesService } from "./stages.service.js";
+import { ChatService } from "../chat/chat.service.js";
 
 export interface ProjectDto {
   name: string;
@@ -56,7 +59,114 @@ export class ProjectsService {
     @Inject(DRIZZLE) private readonly db: DB,
     private readonly activity: ActivityService,
     private readonly stages: StagesService,
+    private readonly chat: ChatService,
   ) {}
+
+  /* ---------------- Row 39: project team + project channel ---------------- */
+
+  /** The team = explicit members ∪ lead ∪ creator. */
+  private async teamIds(orgId: string, projectId: string) {
+    const project = await this.db.query.projects.findFirst({
+      where: and(eq(projects.id, projectId), eq(projects.organizationId, orgId)),
+      columns: { id: true, name: true, leadId: true, createdById: true },
+    });
+    if (!project) throw new NotFoundException("Project not found");
+    const rows = await this.db.query.projectMembers.findMany({ where: eq(projectMembers.projectId, projectId), columns: { userId: true } });
+    const ids = new Set(rows.map((r) => r.userId));
+    if (project.leadId) ids.add(project.leadId);
+    if (project.createdById) ids.add(project.createdById);
+    return { project, ids: [...ids] };
+  }
+
+  async members(orgId: string, projectId: string) {
+    const { project, ids } = await this.teamIds(orgId, projectId);
+    if (!ids.length) return [];
+    const rows = await this.db.query.users.findMany({
+      where: inArray(users.id, ids),
+      columns: { id: true, name: true, email: true, avatarUrl: true },
+    });
+    return rows
+      .map((u) => ({ ...u, isLead: u.id === project.leadId, isCreator: u.id === project.createdById }))
+      .sort((a, b) => Number(b.isLead) - Number(a.isLead) || a.name.localeCompare(b.name));
+  }
+
+  private async orgUserIds(orgId: string, userIds: string[]) {
+    const uniq = [...new Set(userIds)];
+    if (!uniq.length) return [];
+    const rows = await this.db.query.memberships.findMany({
+      where: and(eq(memberships.organizationId, orgId), inArray(memberships.userId, uniq)),
+      columns: { userId: true },
+    });
+    return rows.map((r) => r.userId);
+  }
+
+  async addMembers(orgId: string, actorId: string, projectId: string, userIds: string[]) {
+    await this.teamIds(orgId, projectId);
+    const ids = await this.orgUserIds(orgId, userIds);
+    if (ids.length) {
+      await this.db
+        .insert(projectMembers)
+        .values(ids.map((userId) => ({ projectId, userId, organizationId: orgId })))
+        .onConflictDoNothing();
+      await this.activity.record({
+        orgId,
+        actorId,
+        entityType: "list",
+        entityId: projectId,
+        action: "project_updated",
+        changes: ids.map((id) => ({ field: "member", from: null, to: id })),
+      });
+    }
+    await this.syncChannel(orgId, projectId);
+    return this.members(orgId, projectId);
+  }
+
+  async removeMember(orgId: string, actorId: string, projectId: string, userId: string) {
+    const { project } = await this.teamIds(orgId, projectId);
+    if (userId === project.leadId) throw new BadRequestException("Change the project lead before removing them");
+    if (userId === project.createdById) throw new BadRequestException("The project creator stays on the team");
+    await this.db.delete(projectMembers).where(and(eq(projectMembers.projectId, projectId), eq(projectMembers.userId, userId)));
+    await this.activity.record({
+      orgId,
+      actorId,
+      entityType: "list",
+      entityId: projectId,
+      action: "project_updated",
+      changes: [{ field: "member", from: userId, to: null }],
+    });
+    await this.syncChannel(orgId, projectId);
+    return this.members(orgId, projectId);
+  }
+
+  /** Make the project channel's members match the team (creating the channel if needed). */
+  async syncChannel(orgId: string, projectId: string) {
+    const { project, ids } = await this.teamIds(orgId, projectId);
+    return this.chat.ensureProjectChannel(orgId, project, ids);
+  }
+
+  /**
+   * Assigning someone a task in a project puts them on the team — and so in
+   * the project channel. No-op for lists that aren't part of a project.
+   */
+  async ensureMembersForList(orgId: string, listId: string, userIds: string[]) {
+    const list = await this.db.query.lists.findFirst({ where: and(eq(lists.id, listId), eq(lists.organizationId, orgId)), columns: { spaceId: true } });
+    if (!list) return;
+    const project = await this.db.query.projects.findFirst({
+      where: and(eq(projects.spaceId, list.spaceId), eq(projects.organizationId, orgId)),
+      columns: { id: true },
+    });
+    if (!project) return;
+    const ids = await this.orgUserIds(orgId, userIds);
+    if (!ids.length) return;
+    const before = await this.db.query.projectMembers.findMany({ where: eq(projectMembers.projectId, project.id), columns: { userId: true } });
+    const have = new Set(before.map((b) => b.userId));
+    if (ids.every((id) => have.has(id))) return;
+    await this.db
+      .insert(projectMembers)
+      .values(ids.map((userId) => ({ projectId: project.id, userId, organizationId: orgId })))
+      .onConflictDoNothing();
+    await this.syncChannel(orgId, project.id);
+  }
 
   async list(orgId: string, includeArchived = false) {
     const rows = await this.db.query.projects.findMany({
@@ -182,6 +292,12 @@ export class ProjectsService {
       // New projects start with the org's default stage sequence (Settings → Stage templates).
       const names = await this.stages.defaultStageNames(orgId);
       if (names.length) await this.stages.appendStages(orgId, userId, project.id, names);
+      // Row 39: creator + lead form the first team; the project channel follows.
+      await this.db
+        .insert(projectMembers)
+        .values([userId, ...(project.leadId ? [project.leadId] : [])].map((id) => ({ projectId: project.id, userId: id, organizationId: orgId })))
+        .onConflictDoNothing();
+      await this.syncChannel(orgId, project.id);
       return project;
     });
   }
@@ -232,6 +348,8 @@ export class ProjectsService {
         changes,
       });
     }
+    // A renamed project renames its channel; a new lead joins it.
+    if (dto.name !== undefined || dto.leadId !== undefined) await this.syncChannel(orgId, id);
     return row!;
   }
 

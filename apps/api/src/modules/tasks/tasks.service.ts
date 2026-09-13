@@ -20,6 +20,7 @@ import {
 import type { BulkUpdateDto, CreateTaskDto, UpdateTaskDto } from "./tasks.dto.js";
 import { ActivityService, type FieldChange } from "../activity/activity.service.js";
 import { NotificationsService } from "../notifications/notifications.service.js";
+import { ProjectsService } from "../projects/projects.service.js";
 
 /** Fields worth recording a diff for. Anything else changes silently. */
 const TRACKED_FIELDS = [
@@ -61,6 +62,7 @@ export class TasksService {
     @Inject(DRIZZLE) private readonly db: DB,
     private readonly activity: ActivityService,
     private readonly notifications: NotificationsService,
+    private readonly projects: ProjectsService,
   ) {}
 
   /**
@@ -309,6 +311,9 @@ export class TasksService {
         })),
       );
     }
+
+    // Assignees join the project team (and its channel) — row 39.
+    if (dto.assigneeIds?.length) await this.projects.ensureMembersForList(orgId, dto.listId, dto.assigneeIds);
 
     // The creator follows what they made; assignees follow what they're given.
     await this.notifications.subscribe(orgId, task!.id, userId);
@@ -586,6 +591,8 @@ export class TasksService {
       .insert(taskAssignees)
       .values({ taskId, userId, organizationId: orgId })
       .onConflictDoNothing();
+    // Row 39: being assigned work in a project makes you part of the project team.
+    await this.projects.ensureMembersForList(orgId, task.listId, [userId]);
 
     await this.notifications.subscribe(orgId, taskId, userId);
     await this.activity.record({

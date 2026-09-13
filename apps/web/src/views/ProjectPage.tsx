@@ -7,6 +7,7 @@ import { useAuth } from "../lib/auth.js";
 import { fmtDuration, fmtMoney, fmtShortDate } from "../lib/format.js";
 import { PROJECT_STATUS } from "./ProjectsPage.js";
 import { NotFound } from "../components/NotFound.js";
+import { ProjectTeam } from "../components/ProjectTeam.js";
 import { cn } from "../lib/utils.js";
 
 /** One project: headline numbers, its lists, who has logged time, recent entries. */
@@ -143,6 +144,7 @@ export function ProjectPage() {
         </div>
 
         <ProjectDetails project={project} canManage={canManage} onSaved={refresh} />
+        <ProjectTeam projectId={project.id} canManage={canManage} />
         <ProjectStages projectId={project.id} canManage={canManage} />
         <ProjectMilestones projectId={project.id} canManage={canManage} />
         {canManage && <ApplyTemplate projectId={project.id} />}

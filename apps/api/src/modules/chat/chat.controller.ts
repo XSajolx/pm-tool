@@ -34,8 +34,20 @@ export class ChatController {
 
   @Post("channels")
   @Roles("owner", "admin", "member")
-  create(@Auth() auth: AuthContext, @Body() body: { name: string }) {
-    return this.chat.createChannel(auth.orgId, auth.userId, body.name);
+  create(@Auth() auth: AuthContext, @Body() body: { name: string; isPrivate?: boolean; memberIds?: string[] }) {
+    return this.chat.createChannel(auth.orgId, auth.userId, body);
+  }
+
+  /** Row 39: invite people into a named channel (any member can). */
+  @Post("channels/:id/members")
+  @Roles("owner", "admin", "member")
+  addMembers(@Auth() auth: AuthContext, @Param("id") id: string, @Body() body: { userIds: string[] }) {
+    return this.chat.addMembers(auth.orgId, id, auth.userId, body.userIds ?? []);
+  }
+
+  @Post("channels/:id/leave")
+  leave(@Auth() auth: AuthContext, @Param("id") id: string) {
+    return this.chat.leave(auth.orgId, id, auth.userId);
   }
 
   /** All named channels with a joined flag — the "browse" list. */
@@ -49,9 +61,10 @@ export class ChatController {
     return this.chat.join(auth.orgId, id, auth.userId);
   }
 
-  /** Find-or-create the DM with one person. */
+  /** Find-or-create the DM with one person, or the group DM with several (row 39). */
   @Post("dm")
-  dm(@Auth() auth: AuthContext, @Body() body: { userId: string }) {
-    return this.chat.openDm(auth.orgId, auth.userId, body.userId);
+  dm(@Auth() auth: AuthContext, @Body() body: { userId?: string; userIds?: string[] }) {
+    const ids = body.userIds ?? (body.userId ? [body.userId] : []);
+    return this.chat.openGroupDm(auth.orgId, auth.userId, ids);
   }
 }

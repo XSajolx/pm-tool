@@ -7,8 +7,11 @@ import { MilestonesController } from "./milestones.controller.js";
 import { MilestonesService } from "./milestones.service.js";
 import { TemplatesController } from "./templates.controller.js";
 import { TemplatesService } from "./templates.service.js";
+import { ChatModule } from "../chat/chat.module.js";
 
 @Module({
+  // ChatModule: every project owns a chat channel whose members follow the project team (row 39).
+  imports: [ChatModule],
   controllers: [ProjectsController, StagesController, MilestonesController, TemplatesController],
   providers: [ProjectsService, StagesService, MilestonesService, TemplatesService],
   exports: [ProjectsService, StagesService, MilestonesService, TemplatesService],
