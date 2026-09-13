@@ -618,8 +618,14 @@ function describeChanges(changes: FieldChange[]) {
   const names: Record<string, string> = {
     statusId: "status",
     dueDate: "due date",
+    startDate: "start date",
     timeEstimateMinutes: "estimate",
     listId: "list",
+    stageId: "stage",
+    milestoneId: "milestone",
+    priority: "priority",
+    title: "title",
+    description: "description",
   };
   return `changed ${changes.map((c) => names[c.field] ?? c.field).join(", ")}`;
 }

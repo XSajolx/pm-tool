@@ -30,7 +30,29 @@ const FIELD_LABEL: Record<string, string> = {
   priority: "priority",
   title: "title",
   description: "description",
+  stageId: "stage",
+  milestoneId: "milestone",
+  tag: "tag",
 };
+
+/** Value formatting per field, so the timeline reads like a person wrote it. */
+function fmtValue(field: string, v: unknown): string {
+  if (v === null || v === undefined || v === "") return "none";
+  if (field === "dueDate" || field === "startDate") {
+    const d = new Date(String(v));
+    return isNaN(d.getTime()) ? String(v) : d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+  }
+  if (field === "timeEstimateMinutes") {
+    const m = Number(v);
+    const h = Math.floor(m / 60);
+    const rest = m % 60;
+    return h && rest ? `${h}h ${rest}m` : h ? `${h}h` : `${rest}m`;
+  }
+  if (field === "stageId" || field === "milestoneId") return "another one";
+  if (field === "description") return "new text";
+  const str = String(v);
+  return str.length > 40 ? `${str.slice(0, 40)}…` : str;
+}
 
 interface Props {
   taskId: string;
@@ -302,7 +324,7 @@ export function TaskCollaboration({ taskId, listId, statuses }: Props) {
             {activity.length ? (
               <ul className="space-y-2.5">
                 {activity.map((entry) => (
-                  <ActivityRow key={entry.id} entry={entry} statuses={statuses} />
+                  <ActivityRow key={entry.id} entry={entry} statuses={statuses} members={members} />
                 ))}
               </ul>
             ) : (
@@ -319,12 +341,15 @@ export function TaskCollaboration({ taskId, listId, statuses }: Props) {
 function ActivityRow({
   entry,
   statuses,
+  members,
 }: {
   entry: ActivityEntry;
   statuses: Status[];
+  members: Member[];
 }) {
   const statusName = (id: unknown) =>
     statuses.find((s) => s.id === id)?.name ?? (id ? "another status" : "none");
+  const memberName = (id: unknown) => members.find((m) => m.id === id)?.name ?? "a teammate";
 
   const describe = () => {
     switch (entry.action) {
@@ -333,9 +358,24 @@ function ActivityRow({
       case "commented":
         return "commented";
       case "assigned":
-        return "changed assignees";
+        return `assigned ${memberName(entry.changes[0]?.to)}`;
       case "unassigned":
-        return "removed an assignee";
+        return `unassigned ${memberName(entry.changes[0]?.from ?? entry.changes[0]?.to)}`;
+      case "tagged":
+        return `added the tag ${String(entry.changes[0]?.to ?? "")}`;
+      case "untagged":
+        return "removed a tag";
+      case "status_changed":
+      case "updated": {
+        const parts = entry.changes.map((c) =>
+          c.field === "statusId"
+            ? `moved ${statusName(c.from)} → ${statusName(c.to)}`
+            : c.field === "assigneeIds"
+              ? "changed assignees"
+              : `set ${FIELD_LABEL[c.field] ?? c.field}: ${fmtValue(c.field, c.from)} → ${fmtValue(c.field, c.to)}`,
+        );
+        return parts.length ? parts.join(", ") : "updated this task";
+      }
       case "archived":
         return "archived this task";
       case "linked":
@@ -346,33 +386,51 @@ function ActivityRow({
         return `added this to ${String(entry.changes[0]?.to ?? "a cycle")}`;
       case "removed_from_cycle":
         return "removed this from its cycle";
-      case "completed":
-        return "marked this complete";
+      case "completed": {
+        const c = entry.changes.find((x) => x.field === "statusId");
+        return c ? `marked this complete (${statusName(c.from)} → ${statusName(c.to)})` : "marked this complete";
+      }
       default:
-        return entry.changes
-          .map((c) =>
-            c.field === "statusId"
-              ? `moved from ${statusName(c.from)} to ${statusName(c.to)}`
-              : `changed ${FIELD_LABEL[c.field] ?? c.field} from ${fmt(c.from)} to ${fmt(c.to)}`,
-          )
-          .join(", ");
+        return entry.changes.length
+          ? entry.changes
+              .map((c) =>
+                c.field === "statusId"
+                  ? `moved ${statusName(c.from)} → ${statusName(c.to)}`
+                  : `changed ${FIELD_LABEL[c.field] ?? c.field} from ${fmt(c.from)} to ${fmt(c.to)}`,
+              )
+              .join(", ")
+          : entry.action.replace(/_/g, " ");
     }
   };
 
+  const when = new Date(entry.createdAt);
   return (
     <li className="flex gap-2 text-sm">
-      <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-slate-300" />
+      <ActivityIcon entry={entry} />
       <p className="text-slate-600">
         <span className="font-medium text-slate-800">
           {entry.actor?.name ?? "Someone"}
         </span>{" "}
         {describe()}
-        <span className="ml-1.5 text-xs text-muted-foreground">
+        <span className="ml-1.5 text-xs text-muted-foreground" title={when.toLocaleString()}>
           {relativeTime(entry.createdAt)}
         </span>
       </p>
     </li>
   );
+}
+
+/** Small glyph per event type so the timeline can be scanned for "why did this slip". */
+function ActivityIcon({ entry }: { entry: ActivityEntry }) {
+  const fields = entry.changes.map((c) => c.field);
+  const cls = "mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[10px]";
+  if (entry.action === "completed") return <span className={`${cls} bg-green-100 text-green-700`}>✓</span>;
+  if (entry.action === "status_changed" || fields.includes("statusId")) return <span className={`${cls} bg-blue-100 text-blue-700`}>↔</span>;
+  if (entry.action === "assigned" || entry.action === "unassigned") return <span className={`${cls} bg-indigo-100 text-indigo-700`}>@</span>;
+  if (fields.includes("dueDate") || fields.includes("startDate")) return <span className={`${cls} bg-amber-100 text-amber-700`}>📅</span>;
+  if (fields.includes("timeEstimateMinutes")) return <span className={`${cls} bg-purple-100 text-purple-700`}>⏱</span>;
+  if (entry.action === "commented") return <span className={`${cls} bg-slate-100 text-slate-600`}>💬</span>;
+  return <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-slate-300" />;
 }
 
 function EmojiPicker({ onPick }: { onPick: (emoji: string) => void }) {
