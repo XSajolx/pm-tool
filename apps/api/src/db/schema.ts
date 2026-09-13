@@ -33,6 +33,9 @@ export const statusCategory = pgEnum("status_category", [
   "closed",
 ]);
 
+/** Row 36: how often a task repeats; the next instance is created when the current one is done. */
+export const recurrenceFreq = pgEnum("recurrence_freq", ["daily", "weekly", "monthly"]);
+
 export const taskPriority = pgEnum("task_priority", [
   "urgent",
   "high",
@@ -216,6 +219,11 @@ export const tasks = pgTable(
     stageId: uuid("stage_id").references((): AnyPgColumn => projectStages.id, { onDelete: "set null" }),
     /** Milestone this task counts toward (row 32). */
     milestoneId: uuid("milestone_id").references((): AnyPgColumn => milestones.id, { onDelete: "set null" }),
+    /** Repeat rule (row 36): null = one-off. Interval = every N days/weeks/months. */
+    recurrence: recurrenceFreq("recurrence"),
+    recurrenceInterval: integer("recurrence_interval").notNull().default(1),
+    /** The task this one was spawned from, so a series can be traced. */
+    recurredFromId: uuid("recurred_from_id"),
     statusId: uuid("status_id").references(() => statuses.id),
     /** Short human key like "PM-142", unique per org. */
     reference: varchar("reference", { length: 32 }),

@@ -210,6 +210,9 @@ export interface Task {
   stage?: { id: string; name: string; status: StageStatus } | null;
   milestoneId?: string | null;
   milestone?: { id: string; name: string; targetDate: string | null; reachedAt: string | null } | null;
+  recurrence?: Recurrence | null;
+  recurrenceInterval?: number;
+  recurredFromId?: string | null;
   parentTaskId?: string | null;
   subtasks: {
     id: string;
@@ -275,7 +278,11 @@ export interface TaskComment {
 }
 
 /** Fields PATCH /tasks/:id accepts. `null` clears a value. */
+export type Recurrence = "daily" | "weekly" | "monthly";
+
 export type TaskPatch = Partial<{
+  recurrence: Recurrence | null;
+  recurrenceInterval: number;
   title: string;
   description: string;
   statusId: string;

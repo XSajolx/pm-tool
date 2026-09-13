@@ -76,6 +76,11 @@ export function ListView({ tasks, statuses, members, groupBy, sort, sortDir, onO
                     <span className="flex min-w-0 items-center gap-2 text-sm text-slate-800">
                       {t.reference && <span className="text-[11px] text-muted-foreground">{t.reference}</span>}
                       <span className={`truncate ${t.status?.category === "done" ? "text-slate-400 line-through" : ""}`}>{t.title}</span>
+                      {t.recurrence && (
+                        <span className="shrink-0 text-[11px] text-indigo-500" title={`Repeats ${t.recurrence}`}>
+                          ↻
+                        </span>
+                      )}
                       {t.subtasks.length > 0 && (
                         <span className="shrink-0 rounded bg-muted px-1 text-[10px] text-muted-foreground">
                           {t.subtasks.filter((s) => s.status?.category === "done").length}/{t.subtasks.length}

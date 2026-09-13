@@ -150,6 +150,15 @@ export function TaskDetail({ taskId, listId, spaceId, statuses, members, onClose
                 />
               </Field>
 
+              <Field label="Repeat">
+                <RepeatField
+                  recurrence={task.recurrence ?? null}
+                  interval={task.recurrenceInterval ?? 1}
+                  isSubtask={Boolean(task.parentTaskId)}
+                  onChange={(recurrence, recurrenceInterval) => save.mutate({ recurrence, recurrenceInterval })}
+                />
+              </Field>
+
               <Field label="Estimate">
                 <EstimateInput
                   minutes={task.timeEstimateMinutes}
@@ -307,4 +316,48 @@ export function parseEstimate(text: string): number | null | undefined {
     total += unit.startsWith("d") ? n * 8 * 60 : unit.startsWith("h") ? n * 60 : n;
   }
   return matched ? Math.round(total) : undefined;
+}
+
+/** Repeat rule picker: none / every N days / weeks / months. Subtasks don't repeat on their own. */
+function RepeatField({
+  recurrence,
+  interval,
+  isSubtask,
+  onChange,
+}: {
+  recurrence: "daily" | "weekly" | "monthly" | null;
+  interval: number;
+  isSubtask: boolean;
+  onChange: (recurrence: "daily" | "weekly" | "monthly" | null, interval: number) => void;
+}) {
+  if (isSubtask) return <span className="text-xs text-muted-foreground">Subtasks follow their parent</span>;
+  return (
+    <div className="flex items-center gap-1.5">
+      <select
+        value={recurrence ?? ""}
+        onChange={(e) => onChange((e.target.value || null) as "daily" | "weekly" | "monthly" | null, interval)}
+        className="rounded-md border border-border bg-white px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-indigo-500/30"
+      >
+        <option value="">Does not repeat</option>
+        <option value="daily">Daily</option>
+        <option value="weekly">Weekly</option>
+        <option value="monthly">Monthly</option>
+      </select>
+      {recurrence && (
+        <label className="flex items-center gap-1 text-xs text-slate-600">
+          every
+          <input
+            type="number"
+            min={1}
+            max={365}
+            value={interval}
+            onChange={(e) => onChange(recurrence, Math.max(1, Number(e.target.value) || 1))}
+            className="w-14 rounded-md border border-border px-1.5 py-1 text-sm outline-none focus:ring-2 focus:ring-indigo-500/30"
+          />
+          {recurrence === "daily" ? "day(s)" : recurrence === "weekly" ? "week(s)" : "month(s)"}
+        </label>
+      )}
+      {recurrence && <span className="text-[11px] text-muted-foreground" title="The next instance is created when this one is completed">↻ next on completion</span>}
+    </div>
+  );
 }

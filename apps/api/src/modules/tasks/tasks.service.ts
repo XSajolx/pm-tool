@@ -208,6 +208,8 @@ export class TasksService {
         parentTaskId: dto.parentTaskId,
         stageId: dto.stageId ?? undefined,
         milestoneId: dto.milestoneId ?? undefined,
+        recurrence: dto.recurrence ?? undefined,
+        recurrenceInterval: dto.recurrenceInterval ?? undefined,
         startDate: dto.startDate ? new Date(dto.startDate) : undefined,
         dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
         timeEstimateMinutes: dto.timeEstimateMinutes ?? undefined,
@@ -289,6 +291,8 @@ export class TasksService {
       .returning();
 
     if (assigneeIds) await this.syncAssignees(orgId, userId, id, assigneeIds);
+    // Recurring task ticked off: the next instance appears right away.
+    if (completed && task?.recurrence && !task.parentTaskId) await this.spawnNextOccurrence(orgId, userId, task);
 
     const changes = this.activity.diff(
       before as unknown as Record<string, unknown>,
@@ -330,6 +334,81 @@ export class TasksService {
     return task;
   }
 
+
+  /**
+   * Row 36: when a repeating task is completed, create its next instance —
+   * same title, description, priority, estimate, assignees, tags, stage,
+   * milestone and rule — with the due date advanced by the rule from the
+   * current due date (or today when it had none).
+   */
+  private async spawnNextOccurrence(
+    orgId: string,
+    userId: string,
+    done: { id: string; listId: string; title: string; description: string | null; priority: "urgent" | "high" | "normal" | "low" | null; timeEstimateMinutes: number | null; dueDate: Date | null; startDate: Date | null; stageId: string | null; milestoneId: string | null; recurrence: "daily" | "weekly" | "monthly" | null; recurrenceInterval: number },
+  ) {
+    const advance = (d: Date) => {
+      const next = new Date(d);
+      const n = Math.max(1, done.recurrenceInterval || 1);
+      if (done.recurrence === "daily") next.setUTCDate(next.getUTCDate() + n);
+      else if (done.recurrence === "weekly") next.setUTCDate(next.getUTCDate() + 7 * n);
+      else next.setUTCMonth(next.getUTCMonth() + n);
+      return next;
+    };
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+    let nextDue = advance(done.dueDate ?? today);
+    // If the task was overdue, keep advancing so the next one lands in the future.
+    while (nextDue < today) nextDue = advance(nextDue);
+    const nextStart = done.startDate && done.dueDate ? new Date(nextDue.getTime() - (done.dueDate.getTime() - done.startDate.getTime())) : null;
+
+    const list = await this.db.query.lists.findFirst({ where: eq(lists.id, done.listId), columns: { spaceId: true } });
+    const first = list
+      ? await this.db.query.statuses.findFirst({
+          where: and(eq(statuses.spaceId, list.spaceId), eq(statuses.organizationId, orgId)),
+          orderBy: (st, { asc }) => [asc(st.position)],
+        })
+      : null;
+    const [assigneeRows, tagRows] = await Promise.all([
+      this.db.query.taskAssignees.findMany({ where: eq(taskAssignees.taskId, done.id) }),
+      this.db.select({ tagId: taskTags.tagId }).from(taskTags).where(eq(taskTags.taskId, done.id)),
+    ]);
+
+    const [next] = await this.db
+      .insert(tasks)
+      .values({
+        organizationId: orgId,
+        listId: done.listId,
+        title: done.title,
+        description: done.description,
+        priority: done.priority ?? undefined,
+        timeEstimateMinutes: done.timeEstimateMinutes,
+        statusId: first?.id,
+        dueDate: nextDue,
+        startDate: nextStart,
+        stageId: done.stageId,
+        milestoneId: done.milestoneId,
+        recurrence: done.recurrence,
+        recurrenceInterval: done.recurrenceInterval,
+        recurredFromId: done.id,
+        position: Date.now(),
+        createdById: userId,
+      })
+      .returning();
+    if (assigneeRows.length) {
+      await this.db.insert(taskAssignees).values(assigneeRows.map((a) => ({ taskId: next!.id, userId: a.userId, organizationId: orgId })));
+      for (const a of assigneeRows) await this.notifications.subscribe(orgId, next!.id, a.userId);
+    }
+    if (tagRows.length) await this.db.insert(taskTags).values(tagRows.map((t) => ({ taskId: next!.id, tagId: t.tagId }))).onConflictDoNothing();
+    await this.activity.record({
+      orgId,
+      actorId: userId,
+      entityType: "task",
+      entityId: next!.id,
+      action: "recurred",
+      changes: [{ field: "recurredFromId", from: null, to: done.id }],
+    });
+    return next!;
+  }
 
   /**
    * Apply one change set to many tasks. Each task goes through `update` so

@@ -99,6 +99,13 @@
       "when": 1789340740478,
       "tag": "0013_material_goblin_queen",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1789341591837,
+      "tag": "0014_same_sasquatch",
+      "breakpoints": true
     }
   ]
 }
