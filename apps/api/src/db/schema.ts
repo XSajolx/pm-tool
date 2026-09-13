@@ -472,6 +472,15 @@ export const tasksRelations = relations(tasks, ({ one, many }) => ({
   customFieldValues: many(customFieldValues),
 }));
 
+export const taskTagsRelations = relations(taskTags, ({ one }) => ({
+  task: one(tasks, { fields: [taskTags.taskId], references: [tasks.id] }),
+  tag: one(tags, { fields: [taskTags.tagId], references: [tags.id] }),
+}));
+
+export const tagsRelations = relations(tags, ({ many }) => ({
+  taskTags: many(taskTags),
+}));
+
 export const taskAssigneesRelations = relations(taskAssignees, ({ one }) => ({
   task: one(tasks, { fields: [taskAssignees.taskId], references: [tasks.id] }),
   user: one(users, { fields: [taskAssignees.userId], references: [users.id] }),
@@ -1163,6 +1172,46 @@ export const milestonesRelations = relations(milestones, ({ one, many }) => ({
 }));
 
 export type Milestone = typeof milestones.$inferSelect;
+
+/* ------------------------------------------------------------------ *
+ * Task list templates (row 33): a saved set of tasks, subtasks and
+ * milestones; dates are day offsets from the project start.
+ * ------------------------------------------------------------------ */
+export interface TemplateTaskItem {
+  title: string;
+  description: string | null;
+  priority: "urgent" | "high" | "normal" | "low" | null;
+  timeEstimateMinutes: number | null;
+  dueOffsetDays: number | null;
+  stageName: string | null;
+  milestoneName: string | null;
+  tags: string[];
+  subtasks: { title: string; dueOffsetDays: number | null }[];
+}
+export interface TemplateMilestoneItem {
+  name: string;
+  offsetDays: number | null;
+  clientVisible: boolean;
+}
+
+export const taskTemplates = pgTable(
+  "task_templates",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 160 }).notNull(),
+    description: text("description"),
+    items: jsonb("items").$type<TemplateTaskItem[]>().notNull().default([]),
+    milestones: jsonb("milestones").$type<TemplateMilestoneItem[]>().notNull().default([]),
+    createdById: uuid("created_by_id").references(() => users.id),
+    ...timestamps,
+  },
+  (t) => [index("task_templates_org_idx").on(t.organizationId)],
+);
+
+export type TaskTemplate = typeof taskTemplates.$inferSelect;
 
 /** Reusable stage sequences (Settings). One may be the default for new projects. */
 export const stageTemplates = pgTable(

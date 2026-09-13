@@ -191,6 +191,7 @@ export function WorkspacePage() {
         />
 
         <div className="ml-auto flex items-center gap-2">
+          <SaveTemplateButton listId={listId} listName={ctx?.listName ?? "List"} disabled={!tasks.length} />
           {view === "list" && (
             <FilterSelect label="Group" value={groupBy} onChange={(v) => setGroupBy(v as GroupBy)} options={GROUP_OPTIONS} neutral="status" />
           )}
@@ -351,5 +352,57 @@ function FilterSelect({
         ))}
       </select>
     </label>
+  );
+}
+
+/** Snapshot this list (tasks, subtasks, project milestones) as a reusable template. */
+function SaveTemplateButton({ listId, listName, disabled }: { listId: string; listName: string; disabled: boolean }) {
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [result, setResult] = useState<string | null>(null);
+  const save = useMutation({
+    mutationFn: () => api.createTemplateFromList({ listId, name: name.trim() }),
+    onSuccess: (t) => {
+      setResult(`Saved “${t.name}” — apply it from any project page.`);
+      setName("");
+      setOpen(false);
+      qc.invalidateQueries({ queryKey: ["task-templates"] });
+      window.setTimeout(() => setResult(null), 4000);
+    },
+  });
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => {
+          setName(`${listName} template`);
+          setOpen((o) => !o);
+        }}
+        title="Save this list's tasks, subtasks and milestones as a template"
+        className="rounded-md border border-border px-2 py-1 text-xs text-slate-600 hover:bg-muted disabled:opacity-40"
+      >
+        Save as template
+      </button>
+      {open && (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (name.trim()) save.mutate();
+          }}
+          className="absolute right-0 top-full z-30 mt-1 w-72 rounded-md border border-border bg-white p-2 shadow-lg"
+        >
+          <p className="mb-1 text-[11px] text-muted-foreground">Due dates are stored as offsets from the project start.</p>
+          <div className="flex gap-1">
+            <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Template name" className="min-w-0 flex-1 rounded border border-border px-2 py-1 text-xs outline-none focus:border-indigo-500" />
+            <button type="submit" disabled={!name.trim() || save.isPending} className="rounded bg-indigo-600 px-2 py-1 text-xs font-medium text-white disabled:opacity-50">
+              Save
+            </button>
+          </div>
+        </form>
+      )}
+      {result && <span className="absolute right-0 top-full z-30 mt-1 whitespace-nowrap rounded-md bg-slate-800 px-2 py-1 text-[11px] text-white">{result}</span>}
+    </div>
   );
 }

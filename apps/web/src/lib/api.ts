@@ -288,6 +288,16 @@ export type TaskPatch = Partial<{
   assigneeIds: string[];
 }>;
 
+export interface TaskTemplate {
+  id: string;
+  name: string;
+  description: string | null;
+  taskCount: number;
+  subtaskCount: number;
+  milestoneCount: number;
+  createdAt: string;
+}
+
 export interface Milestone {
   id: string;
   projectId: string;
@@ -895,6 +905,19 @@ export const api = {
   getProjects: (archived = false) =>
     request<Project[]>(`/projects${archived ? "?archived=true" : ""}`),
   getProject: (id: string) => request<Project>(`/projects/${id}`),
+  // ---- Task list templates ----
+  getTaskTemplates: () => request<TaskTemplate[]>(`/task-templates`),
+  createTemplateFromList: (body: { listId: string; name: string; description?: string }) =>
+    request<TaskTemplate>(`/task-templates/from-list`, { method: "POST", body: JSON.stringify(body) }),
+  updateTaskTemplate: (id: string, body: { name?: string; description?: string | null }) =>
+    request<TaskTemplate>(`/task-templates/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  deleteTaskTemplate: (id: string) => request<{ id: string }>(`/task-templates/${id}`, { method: "DELETE" }),
+  applyTaskTemplate: (id: string, body: { projectId: string; listId?: string }) =>
+    request<{ listId: string; tasksCreated: number; subtasksCreated: number; milestonesCreated: number }>(
+      `/task-templates/${id}/apply`,
+      { method: "POST", body: JSON.stringify(body) },
+    ),
+  getProjectLists: (projectId: string) => request<{ id: string; name: string }[]>(`/task-templates/project-lists/${projectId}`),
   // ---- Milestones ----
   getMilestones: (projectId: string) => request<Milestone[]>(`/projects/${projectId}/milestones`),
   getMilestonesForSpace: (spaceId: string) => request<Milestone[]>(`/milestones?spaceId=${encodeURIComponent(spaceId)}`),

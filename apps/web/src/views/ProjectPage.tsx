@@ -145,6 +145,7 @@ export function ProjectPage() {
         <ProjectDetails project={project} canManage={canManage} onSaved={refresh} />
         <ProjectStages projectId={project.id} canManage={canManage} />
         <ProjectMilestones projectId={project.id} canManage={canManage} />
+        {canManage && <ApplyTemplate projectId={project.id} />}
 
         <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
           {/* Lists */}
@@ -693,5 +694,62 @@ function MilestoneName({ milestone, canEdit, onRename }: { milestone: Milestone;
       onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); if (e.key === "Escape") setEditing(false); }}
       className="w-full rounded border border-indigo-300 px-1 text-sm font-medium outline-none"
     />
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * Apply a task list template to this project (row 33)
+ * ------------------------------------------------------------------ */
+function ApplyTemplate({ projectId }: { projectId: string }) {
+  const qc = useQueryClient();
+  const { data: templates = [] } = useQuery({ queryKey: ["task-templates"], queryFn: api.getTaskTemplates });
+  const { data: lists = [] } = useQuery({ queryKey: ["project-lists", projectId], queryFn: () => api.getProjectLists(projectId) });
+  const [templateId, setTemplateId] = useState("");
+  const [listId, setListId] = useState("");
+  const [result, setResult] = useState<string | null>(null);
+  const apply = useMutation({
+    mutationFn: () => api.applyTaskTemplate(templateId, { projectId, listId: listId || undefined }),
+    onSuccess: (res) => {
+      setResult(`Added ${res.tasksCreated} tasks, ${res.subtasksCreated} subtasks and ${res.milestonesCreated} milestones.`);
+      setTemplateId("");
+      qc.invalidateQueries({ queryKey: ["milestones"] });
+      qc.invalidateQueries({ queryKey: ["stages"] });
+      qc.invalidateQueries({ queryKey: ["tasks"] });
+      qc.invalidateQueries({ queryKey: ["project", projectId] });
+      qc.invalidateQueries({ queryKey: ["projects"] });
+    },
+    onError: (e: Error) => setResult(e.message),
+  });
+  if (!templates.length) return null;
+  const chosen = templates.find((t) => t.id === templateId);
+  return (
+    <div className="mt-6 rounded-lg border border-dashed border-border bg-white p-4">
+      <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Apply a task list template</p>
+      <div className="flex flex-wrap items-center gap-2">
+        <select value={templateId} onChange={(e) => setTemplateId(e.target.value)} className="rounded-md border border-border bg-white px-2 py-1 text-sm">
+          <option value="">Choose a template…</option>
+          {templates.map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.name} ({t.taskCount} tasks, {t.milestoneCount} milestones)
+            </option>
+          ))}
+        </select>
+        <select value={listId} onChange={(e) => setListId(e.target.value)} className="rounded-md border border-border bg-white px-2 py-1 text-sm">
+          <option value="">Into: first list</option>
+          {lists.map((l) => (
+            <option key={l.id} value={l.id}>
+              Into: {l.name}
+            </option>
+          ))}
+        </select>
+        <button type="button" disabled={!templateId || apply.isPending} onClick={() => apply.mutate()} className="rounded-md bg-indigo-600 px-3 py-1 text-xs font-medium text-white disabled:opacity-50">
+          {apply.isPending ? "Applying…" : "Apply template"}
+        </button>
+        {chosen?.description && <span className="text-xs text-muted-foreground">{chosen.description}</span>}
+      </div>
+      <p className="mt-2 text-[11px] text-muted-foreground">
+        Due dates are set relative to the project start date{result ? ` · ${result}` : "."}
+      </p>
+    </div>
   );
 }

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, type StageTemplate, type Status, type Tag } from "../lib/api.js";
+import { api, type StageTemplate, type Status, type Tag, type TaskTemplate } from "../lib/api.js";
 import { useAuth } from "../lib/auth.js";
 import { PRIORITY } from "../components/ui.js";
 import type { Priority } from "../lib/api.js";
@@ -9,13 +9,14 @@ import type { Priority } from "../lib/api.js";
  * Workspace settings. Sections are added as the roadmap lands; each one is a
  * self-contained panel that owns its own queries.
  */
-type Section = "statuses" | "priorities" | "stages" | "tags";
+type Section = "statuses" | "priorities" | "stages" | "tags" | "templates";
 
 const SECTIONS: { id: Section; label: string; hint: string }[] = [
   { id: "statuses", label: "Task statuses", hint: "Per space: names, colours, order, done state" },
   { id: "priorities", label: "Priorities", hint: "The four priority levels" },
   { id: "stages", label: "Stage templates", hint: "Default stage sequences for new projects" },
   { id: "tags", label: "Tags", hint: "Workspace tags: rename, recolour, merge, retire" },
+  { id: "templates", label: "Task list templates", hint: "Saved task sets to kick off new projects" },
 ];
 
 export function SettingsPage() {
@@ -52,6 +53,7 @@ export function SettingsPage() {
           {section === "priorities" && <PrioritySettings />}
           {section === "stages" && <StageTemplateSettings canEdit={canEdit} />}
           {section === "tags" && <TagSettings canEdit={canEdit} />}
+          {section === "templates" && <TaskTemplateSettings canEdit={canEdit} />}
         </div>
       </div>
     </div>
@@ -511,6 +513,61 @@ function TagSettings({ canEdit }: { canEdit: boolean }) {
             </div>
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * Task list templates — saved from any list, applied from a project page
+ * ------------------------------------------------------------------ */
+function TaskTemplateSettings({ canEdit }: { canEdit: boolean }) {
+  const qc = useQueryClient();
+  const { data: templates = [] } = useQuery({ queryKey: ["task-templates"], queryFn: api.getTaskTemplates });
+  const invalidate = () => qc.invalidateQueries({ queryKey: ["task-templates"] });
+  const update = useMutation({
+    mutationFn: ({ id, ...body }: { id: string; name?: string; description?: string | null }) => api.updateTaskTemplate(id, body),
+    onSuccess: invalidate,
+  });
+  const remove = useMutation({ mutationFn: (id: string) => api.deleteTaskTemplate(id), onSuccess: invalidate });
+  return (
+    <div>
+      <h1 className="text-lg font-semibold text-slate-900">Task list templates</h1>
+      <p className="mb-4 text-xs text-muted-foreground">
+        Save any list as a template from its toolbar (“Save as template”), then apply it from a project page. Due dates are
+        stored as offsets from the project start, so a “Website build” template schedules itself around each new project.
+      </p>
+      <div className="overflow-hidden rounded-lg border border-border bg-white">
+        {templates.map((t) => (
+          <TemplateSettingsRow key={t.id} template={t} canEdit={canEdit} onSave={(body) => update.mutate({ id: t.id, ...body })} onDelete={() => remove.mutate(t.id)} />
+        ))}
+        {!templates.length && <p className="px-3 py-3 text-xs text-muted-foreground">No templates yet. Open a list and use “Save as template”.</p>}
+      </div>
+    </div>
+  );
+}
+
+function TemplateSettingsRow({ template, canEdit, onSave, onDelete }: { template: TaskTemplate; canEdit: boolean; onSave: (b: { name?: string; description?: string | null }) => void; onDelete: () => void }) {
+  const [desc, setDesc] = useState(template.description ?? "");
+  useEffect(() => setDesc(template.description ?? ""), [template.description]);
+  return (
+    <div className="flex flex-wrap items-center gap-3 border-b border-border px-3 py-2 last:border-b-0">
+      <InlineName value={template.name} disabled={!canEdit} onCommit={(name) => onSave({ name })} />
+      <span className="text-[11px] text-muted-foreground">
+        {template.taskCount} tasks · {template.subtaskCount} subtasks · {template.milestoneCount} milestones
+      </span>
+      <input
+        value={desc}
+        disabled={!canEdit}
+        onChange={(e) => setDesc(e.target.value)}
+        onBlur={() => desc !== (template.description ?? "") && onSave({ description: desc || null })}
+        placeholder="Description (optional)"
+        className="w-64 rounded-md border border-border px-2 py-1 text-xs outline-none focus:border-indigo-400 disabled:bg-muted/40"
+      />
+      {canEdit && (
+        <button type="button" onClick={onDelete} className="ml-auto text-xs text-slate-400 hover:text-red-500">
+          Delete
+        </button>
       )}
     </div>
   );
