@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, count, eq, inArray, isNull, max } from "drizzle-orm";
 import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
 import { channels, channelMembers, memberships, messages } from "../../db/schema.js";
@@ -98,28 +98,70 @@ export class ChatService {
     return rows.map((m) => ({ id: m.user.id, name: m.user.name, avatarUrl: m.user.avatarUrl }));
   }
 
+  /**
+   * Top-level messages only (row 40: replies live in threads), each with its
+   * reply count and the time of the latest reply so the row can show "3 replies".
+   */
   async listMessages(orgId: string, channelId: string, userId: string) {
     await this.assertMember(channelId, userId);
     const rows = await this.db.query.messages.findMany({
-      where: and(eq(messages.organizationId, orgId), eq(messages.channelId, channelId)),
+      where: and(eq(messages.organizationId, orgId), eq(messages.channelId, channelId), isNull(messages.parentMessageId)),
       with: { author: true },
       orderBy: (m) => [asc(m.createdAt)],
       limit: 200,
     });
-    return rows.map(this.shape);
+    const ids = rows.map((r) => r.id);
+    const counts = ids.length
+      ? await this.db
+          .select({ parentMessageId: messages.parentMessageId, n: count(), last: max(messages.createdAt) })
+          .from(messages)
+          .where(and(eq(messages.channelId, channelId), inArray(messages.parentMessageId, ids)))
+          .groupBy(messages.parentMessageId)
+      : [];
+    const byParent = new Map(counts.map((c) => [c.parentMessageId!, c]));
+    return rows.map((m) => {
+      const c = byParent.get(m.id);
+      return { ...this.shape(m), replyCount: Number(c?.n ?? 0), lastReplyAt: c?.last ?? null };
+    });
   }
 
-  async sendMessage(orgId: string, channelId: string, userId: string, body: string) {
+  /** Row 40: the first message of a thread plus its replies, oldest first. */
+  async listReplies(orgId: string, channelId: string, messageId: string, userId: string) {
     await this.assertMember(channelId, userId);
+    const root = await this.db.query.messages.findFirst({
+      where: and(eq(messages.id, messageId), eq(messages.channelId, channelId), eq(messages.organizationId, orgId)),
+      with: { author: true },
+    });
+    if (!root) throw new NotFoundException("Message not found");
+    const replies = await this.db.query.messages.findMany({
+      where: and(eq(messages.channelId, channelId), eq(messages.parentMessageId, messageId)),
+      with: { author: true },
+      orderBy: (m) => [asc(m.createdAt)],
+    });
+    return { root: { ...this.shape(root), replyCount: replies.length, lastReplyAt: replies.at(-1)?.createdAt ?? null }, replies: replies.map(this.shape) };
+  }
+
+  /** A channel message, or — with `parentMessageId` — a reply in that message's thread (one level deep). */
+  async sendMessage(orgId: string, channelId: string, userId: string, body: string, parentMessageId?: string | null) {
+    await this.assertMember(channelId, userId);
+    if (!body?.trim()) throw new BadRequestException("Message can't be empty");
+    if (parentMessageId) {
+      const parent = await this.db.query.messages.findFirst({
+        where: and(eq(messages.id, parentMessageId), eq(messages.channelId, channelId)),
+        columns: { id: true, parentMessageId: true },
+      });
+      if (!parent) throw new BadRequestException("That message isn't in this channel");
+      if (parent.parentMessageId) throw new BadRequestException("Reply to the thread's first message");
+    }
     const [row] = await this.db
       .insert(messages)
-      .values({ organizationId: orgId, channelId, authorId: userId, body })
+      .values({ organizationId: orgId, channelId, authorId: userId, body, parentMessageId: parentMessageId ?? null })
       .returning();
     const withAuthor = await this.db.query.messages.findFirst({
       where: eq(messages.id, row!.id),
       with: { author: true },
     });
-    return this.shape(withAuthor!);
+    return { ...this.shape(withAuthor!), replyCount: 0, lastReplyAt: null };
   }
 
   /**
@@ -280,6 +322,7 @@ export class ChatService {
     channelId: string;
     body: string;
     createdAt: Date;
+    parentMessageId: string | null;
     author: { id: string; name: string; avatarUrl: string | null };
   }) {
     return {
@@ -287,6 +330,7 @@ export class ChatService {
       channelId: m.channelId,
       body: m.body,
       createdAt: m.createdAt,
+      parentMessageId: m.parentMessageId,
       author: { id: m.author.id, name: m.author.name, avatarUrl: m.author.avatarUrl },
     };
   }

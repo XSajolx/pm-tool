@@ -783,11 +783,14 @@ export const api = {
   getChannels: () => request<ChatChannel[]>(`/chat/channels`),
   getMessages: (channelId: string) =>
     request<ChatMessage[]>(`/chat/channels/${channelId}/messages`),
-  sendMessage: (channelId: string, body: string) =>
+  sendMessage: (channelId: string, body: string, parentMessageId?: string) =>
     request<ChatMessage>(`/chat/channels/${channelId}/messages`, {
       method: "POST",
-      body: JSON.stringify({ body }),
+      body: JSON.stringify({ body, parentMessageId }),
     }),
+  /** Row 40: a message's thread (root + replies). */
+  getThread: (channelId: string, messageId: string) =>
+    request<{ root: ChatMessage; replies: ChatMessage[] }>(`/chat/channels/${channelId}/messages/${messageId}/replies`),
   createChannel: (body: { name: string; isPrivate?: boolean; memberIds?: string[] }) =>
     request<ChatChannel>(`/chat/channels`, { method: "POST", body: JSON.stringify(body) }),
   addChannelMembers: (id: string, userIds: string[]) =>
@@ -1244,4 +1247,8 @@ export interface ChatMessage {
   body: string;
   createdAt: string;
   author: ChatMember;
+  /** Row 40: set on replies; null for channel-level messages. */
+  parentMessageId: string | null;
+  replyCount?: number;
+  lastReplyAt?: string | null;
 }

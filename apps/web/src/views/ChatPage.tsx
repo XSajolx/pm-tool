@@ -127,6 +127,7 @@ function MessagePane({ channelId, channel }: { channelId: string; channel?: Chat
   const qc = useQueryClient();
   const meId = useAuth().user!.id;
   const [draft, setDraft] = useState("");
+  const [threadId, setThreadId] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const { data: messages = [] } = useQuery({
@@ -134,12 +135,25 @@ function MessagePane({ channelId, channel }: { channelId: string; channel?: Chat
     queryFn: () => api.getMessages(channelId),
   });
 
-  // Join the channel room and listen for live messages.
+  useEffect(() => setThreadId(null), [channelId]);
+
+  // Join the channel room and listen for live messages. Replies (row 40) go
+  // into their thread and bump the parent's count instead of the channel.
   useEffect(() => {
     const socket = getSocket();
     socket.emit("join", channelId);
     const onNew = (msg: ChatMessage) => {
       if (msg.channelId !== channelId) return;
+      if (msg.parentMessageId) {
+        const parentId = msg.parentMessageId;
+        qc.setQueryData<ThreadData>(["thread", channelId, parentId], (old) =>
+          old && !old.replies.some((r) => r.id === msg.id) ? { ...old, replies: [...old.replies, msg] } : old,
+        );
+        qc.setQueryData<ChatMessage[]>(["messages", channelId], (old = []) =>
+          old.map((m) => (m.id === parentId ? { ...m, replyCount: (m.replyCount ?? 0) + 1, lastReplyAt: msg.createdAt } : m)),
+        );
+        return;
+      }
       qc.setQueryData<ChatMessage[]>(["messages", channelId], (old = []) =>
         old.some((m) => m.id === msg.id) ? old : [...old, msg],
       );
@@ -166,81 +180,199 @@ function MessagePane({ channelId, channel }: { channelId: string; channel?: Chat
       : `${channel?.isPrivate && !channel.projectId ? "🔒" : "#"} ${channel?.name ?? ""}`;
 
   return (
-    <div className="flex flex-1 flex-col bg-white">
-      <ChannelHeader channel={channel} title={title} />
+    <div className="flex flex-1 overflow-hidden bg-white">
+      <div className="flex min-w-0 flex-1 flex-col">
+        <ChannelHeader channel={channel} title={title} />
 
-      <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
-        {messages.length === 0 && (
-          <p className="pt-6 text-center text-sm text-muted-foreground">
-            {channel?.projectId ? "This is the project's channel. Everyone on the project team is here automatically." : "No messages yet. Say hello!"}
-          </p>
-        )}
-        {messages.map((m, i) => {
-          const mine = m.author.id === meId;
-          const prev = messages[i - 1];
-          const grouped = prev && prev.author.id === m.author.id;
-          return (
-            <div key={m.id} className={cn("flex gap-3", grouped && "mt-[-8px]")}>
-              <div className="w-9 shrink-0">
-                {!grouped && (
-                  <span
-                    className={cn(
-                      "flex h-9 w-9 items-center justify-center rounded-full text-xs font-semibold text-white",
-                      mine ? "bg-indigo-500" : "bg-slate-400",
-                    )}
-                  >
-                    {m.author.name
-                      .split(" ")
-                      .map((p) => p[0])
-                      .slice(0, 2)
-                      .join("")}
-                  </span>
-                )}
-              </div>
-              <div className="min-w-0">
-                {!grouped && (
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-sm font-semibold text-slate-800">{m.author.name}</span>
-                    <span className="text-[11px] text-muted-foreground">
-                      {new Date(m.createdAt).toLocaleTimeString([], {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                    </span>
-                  </div>
-                )}
-                <p className="text-sm leading-relaxed text-slate-700">{m.body}</p>
-              </div>
-            </div>
-          );
-        })}
-        <div ref={bottomRef} />
+        <div className="flex-1 space-y-3 overflow-y-auto px-5 py-4">
+          {messages.length === 0 && (
+            <p className="pt-6 text-center text-sm text-muted-foreground">
+              {channel?.projectId ? "This is the project's channel. Everyone on the project team is here automatically." : "No messages yet. Say hello!"}
+            </p>
+          )}
+          {messages.map((m, i) => {
+            const prev = messages[i - 1];
+            return (
+              <MessageRow
+                key={m.id}
+                m={m}
+                meId={meId}
+                grouped={Boolean(prev && prev.author.id === m.author.id && !prev.replyCount)}
+                onReply={() => setThreadId(m.id)}
+                threadOpen={threadId === m.id}
+              />
+            );
+          })}
+          <div ref={bottomRef} />
+        </div>
+
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (draft.trim()) send.mutate(draft.trim());
+          }}
+          className="border-t border-border p-3"
+        >
+          <div className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 focus-within:ring-2 focus-within:ring-indigo-500/30">
+            <input
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              placeholder={`Message ${title}`}
+              className="flex-1 text-sm outline-none"
+            />
+            <button
+              type="submit"
+              disabled={!draft.trim()}
+              className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-indigo-700 disabled:opacity-40"
+            >
+              Send
+            </button>
+          </div>
+        </form>
       </div>
 
+      {threadId && <ThreadPane channelId={channelId} messageId={threadId} meId={meId} onClose={() => setThreadId(null)} />}
+    </div>
+  );
+}
+
+function fmtTime(iso: string) {
+  return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+/**
+ * One message. Hovering shows "Reply" (row 40); a message that already has
+ * replies shows the count as a link into its thread.
+ */
+function MessageRow({
+  m,
+  meId,
+  grouped,
+  onReply,
+  threadOpen,
+  compact,
+}: {
+  m: ChatMessage;
+  meId: string;
+  grouped?: boolean;
+  onReply?: () => void;
+  threadOpen?: boolean;
+  compact?: boolean;
+}) {
+  const mine = m.author.id === meId;
+  const initials = m.author.name
+    .split(" ")
+    .map((p) => p[0])
+    .slice(0, 2)
+    .join("");
+  return (
+    <div className={cn("group relative -mx-2 flex gap-3 rounded-md px-2 py-0.5 hover:bg-muted/40", grouped && "-mt-2", threadOpen && "bg-indigo-50/60")}>
+      <div className={cn("shrink-0", compact ? "w-7" : "w-9")}>
+        {!grouped && (
+          <span
+            className={cn(
+              "flex items-center justify-center rounded-full font-semibold text-white",
+              compact ? "h-7 w-7 text-[10px]" : "h-9 w-9 text-xs",
+              mine ? "bg-indigo-500" : "bg-slate-400",
+            )}
+          >
+            {initials}
+          </span>
+        )}
+      </div>
+      <div className="min-w-0 flex-1">
+        {!grouped && (
+          <div className="flex items-baseline gap-2">
+            <span className="text-sm font-semibold text-slate-800">{m.author.name}</span>
+            <span className="text-[11px] text-muted-foreground">{fmtTime(m.createdAt)}</span>
+          </div>
+        )}
+        <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-700">{m.body}</p>
+        {onReply && (m.replyCount ?? 0) > 0 && (
+          <button type="button" onClick={onReply} className="mt-1 flex items-center gap-1.5 text-xs font-medium text-indigo-600 hover:underline">
+            💬 {m.replyCount} {m.replyCount === 1 ? "reply" : "replies"}
+            {m.lastReplyAt && <span className="font-normal text-muted-foreground">· last {fmtTime(m.lastReplyAt)}</span>}
+          </button>
+        )}
+      </div>
+      {onReply && (
+        <button
+          type="button"
+          onClick={onReply}
+          title="Reply in thread"
+          className="absolute right-2 top-0 hidden rounded-md border border-border bg-white px-1.5 py-0.5 text-[11px] text-slate-600 shadow-sm hover:text-indigo-700 group-hover:block"
+        >
+          💬 Reply
+        </button>
+      )}
+    </div>
+  );
+}
+
+type ThreadData = { root: ChatMessage; replies: ChatMessage[] };
+
+/** Row 40: side panel with the original message and its replies. */
+function ThreadPane({ channelId, messageId, meId, onClose }: { channelId: string; messageId: string; meId: string; onClose: () => void }) {
+  const qc = useQueryClient();
+  const [draft, setDraft] = useState("");
+  const endRef = useRef<HTMLDivElement>(null);
+  const { data } = useQuery({ queryKey: ["thread", channelId, messageId], queryFn: () => api.getThread(channelId, messageId) });
+
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [data?.replies.length]);
+
+  const reply = useMutation({
+    mutationFn: (body: string) => api.sendMessage(channelId, body, messageId),
+    onSuccess: () => {
+      setDraft("");
+      qc.invalidateQueries({ queryKey: ["thread", channelId, messageId] });
+      qc.invalidateQueries({ queryKey: ["messages", channelId] });
+    },
+  });
+
+  return (
+    <aside className="flex w-80 shrink-0 flex-col border-l border-border bg-[#fbfbfa]">
+      <header className="flex items-center justify-between border-b border-border px-4 py-3">
+        <span className="text-sm font-semibold">Thread</span>
+        <button onClick={onClose} className="rounded p-1 text-slate-400 hover:bg-muted" aria-label="Close thread">
+          ✕
+        </button>
+      </header>
+      <div className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
+        {data ? (
+          <>
+            <MessageRow m={data.root} meId={meId} compact />
+            <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+              <span className="h-px flex-1 bg-border" />
+              {data.replies.length} {data.replies.length === 1 ? "reply" : "replies"}
+              <span className="h-px flex-1 bg-border" />
+            </div>
+            {data.replies.map((r, i) => {
+              const prev = data.replies[i - 1];
+              return <MessageRow key={r.id} m={r} meId={meId} compact grouped={Boolean(prev && prev.author.id === r.author.id)} />;
+            })}
+          </>
+        ) : (
+          <p className="text-sm text-muted-foreground">Loading…</p>
+        )}
+        <div ref={endRef} />
+      </div>
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          if (draft.trim()) send.mutate(draft.trim());
+          if (draft.trim() && !reply.isPending) reply.mutate(draft.trim());
         }}
         className="border-t border-border p-3"
       >
-        <div className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 focus-within:ring-2 focus-within:ring-indigo-500/30">
-          <input
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            placeholder={`Message ${title}`}
-            className="flex-1 text-sm outline-none"
-          />
-          <button
-            type="submit"
-            disabled={!draft.trim()}
-            className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-indigo-700 disabled:opacity-40"
-          >
-            Send
+        <div className="flex items-center gap-2 rounded-lg border border-border bg-white px-3 py-2 focus-within:ring-2 focus-within:ring-indigo-500/30">
+          <input autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Reply in thread…" className="min-w-0 flex-1 text-sm outline-none" />
+          <button type="submit" disabled={!draft.trim() || reply.isPending} className="rounded-md bg-indigo-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-40">
+            Reply
           </button>
         </div>
       </form>
-    </div>
+    </aside>
   );
 }
 

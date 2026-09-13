@@ -21,13 +21,20 @@ export class ChatController {
     return this.chat.listMessages(auth.orgId, id, auth.userId);
   }
 
+  /** Row 40: a thread — the root message and its replies. */
+  @Get("channels/:id/messages/:messageId/replies")
+  replies(@Auth() auth: AuthContext, @Param("id") id: string, @Param("messageId") messageId: string) {
+    return this.chat.listReplies(auth.orgId, id, messageId, auth.userId);
+  }
+
   @Post("channels/:id/messages")
   async send(
     @Auth() auth: AuthContext,
     @Param("id") id: string,
-    @Body() body: { body: string },
+    @Body() body: { body: string; parentMessageId?: string | null },
   ) {
-    const msg = await this.chat.sendMessage(auth.orgId, id, auth.userId, body.body);
+    const msg = await this.chat.sendMessage(auth.orgId, id, auth.userId, body.body, body.parentMessageId);
+    // Replies are broadcast too; the client routes them into the open thread.
     this.gateway.broadcast(id, msg);
     return msg;
   }
