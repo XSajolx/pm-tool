@@ -7,12 +7,14 @@ import type { AuthContext } from "../auth/auth.types.js";
 
 const projectSchema = z.object({
   name: z.string().min(1).max(255),
-  clientName: z.string().max(255).optional(),
+  clientName: z.string().max(255).nullable().optional(),
+  companyId: z.string().uuid().nullable().optional(),
+  leadId: z.string().uuid().nullable().optional(),
   description: z.string().max(20_000).optional(),
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
   status: z.enum(["active", "on_hold", "completed", "archived"]).optional(),
-  startDate: z.string().datetime().optional(),
-  endDate: z.string().datetime().optional(),
+  startDate: z.string().datetime().nullable().optional(),
+  endDate: z.string().datetime().nullable().optional(),
   budgetHours: z.number().int().nonnegative().optional(),
   budgetAmount: z.number().nonnegative().optional(),
   hourlyRate: z.number().nonnegative().optional(),

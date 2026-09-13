@@ -993,8 +993,12 @@ export const projects = pgTable(
     /** The space whose lists/tasks make up this project. One space per project. */
     spaceId: uuid("space_id").references(() => spaces.id, { onDelete: "set null" }),
     name: varchar("name", { length: 255 }).notNull(),
-    /** Free text until a Companies/Contacts model exists to point at. */
+    /** Display name of the client; mirrors the linked company's name when `companyId` is set. */
     clientName: varchar("client_name", { length: 255 }),
+    /** CRM company this project is for (row 25). */
+    companyId: uuid("company_id").references((): AnyPgColumn => companies.id, { onDelete: "set null" }),
+    /** The person accountable for the project. */
+    leadId: uuid("lead_id").references(() => users.id, { onDelete: "set null" }),
     description: text("description"),
     status: projectStatus("status").notNull().default("active"),
     color: varchar("color", { length: 16 }).notNull().default("#6366f1"),
@@ -1010,6 +1014,7 @@ export const projects = pgTable(
   },
   (t) => [
     index("projects_org_idx").on(t.organizationId),
+    index("projects_company_idx").on(t.companyId),
     uniqueIndex("projects_space_uq").on(t.spaceId),
   ],
 );
@@ -1079,6 +1084,8 @@ export const allocations = pgTable(
 
 export const projectsRelations = relations(projects, ({ one, many }) => ({
   space: one(spaces, { fields: [projects.spaceId], references: [spaces.id] }),
+  company: one(companies, { fields: [projects.companyId], references: [companies.id] }),
+  lead: one(users, { fields: [projects.leadId], references: [users.id] }),
   timeEntries: many(timeEntries),
   allocations: many(allocations),
 }));

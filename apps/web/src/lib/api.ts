@@ -355,6 +355,10 @@ export interface Project {
   spaceId: string | null;
   name: string;
   clientName: string | null;
+  companyId: string | null;
+  company: { id: string; name: string } | null;
+  leadId: string | null;
+  lead: { id: string; name: string; avatarUrl: string | null } | null;
   description: string | null;
   status: ProjectStatus;
   color: string;
@@ -372,12 +376,14 @@ export interface Project {
 
 export interface ProjectInput {
   name: string;
-  clientName?: string;
+  clientName?: string | null;
+  companyId?: string | null;
+  leadId?: string | null;
   description?: string;
   color?: string;
   status?: ProjectStatus;
-  startDate?: string;
-  endDate?: string;
+  startDate?: string | null;
+  endDate?: string | null;
   budgetHours?: number;
   budgetAmount?: number;
   hourlyRate?: number;

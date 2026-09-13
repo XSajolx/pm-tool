@@ -2,6 +2,8 @@ import { useState, type FormEvent } from "react";
 import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type Project, type ProjectStatus } from "../lib/api.js";
+import { Avatar } from "../components/ui.js";
+import { fmtShortDate } from "../lib/format.js";
 import { useAuth } from "../lib/auth.js";
 import { fmtDuration, fmtMoney } from "../lib/format.js";
 import { cn } from "../lib/utils.js";
@@ -96,11 +98,25 @@ function ProjectCard({ p }: { p: Project }) {
               {p.name}
             </p>
             <p className="truncate text-xs text-muted-foreground">
-              {p.clientName ?? "No client"}
+              {p.company?.name ?? p.clientName ?? "No client"}
             </p>
           </div>
           <span className={cn("shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium", status.cls)}>
             {status.label}
+          </span>
+        </div>
+
+        <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+          {p.lead ? (
+            <span className="inline-flex items-center gap-1" title={`Lead: ${p.lead.name}`}>
+              <Avatar user={{ id: p.lead.id, name: p.lead.name, avatarUrl: p.lead.avatarUrl, email: "", role: "member" }} size={16} />
+              {p.lead.name.split(" ")[0]}
+            </span>
+          ) : (
+            <span>No lead</span>
+          )}
+          <span className="ml-auto tabular-nums">
+            {p.startDate ? fmtShortDate(p.startDate) : "…"} → {p.endDate ? fmtShortDate(p.endDate) : "…"}
           </span>
         </div>
 
@@ -149,6 +165,10 @@ function NewProjectDialog({ onClose }: { onClose: () => void }) {
   const qc = useQueryClient();
   const [name, setName] = useState("");
   const [clientName, setClientName] = useState("");
+  const [companyId, setCompanyId] = useState("");
+  const [leadId, setLeadId] = useState("");
+  const { data: companies = [] } = useQuery({ queryKey: ["companies", ""], queryFn: () => api.getCompanies() });
+  const { data: members = [] } = useQuery({ queryKey: ["members"], queryFn: api.getMembers });
   const [color, setColor] = useState(COLORS[0]!);
   const [budgetHours, setBudgetHours] = useState("");
   const [hourlyRate, setHourlyRate] = useState("");
@@ -160,7 +180,9 @@ function NewProjectDialog({ onClose }: { onClose: () => void }) {
     mutationFn: () =>
       api.createProject({
         name: name.trim(),
-        clientName: clientName.trim() || undefined,
+        clientName: companyId ? undefined : clientName.trim() || undefined,
+        companyId: companyId || undefined,
+        leadId: leadId || undefined,
         color,
         budgetHours: budgetHours ? Number(budgetHours) : undefined,
         hourlyRate: hourlyRate ? Number(hourlyRate) : undefined,
@@ -196,9 +218,33 @@ function NewProjectDialog({ onClose }: { onClose: () => void }) {
           <Field label="Name">
             <input autoFocus value={name} onChange={(e) => setName(e.target.value)} required className={input} placeholder="Website redesign" />
           </Field>
-          <Field label="Client">
-            <input value={clientName} onChange={(e) => setClientName(e.target.value)} className={input} placeholder="Acme Ltd" />
-          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Client (CRM company)">
+              <select value={companyId} onChange={(e) => setCompanyId(e.target.value)} className={input}>
+                <option value="">— none —</option>
+                {companies.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Project lead">
+              <select value={leadId} onChange={(e) => setLeadId(e.target.value)} className={input}>
+                <option value="">— unassigned —</option>
+                {members.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          </div>
+          {!companyId && (
+            <Field label="Client name (if not in CRM)">
+              <input value={clientName} onChange={(e) => setClientName(e.target.value)} className={input} placeholder="Acme Ltd" />
+            </Field>
+          )}
           <Field label="Color">
             <div className="flex gap-1.5">
               {COLORS.map((c) => (
@@ -222,7 +268,7 @@ function NewProjectDialog({ onClose }: { onClose: () => void }) {
             <Field label="Start">
               <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className={input} />
             </Field>
-            <Field label="End">
+            <Field label="Target end">
               <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className={input} />
             </Field>
           </div>

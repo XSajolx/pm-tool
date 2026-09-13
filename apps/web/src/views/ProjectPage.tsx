@@ -1,6 +1,7 @@
 import { Link, useParams } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, type ProjectStatus } from "../lib/api.js";
+import { api, type Project, type ProjectStatus } from "../lib/api.js";
+import { Avatar } from "../components/ui.js";
 import { useAuth } from "../lib/auth.js";
 import { fmtDuration, fmtMoney, fmtShortDate } from "../lib/format.js";
 import { PROJECT_STATUS } from "./ProjectsPage.js";
@@ -59,8 +60,22 @@ export function ProjectPage() {
         <span className="text-muted-foreground">/</span>
         <span className="h-3 w-3 rounded-full" style={{ background: project.color }} />
         <h1 className="text-sm font-semibold text-slate-800">{project.name}</h1>
-        {project.clientName && (
-          <span className="text-xs text-muted-foreground">for {project.clientName}</span>
+        {project.company ? (
+          <Link
+            to="/crm/companies/$companyId"
+            params={{ companyId: project.company.id }}
+            className="text-xs text-muted-foreground hover:text-indigo-700"
+          >
+            for {project.company.name}
+          </Link>
+        ) : (
+          project.clientName && <span className="text-xs text-muted-foreground">for {project.clientName}</span>
+        )}
+        {project.lead && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-muted py-0.5 pl-0.5 pr-2 text-[11px] text-slate-700" title="Project lead">
+            <Avatar user={{ id: project.lead.id, name: project.lead.name, avatarUrl: project.lead.avatarUrl, email: "", role: "member" }} size={16} />
+            {project.lead.name}
+          </span>
         )}
 
         <div className="ml-auto flex items-center gap-2">
@@ -125,6 +140,8 @@ export function ProjectPage() {
             }
           />
         </div>
+
+        <ProjectDetails project={project} canManage={canManage} onSaved={refresh} />
 
         <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
           {/* Lists */}
@@ -239,6 +256,74 @@ function Stat({
           />
         </div>
       )}
+    </div>
+  );
+}
+
+/** Editable record: client company, lead, start and target dates. */
+function ProjectDetails({ project, canManage, onSaved }: { project: Project; canManage: boolean; onSaved: () => void }) {
+  const { data: companies = [] } = useQuery({ queryKey: ["companies", ""], queryFn: () => api.getCompanies() });
+  const { data: members = [] } = useQuery({ queryKey: ["members"], queryFn: api.getMembers });
+  const save = useMutation({
+    mutationFn: (patch: Parameters<typeof api.updateProject>[1]) => api.updateProject(project.id, patch),
+    onSuccess: onSaved,
+  });
+  const toIso = (v: string) => (v ? new Date(v + "T00:00:00Z").toISOString() : null);
+  const sel = "w-full rounded-md border border-border bg-white px-2 py-1 text-sm text-slate-800 disabled:bg-muted/40";
+  return (
+    <div className="mt-6 grid grid-cols-2 gap-3 rounded-lg border border-border bg-white p-4 md:grid-cols-4">
+      <label className="block">
+        <span className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Client</span>
+        <select
+          value={project.companyId ?? ""}
+          disabled={!canManage}
+          onChange={(e) => save.mutate({ companyId: e.target.value || null })}
+          className={sel}
+        >
+          <option value="">{project.clientName && !project.companyId ? `${project.clientName} (not in CRM)` : "— none —"}</option>
+          {companies.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="block">
+        <span className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Project lead</span>
+        <select
+          value={project.leadId ?? ""}
+          disabled={!canManage}
+          onChange={(e) => save.mutate({ leadId: e.target.value || null })}
+          className={sel}
+        >
+          <option value="">— unassigned —</option>
+          {members.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="block">
+        <span className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Start date</span>
+        <input
+          type="date"
+          disabled={!canManage}
+          value={project.startDate ? project.startDate.slice(0, 10) : ""}
+          onChange={(e) => save.mutate({ startDate: toIso(e.target.value) })}
+          className={sel}
+        />
+      </label>
+      <label className="block">
+        <span className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Target date</span>
+        <input
+          type="date"
+          disabled={!canManage}
+          value={project.endDate ? project.endDate.slice(0, 10) : ""}
+          onChange={(e) => save.mutate({ endDate: toIso(e.target.value) })}
+          className={sel}
+        />
+      </label>
     </div>
   );
 }
