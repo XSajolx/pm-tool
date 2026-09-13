@@ -26,6 +26,19 @@ export function ChatPage() {
   const navigate = useNavigate();
   const meId = useAuth().user!.id;
   const { data: channels = [] } = useQuery({ queryKey: ["channels"], queryFn: api.getChannels });
+  const qc = useQueryClient();
+
+  // Row 42: badges follow new messages and read marks from any device.
+  useEffect(() => {
+    const socket = getSocket();
+    const changed = () => qc.invalidateQueries({ queryKey: ["channels"] });
+    socket.on("chat:unread", changed);
+    socket.on("chat:read", changed);
+    return () => {
+      socket.off("chat:unread", changed);
+      socket.off("chat:read", changed);
+    };
+  }, [qc]);
 
   // Auto-select the first channel when none is chosen.
   useEffect(() => {
@@ -118,7 +131,12 @@ function ChannelRow({
           {group ? c.members.length - 1 : label[0]}
         </span>
       )}
-      <span className="truncate">{label}</span>
+      <span className={cn("truncate", !active && c.unreadCount > 0 && "font-semibold text-slate-900")}>{label}</span>
+      {!active && c.unreadCount > 0 && (
+        <span className="ml-auto min-w-[18px] rounded-full bg-indigo-600 px-1.5 py-0.5 text-center text-[10px] font-semibold leading-none text-white" title={`${c.unreadCount} unread`}>
+          {c.unreadCount > 99 ? "99+" : c.unreadCount}
+        </span>
+      )}
     </Link>
   );
 }
@@ -135,6 +153,31 @@ function MessagePane({ channelId, channel }: { channelId: string; channel?: Chat
   });
 
   useEffect(() => setThreadId(null), [channelId]);
+
+  // Row 42: remember where I'd read up to when I opened this channel, so the
+  // "New messages" line stays put while I read, then mark everything read.
+  const [marker, setMarker] = useState<{ channelId: string; at: string | null } | null>(null);
+  useEffect(() => {
+    if (channel && marker?.channelId !== channelId) setMarker({ channelId, at: channel.lastReadAt });
+  }, [channel, channelId, marker]);
+
+  const markRead = useMutation({
+    mutationFn: () => api.markChannelRead(channelId),
+    onSuccess: ({ lastReadAt }) =>
+      qc.setQueryData<ChatChannel[]>(["channels"], (old = []) => old.map((c) => (c.id === channelId ? { ...c, unreadCount: 0, lastReadAt } : c))),
+  });
+  const lastAt = messages.at(-1)?.createdAt;
+  useEffect(() => {
+    if (!channel) return;
+    const behind = channel.unreadCount > 0 || (lastAt && (!channel.lastReadAt || new Date(lastAt) > new Date(channel.lastReadAt)));
+    if (behind && !markRead.isPending) markRead.mutate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [channelId, lastAt, channel?.unreadCount]);
+
+  const firstUnreadIdx =
+    marker && marker.channelId === channelId
+      ? messages.findIndex((m) => m.author.id !== meId && (!marker.at || new Date(m.createdAt) > new Date(marker.at)))
+      : -1;
 
   // Join the channel room and listen for live messages. Replies (row 40) go
   // into their thread and bump the parent's count instead of the channel.
@@ -198,16 +241,25 @@ function MessagePane({ channelId, channel }: { channelId: string; channel?: Chat
           )}
           {messages.map((m, i) => {
             const prev = messages[i - 1];
+            const isFirstUnread = i === firstUnreadIdx;
             return (
-              <MessageRow
-                key={m.id}
-                m={m}
-                meId={meId}
-                members={members}
-                grouped={Boolean(prev && prev.author.id === m.author.id && !prev.replyCount)}
-                onReply={() => setThreadId(m.id)}
-                threadOpen={threadId === m.id}
-              />
+              <div key={m.id}>
+                {isFirstUnread && (
+                  <div className="mb-3 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-red-500">
+                    <span className="h-px flex-1 bg-red-300" />
+                    New messages
+                    <span className="h-px flex-1 bg-red-300" />
+                  </div>
+                )}
+                <MessageRow
+                  m={m}
+                  meId={meId}
+                  members={members}
+                  grouped={Boolean(prev && prev.author.id === m.author.id && !prev.replyCount && !isFirstUnread)}
+                  onReply={() => setThreadId(m.id)}
+                  threadOpen={threadId === m.id}
+                />
+              </div>
             );
           })}
           <div ref={bottomRef} />

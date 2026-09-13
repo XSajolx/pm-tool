@@ -798,6 +798,8 @@ export const api = {
   addChannelMembers: (id: string, userIds: string[]) =>
     request<ChatMember[]>(`/chat/channels/${id}/members`, { method: "POST", body: JSON.stringify({ userIds }) }),
   leaveChannel: (id: string) => request<{ id: string; left: boolean }>(`/chat/channels/${id}/leave`, { method: "POST" }),
+  /** Row 42: I've read this channel up to now (synced to my other devices). */
+  markChannelRead: (id: string) => request<{ channelId: string; lastReadAt: string }>(`/chat/channels/${id}/read`, { method: "POST" }),
   // ---- Projects: team (row 39) ----
   getProjectMembers: (projectId: string) => request<ProjectMember[]>(`/projects/${projectId}/members`),
   addProjectMembers: (projectId: string, userIds: string[]) =>
@@ -1227,6 +1229,9 @@ export interface ChatChannel {
   type: "channel" | "dm";
   name: string | null;
   topic: string | null;
+  /** Row 42: other people's messages since my last-read mark. */
+  unreadCount: number;
+  lastReadAt: string | null;
   /** Invite-only (row 39). Project channels are always private. */
   isPrivate: boolean;
   projectId: string | null;

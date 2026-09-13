@@ -39,7 +39,20 @@ export class ChatController {
     // Row 41: @mentions land in the inbox and are pushed live to whoever is online.
     const rows = await this.chat.notifyMentions(auth.orgId, auth.userId, id, msg, body.mentionedUserIds ?? [], this.gateway.onlineUserIds());
     for (const row of rows) this.gateway.emitToUser(row.receiverId, "notification:new", row);
+    // Row 42: nudge every other member's devices so their unread badges move
+    // even when they aren't looking at this channel.
+    for (const userId of await this.chat.memberIds(id)) {
+      if (userId !== auth.userId) this.gateway.emitToUser(userId, "chat:unread", { channelId: id, messageId: msg.id });
+    }
     return msg;
+  }
+
+  /** Row 42: mark the channel read up to now; other open tabs/devices are told. */
+  @Post("channels/:id/read")
+  async read(@Auth() auth: AuthContext, @Param("id") id: string) {
+    const res = await this.chat.markRead(auth.orgId, id, auth.userId);
+    this.gateway.emitToUser(auth.userId, "chat:read", res);
+    return res;
   }
 
   @Post("channels")

@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, asc, count, eq, inArray, isNull, max } from "drizzle-orm";
+import { and, asc, count, eq, gt, inArray, isNull, max, ne, or } from "drizzle-orm";
 import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
 import { channels, channelMembers, memberships, messages, notificationPreferences, notifications } from "../../db/schema.js";
@@ -40,11 +40,23 @@ export class ChatService {
       orderBy: (c) => [asc(c.createdAt)],
     });
 
+    // Row 42: unread = other people's messages newer than my last-read mark.
+    const unread = await this.db
+      .select({ channelId: messages.channelId, n: count() })
+      .from(messages)
+      .innerJoin(channelMembers, and(eq(channelMembers.channelId, messages.channelId), eq(channelMembers.userId, userId)))
+      .where(and(inArray(messages.channelId, ids), ne(messages.authorId, userId), or(isNull(channelMembers.lastReadAt), gt(messages.createdAt, channelMembers.lastReadAt))))
+      .groupBy(messages.channelId);
+    const unreadBy = new Map(unread.map((u) => [u.channelId, Number(u.n)]));
+    const lastReadBy = new Map(mine.map((m) => [m.channelId, m.lastReadAt]));
+
     return rows.map((c) => ({
       id: c.id,
       type: c.type,
       name: c.name,
       topic: c.topic,
+      unreadCount: unreadBy.get(c.id) ?? 0,
+      lastReadAt: lastReadBy.get(c.id) ?? null,
       isPrivate: c.isPrivate,
       projectId: c.projectId,
       project: c.project ? { id: c.project.id, name: c.project.name, color: c.project.color, archived: Boolean(c.project.archivedAt) } : null,
@@ -87,6 +99,23 @@ export class ChatService {
       where: and(eq(memberships.organizationId, orgId), inArray(memberships.userId, uniq)),
       columns: { userId: true },
     });
+    return rows.map((r) => r.userId);
+  }
+
+  /** Row 42: "I've seen everything up to now" — the same mark every device reads. */
+  async markRead(orgId: string, channelId: string, userId: string) {
+    const lastReadAt = new Date();
+    const [row] = await this.db
+      .update(channelMembers)
+      .set({ lastReadAt })
+      .where(and(eq(channelMembers.channelId, channelId), eq(channelMembers.userId, userId), eq(channelMembers.organizationId, orgId)))
+      .returning({ channelId: channelMembers.channelId });
+    if (!row) throw new ForbiddenException("Not a member of this channel");
+    return { channelId, lastReadAt };
+  }
+
+  async memberIds(channelId: string) {
+    const rows = await this.db.query.channelMembers.findMany({ where: eq(channelMembers.channelId, channelId), columns: { userId: true } });
     return rows.map((r) => r.userId);
   }
 

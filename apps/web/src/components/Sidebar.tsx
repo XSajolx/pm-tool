@@ -18,6 +18,9 @@ export function Sidebar() {
     queryFn: api.getUnreadCount,
   });
   const unread = unreadData?.count ?? 0;
+  // Row 42: total unread chat messages across my channels.
+  const { data: channels = [] } = useQuery({ queryKey: ["channels"], queryFn: api.getChannels });
+  const chatUnread = channels.reduce((n, c) => n + (c.unreadCount ?? 0), 0);
 
   // The server pushes notification:new into this user's personal room, so the
   // badge updates without polling. Refetching (rather than incrementing) keeps
@@ -29,8 +32,15 @@ export function Sidebar() {
       qc.invalidateQueries({ queryKey: ["notifications"] });
     };
     socket.on("notification:new", bump);
+    // Row 42: a new message in any of my channels, or a read mark from another
+    // device, changes the unread badges.
+    const chatChanged = () => qc.invalidateQueries({ queryKey: ["channels"] });
+    socket.on("chat:unread", chatChanged);
+    socket.on("chat:read", chatChanged);
     return () => {
       socket.off("notification:new", bump);
+      socket.off("chat:unread", chatChanged);
+      socket.off("chat:read", chatChanged);
     };
   }, [qc]);
   const [orgMenu, setOrgMenu] = useState(false);
@@ -121,6 +131,11 @@ export function Sidebar() {
             />
           </svg>
           Chat
+          {chatUnread > 0 && (
+            <span className="ml-auto min-w-[18px] rounded-full bg-indigo-600 px-1.5 py-0.5 text-center text-[10px] font-semibold leading-none text-white">
+              {chatUnread > 99 ? "99+" : chatUnread}
+            </span>
+          )}
         </Link>
         <NavLink to="/my-work" label="My Work" icon={checkIcon} />
         <NavLink to="/inbox" label="Home" badge={unread} icon={bellIcon} />
