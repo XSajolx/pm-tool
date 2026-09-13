@@ -1,6 +1,7 @@
 import { Link, useParams } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, type Project, type ProjectStatus } from "../lib/api.js";
+import { useState } from "react";
+import { api, type Project, type ProjectStatus, type Stage } from "../lib/api.js";
 import { Avatar } from "../components/ui.js";
 import { useAuth } from "../lib/auth.js";
 import { fmtDuration, fmtMoney, fmtShortDate } from "../lib/format.js";
@@ -142,6 +143,7 @@ export function ProjectPage() {
         </div>
 
         <ProjectDetails project={project} canManage={canManage} onSaved={refresh} />
+        <ProjectStages projectId={project.id} canManage={canManage} />
 
         <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
           {/* Lists */}
@@ -325,5 +327,236 @@ function ProjectDetails({ project, canManage, onSaved }: { project: Project; can
         />
       </label>
     </div>
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * Stages strip: Discovery > Design > Build > QA > Launch with per-stage
+ * task progress and start / complete / reopen controls.
+ * ------------------------------------------------------------------ */
+const STAGE_STATUS: Record<Stage["status"], { label: string; cls: string; bar: string }> = {
+  not_started: { label: "Not started", cls: "bg-slate-100 text-slate-600", bar: "bg-slate-300" },
+  active: { label: "In progress", cls: "bg-blue-50 text-blue-700", bar: "bg-indigo-500" },
+  completed: { label: "Completed", cls: "bg-green-50 text-green-700", bar: "bg-green-500" },
+};
+
+function ProjectStages({ projectId, canManage }: { projectId: string; canManage: boolean }) {
+  const qc = useQueryClient();
+  const { data: stages = [] } = useQuery({ queryKey: ["stages", projectId], queryFn: () => api.getStages(projectId) });
+  const { data: templates = [] } = useQuery({ queryKey: ["stage-templates"], queryFn: api.getStageTemplates });
+  const [newName, setNewName] = useState("");
+  const [reopening, setReopening] = useState<Stage | null>(null);
+  const [note, setNote] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ["stages"] });
+    qc.invalidateQueries({ queryKey: ["project", projectId] });
+  };
+  const create = useMutation({
+    mutationFn: () => api.createStage(projectId, newName.trim()),
+    onSuccess: () => {
+      setNewName("");
+      refresh();
+    },
+  });
+  const update = useMutation({
+    mutationFn: ({ id, ...body }: { id: string } & Parameters<typeof api.updateStage>[1]) => api.updateStage(id, body),
+    onSuccess: () => {
+      setReopening(null);
+      setNote("");
+      setError(null);
+      refresh();
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+  const reorder = useMutation({
+    mutationFn: (ids: string[]) => api.reorderStages(projectId, ids),
+    onSuccess: (rows) => qc.setQueryData(["stages", projectId], rows),
+  });
+  const remove = useMutation({ mutationFn: (id: string) => api.deleteStage(id), onSuccess: refresh });
+  const apply = useMutation({ mutationFn: (templateId: string) => api.applyStageTemplate(projectId, templateId), onSuccess: refresh });
+
+  const move = (i: number, dir: -1 | 1) => {
+    const ids = stages.map((s) => s.id);
+    const j = i + dir;
+    if (j < 0 || j >= ids.length) return;
+    [ids[i], ids[j]] = [ids[j]!, ids[i]!];
+    reorder.mutate(ids);
+  };
+
+  return (
+    <div className="mt-6 rounded-lg border border-border bg-white p-4">
+      <div className="mb-3 flex items-center gap-3">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Stages</p>
+        <span className="text-[11px] text-muted-foreground">
+          {stages.filter((s) => s.status === "completed").length}/{stages.length} complete
+        </span>
+        {canManage && !stages.length && templates.length > 0 && (
+          <select
+            value=""
+            onChange={(e) => e.target.value && apply.mutate(e.target.value)}
+            className="ml-auto rounded-md border border-border bg-white px-2 py-1 text-xs"
+          >
+            <option value="">Apply a stage template…</option>
+            {templates.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name} ({t.stages.join(" › ")})
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
+
+      {error && <p className="mb-2 text-xs text-red-600">{error}</p>}
+
+      {stages.length ? (
+        <div className="flex gap-3 overflow-x-auto pb-1">
+          {stages.map((st, i) => {
+            const meta = STAGE_STATUS[st.status];
+            const pct = st.progress.total ? Math.round((st.progress.done / st.progress.total) * 100) : 0;
+            return (
+              <div key={st.id} className="flex w-52 shrink-0 flex-col gap-2 rounded-lg border border-border p-3">
+                <div className="flex items-start gap-1">
+                  <span className="text-[10px] font-semibold text-muted-foreground">{i + 1}</span>
+                  <StageName stage={st} canEdit={canManage} onRename={(name) => update.mutate({ id: st.id, name })} />
+                  {canManage && (
+                    <div className="ml-auto flex flex-col text-[9px] leading-none text-slate-400">
+                      <button type="button" disabled={i === 0} onClick={() => move(i, -1)} className="hover:text-slate-700 disabled:opacity-30">◀</button>
+                      <button type="button" disabled={i === stages.length - 1} onClick={() => move(i, 1)} className="hover:text-slate-700 disabled:opacity-30">▶</button>
+                    </div>
+                  )}
+                </div>
+                <span className={cn("w-fit rounded-full px-2 py-0.5 text-[10px] font-medium", meta.cls)}>{meta.label}</span>
+                <div>
+                  <div className="mb-1 flex justify-between text-[10px] text-muted-foreground">
+                    <span>Tasks</span>
+                    <span className="tabular-nums">
+                      {st.progress.done}/{st.progress.total} · {pct}%
+                    </span>
+                  </div>
+                  <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
+                    <div className={cn("h-full rounded-full", meta.bar)} style={{ width: `${pct}%` }} />
+                  </div>
+                </div>
+                <p className="text-[10px] text-muted-foreground">
+                  {st.startedAt ? `Started ${fmtShortDate(st.startedAt)}` : "Not started"}
+                  {st.completedAt ? ` · Done ${fmtShortDate(st.completedAt)}` : ""}
+                </p>
+                {canManage && (
+                  <div className="mt-auto flex flex-wrap gap-1">
+                    {st.status === "not_started" && (
+                      <button type="button" onClick={() => update.mutate({ id: st.id, status: "active" })} className="rounded-md bg-indigo-600 px-2 py-1 text-[11px] font-medium text-white hover:bg-indigo-700">
+                        Start
+                      </button>
+                    )}
+                    {st.status === "active" && (
+                      <button type="button" onClick={() => update.mutate({ id: st.id, status: "completed" })} className="rounded-md bg-green-600 px-2 py-1 text-[11px] font-medium text-white hover:bg-green-700">
+                        Complete
+                      </button>
+                    )}
+                    {st.status === "completed" && (
+                      <button type="button" onClick={() => setReopening(st)} className="rounded-md border border-border px-2 py-1 text-[11px] text-slate-700 hover:bg-muted">
+                        Reopen
+                      </button>
+                    )}
+                    <button type="button" onClick={() => remove.mutate(st.id)} className="ml-auto text-[11px] text-slate-400 hover:text-red-500">
+                      Remove
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <p className="text-xs text-muted-foreground">No stages yet. Add one below or apply a template.</p>
+      )}
+
+      {canManage && (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (newName.trim()) create.mutate();
+          }}
+          className="mt-3 flex items-center gap-2"
+        >
+          <input
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            placeholder="Add a stage (e.g. QA)…"
+            className="w-64 rounded-md border border-border bg-white px-2 py-1 text-sm outline-none focus:border-indigo-400"
+          />
+          <button type="submit" disabled={!newName.trim() || create.isPending} className="rounded-md border border-border px-3 py-1 text-xs text-slate-700 hover:bg-muted disabled:opacity-50">
+            Add stage
+          </button>
+        </form>
+      )}
+
+      {reopening && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/30" onClick={() => setReopening(null)}>
+          <div className="w-96 rounded-lg bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-sm font-semibold text-slate-900">Reopen “{reopening.name}”</h2>
+            <p className="mt-1 text-xs text-muted-foreground">A short note goes on the stage timeline so the team knows why.</p>
+            <textarea
+              autoFocus
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="e.g. Client requested a second design round"
+              className="mt-3 w-full rounded-md border border-border px-2 py-1.5 text-sm outline-none focus:border-indigo-400"
+              rows={3}
+            />
+            <div className="mt-4 flex justify-end gap-2">
+              <button type="button" onClick={() => setReopening(null)} className="rounded-md px-3 py-1.5 text-xs text-slate-600 hover:bg-muted">Cancel</button>
+              <button
+                type="button"
+                disabled={!note.trim()}
+                onClick={() => update.mutate({ id: reopening.id, status: "active", note: note.trim() })}
+                className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+              >
+                Reopen stage
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StageName({ stage, canEdit, onRename }: { stage: Stage; canEdit: boolean; onRename: (name: string) => void }) {
+  const [text, setText] = useState(stage.name);
+  const [editing, setEditing] = useState(false);
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        disabled={!canEdit}
+        onClick={() => {
+          setText(stage.name);
+          setEditing(true);
+        }}
+        className="truncate text-left text-sm font-semibold text-slate-900 disabled:cursor-default"
+        title={canEdit ? "Rename" : undefined}
+      >
+        {stage.name}
+      </button>
+    );
+  }
+  return (
+    <input
+      autoFocus
+      value={text}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={() => {
+        setEditing(false);
+        if (text.trim() && text.trim() !== stage.name) onRename(text.trim());
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+        if (e.key === "Escape") setEditing(false);
+      }}
+      className="w-full rounded border border-indigo-300 px-1 text-sm font-semibold outline-none"
+    />
   );
 }

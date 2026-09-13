@@ -10,6 +10,8 @@ export const createTaskSchema = z.object({
   statusId: z.string().uuid().optional(),
   priority: z.enum(["urgent", "high", "normal", "low"]).nullable().optional(),
   parentTaskId: z.string().uuid().optional(),
+  /** Project stage; null clears. Must belong to the project that owns the task's space. */
+  stageId: z.string().uuid().nullable().optional(),
   startDate: isoDate.nullable().optional(),
   dueDate: isoDate.nullable().optional(),
   /** Whole minutes; null clears the estimate. */

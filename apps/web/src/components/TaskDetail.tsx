@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type Member, type Priority, type Status } from "../lib/api.js";
 import { Avatar, PRIORITY } from "./ui.js";
 import { TaskCollaboration } from "./TaskCollaboration.js";
-import { CycleField, SubtasksSection, TagsField, TrackTimeButton } from "./TaskExtras.js";
+import { CycleField, StageField, SubtasksSection, TagsField, TrackTimeButton } from "./TaskExtras.js";
 import { useEscape } from "../lib/useEscape.js";
 import { useAuth } from "../lib/auth.js";
 
@@ -198,6 +198,7 @@ export function TaskDetail({ taskId, listId, spaceId, statuses, members, onClose
               </Field>
 
               <TagsField task={task} spaceId={spaceId} />
+              <StageField task={task} spaceId={spaceId} />
               <CycleField task={task} spaceId={spaceId} />
             </div>
 

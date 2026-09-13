@@ -156,3 +156,40 @@ export function TrackTimeButton({ taskId, spaceId }: { taskId: string; spaceId: 
     </button>
   );
 }
+
+/** Stage picker: the stages of the project that owns this task's space. Hidden when the space has no project. */
+export function StageField({ task, spaceId }: { task: Task; spaceId?: string }) {
+  const qc = useQueryClient();
+  const { data: stages = [] } = useQuery({
+    queryKey: ["stages", "space", spaceId],
+    queryFn: () => api.getStagesForSpace(spaceId!),
+    enabled: Boolean(spaceId),
+  });
+  const set = useMutation({
+    mutationFn: (stageId: string) => api.updateTask(task.id, { stageId: stageId || null }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["task", task.id] });
+      qc.invalidateQueries({ queryKey: ["tasks"] });
+      qc.invalidateQueries({ queryKey: ["stages"] });
+    },
+  });
+  if (!spaceId || !stages.length) return null;
+  return (
+    <div className="grid grid-cols-[90px_1fr] items-center gap-2">
+      <span className="text-xs font-medium text-muted-foreground">Stage</span>
+      <select
+        value={task.stageId ?? task.stage?.id ?? ""}
+        onChange={(e) => set.mutate(e.target.value)}
+        className="rounded-md border border-border bg-white px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-indigo-500/30"
+      >
+        <option value="">No stage</option>
+        {stages.map((st) => (
+          <option key={st.id} value={st.id}>
+            {st.name}
+            {st.status === "completed" ? " ✓" : st.status === "active" ? " ●" : ""}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}

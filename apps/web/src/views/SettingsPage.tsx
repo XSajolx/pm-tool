@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, type Status } from "../lib/api.js";
+import { api, type StageTemplate, type Status } from "../lib/api.js";
 import { useAuth } from "../lib/auth.js";
 import { PRIORITY } from "../components/ui.js";
 import type { Priority } from "../lib/api.js";
@@ -9,11 +9,12 @@ import type { Priority } from "../lib/api.js";
  * Workspace settings. Sections are added as the roadmap lands; each one is a
  * self-contained panel that owns its own queries.
  */
-type Section = "statuses" | "priorities";
+type Section = "statuses" | "priorities" | "stages";
 
 const SECTIONS: { id: Section; label: string; hint: string }[] = [
   { id: "statuses", label: "Task statuses", hint: "Per space: names, colours, order, done state" },
   { id: "priorities", label: "Priorities", hint: "The four priority levels" },
+  { id: "stages", label: "Stage templates", hint: "Default stage sequences for new projects" },
 ];
 
 export function SettingsPage() {
@@ -48,6 +49,7 @@ export function SettingsPage() {
           )}
           {section === "statuses" && <StatusSettings canEdit={canEdit} />}
           {section === "priorities" && <PrioritySettings />}
+          {section === "stages" && <StageTemplateSettings canEdit={canEdit} />}
         </div>
       </div>
     </div>
@@ -291,6 +293,111 @@ function PrioritySettings() {
             <span className="ml-auto text-[11px] text-muted-foreground">{p}</span>
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * Stage templates — reusable sequences; the default is applied to new projects
+ * ------------------------------------------------------------------ */
+function StageTemplateSettings({ canEdit }: { canEdit: boolean }) {
+  const qc = useQueryClient();
+  const { data: templates = [] } = useQuery({ queryKey: ["stage-templates"], queryFn: api.getStageTemplates });
+  const invalidate = () => qc.invalidateQueries({ queryKey: ["stage-templates"] });
+  const [name, setName] = useState("");
+  const [stagesText, setStagesText] = useState("");
+  const create = useMutation({
+    mutationFn: () => api.createStageTemplate({ name: name.trim(), stages: splitStages(stagesText) }),
+    onSuccess: () => {
+      setName("");
+      setStagesText("");
+      invalidate();
+    },
+  });
+  const update = useMutation({
+    mutationFn: ({ id, ...body }: { id: string } & Parameters<typeof api.updateStageTemplate>[1]) => api.updateStageTemplate(id, body),
+    onSuccess: invalidate,
+  });
+  const remove = useMutation({ mutationFn: (id: string) => api.deleteStageTemplate(id), onSuccess: invalidate });
+
+  return (
+    <div>
+      <h1 className="text-lg font-semibold text-slate-900">Stage templates</h1>
+      <p className="mb-4 text-xs text-muted-foreground">
+        Each template is an ordered list of stages. The default one is added to every new project; any template can be
+        applied to an existing project from its page.
+      </p>
+      <div className="space-y-3">
+        {templates.map((t) => (
+          <TemplateRow key={t.id} template={t} canEdit={canEdit} onSave={(body) => update.mutate({ id: t.id, ...body })} onDelete={() => remove.mutate(t.id)} />
+        ))}
+      </div>
+      {canEdit && (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (name.trim() && splitStages(stagesText).length) create.mutate();
+          }}
+          className="mt-4 rounded-lg border border-dashed border-border p-3"
+        >
+          <p className="mb-2 text-xs font-medium text-slate-700">New template</p>
+          <div className="flex flex-col gap-2 md:flex-row">
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name (e.g. Website build)" className="rounded-md border border-border px-2 py-1 text-sm outline-none focus:border-indigo-400 md:w-48" />
+            <input value={stagesText} onChange={(e) => setStagesText(e.target.value)} placeholder="Stages, comma-separated: Discovery, Design, Build, QA, Launch" className="flex-1 rounded-md border border-border px-2 py-1 text-sm outline-none focus:border-indigo-400" />
+            <button type="submit" disabled={!name.trim() || !splitStages(stagesText).length || create.isPending} className="rounded-md bg-indigo-600 px-3 py-1 text-xs font-medium text-white disabled:opacity-50">
+              Add template
+            </button>
+          </div>
+        </form>
+      )}
+    </div>
+  );
+}
+
+function splitStages(text: string) {
+  return text.split(/[,\n>›]/).map((s) => s.trim()).filter(Boolean);
+}
+
+function TemplateRow({ template, canEdit, onSave, onDelete }: { template: StageTemplate; canEdit: boolean; onSave: (b: { name?: string; stages?: string[]; isDefault?: boolean }) => void; onDelete: () => void }) {
+  const [name, setName] = useState(template.name);
+  const [stagesText, setStagesText] = useState(template.stages.join(", "));
+  useEffect(() => {
+    setName(template.name);
+    setStagesText(template.stages.join(", "));
+  }, [template.name, template.stages]);
+  const dirty = name.trim() !== template.name || splitStages(stagesText).join("|") !== template.stages.join("|");
+  return (
+    <div className="rounded-lg border border-border bg-white p-3">
+      <div className="flex items-center gap-2">
+        <input value={name} disabled={!canEdit} onChange={(e) => setName(e.target.value)} className="w-48 rounded-md border border-transparent px-2 py-1 text-sm font-semibold text-slate-900 hover:border-border focus:border-indigo-400 focus:outline-none" />
+        {template.isDefault ? (
+          <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-medium text-indigo-700">Default for new projects</span>
+        ) : (
+          canEdit && (
+            <button type="button" onClick={() => onSave({ isDefault: true })} className="text-[11px] text-slate-500 hover:text-indigo-700">
+              Make default
+            </button>
+          )
+        )}
+        {canEdit && (
+          <button type="button" onClick={onDelete} className="ml-auto text-[11px] text-slate-400 hover:text-red-500">
+            Delete
+          </button>
+        )}
+      </div>
+      <input value={stagesText} disabled={!canEdit} onChange={(e) => setStagesText(e.target.value)} className="mt-2 w-full rounded-md border border-border px-2 py-1 text-sm text-slate-700 outline-none focus:border-indigo-400 disabled:bg-muted/40" />
+      <div className="mt-2 flex flex-wrap items-center gap-1">
+        {splitStages(stagesText).map((st, i) => (
+          <span key={i} className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-slate-700">
+            {i + 1}. {st}
+          </span>
+        ))}
+        {canEdit && dirty && (
+          <button type="button" onClick={() => onSave({ name: name.trim(), stages: splitStages(stagesText) })} className="ml-auto rounded-md bg-indigo-600 px-2.5 py-1 text-[11px] font-medium text-white">
+            Save changes
+          </button>
+        )}
       </div>
     </div>
   );

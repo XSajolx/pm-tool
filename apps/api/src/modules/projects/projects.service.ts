@@ -13,6 +13,7 @@ import {
   timeEntries,
 } from "../../db/schema.js";
 import { ActivityService } from "../activity/activity.service.js";
+import { StagesService } from "./stages.service.js";
 
 export interface ProjectDto {
   name: string;
@@ -54,6 +55,7 @@ export class ProjectsService {
   constructor(
     @Inject(DRIZZLE) private readonly db: DB,
     private readonly activity: ActivityService,
+    private readonly stages: StagesService,
   ) {}
 
   async list(orgId: string, includeArchived = false) {
@@ -176,6 +178,11 @@ export class ProjectsService {
         action: "project_created",
       });
       return project!;
+    }).then(async (project) => {
+      // New projects start with the org's default stage sequence (Settings → Stage templates).
+      const names = await this.stages.defaultStageNames(orgId);
+      if (names.length) await this.stages.appendStages(orgId, userId, project.id, names);
+      return project;
     });
   }
 

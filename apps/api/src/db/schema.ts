@@ -212,6 +212,8 @@ export const tasks = pgTable(
       .references(() => lists.id, { onDelete: "cascade" }),
     /** Self-reference → subtasks. Null = top-level task. */
     parentTaskId: uuid("parent_task_id"),
+    /** Project stage this task is filed under (row 26). */
+    stageId: uuid("stage_id").references((): AnyPgColumn => projectStages.id, { onDelete: "set null" }),
     statusId: uuid("status_id").references(() => statuses.id),
     /** Short human key like "PM-142", unique per org. */
     reference: varchar("reference", { length: 32 }),
@@ -230,6 +232,7 @@ export const tasks = pgTable(
     index("tasks_list_idx").on(t.listId),
     index("tasks_parent_idx").on(t.parentTaskId),
     index("tasks_status_idx").on(t.statusId),
+    index("tasks_stage_idx").on(t.stageId),
     // Hot path: "give me this org's tasks" — org first, then list.
     index("tasks_org_list_idx").on(t.organizationId, t.listId),
     uniqueIndex("tasks_org_reference_uq").on(t.organizationId, t.reference),
@@ -456,6 +459,7 @@ export const statusesRelations = relations(statuses, ({ one, many }) => ({
 export const tasksRelations = relations(tasks, ({ one, many }) => ({
   list: one(lists, { fields: [tasks.listId], references: [lists.id] }),
   status: one(statuses, { fields: [tasks.statusId], references: [statuses.id] }),
+  stage: one(projectStages, { fields: [tasks.stageId], references: [projectStages.id] }),
   parent: one(tasks, { fields: [tasks.parentTaskId], references: [tasks.id], relationName: "subtasks" }),
   subtasks: many(tasks, { relationName: "subtasks" }),
   assignees: many(taskAssignees),
@@ -1086,9 +1090,62 @@ export const projectsRelations = relations(projects, ({ one, many }) => ({
   space: one(spaces, { fields: [projects.spaceId], references: [spaces.id] }),
   company: one(companies, { fields: [projects.companyId], references: [companies.id] }),
   lead: one(users, { fields: [projects.leadId], references: [users.id] }),
+  stages: many(projectStages),
   timeEntries: many(timeEntries),
   allocations: many(allocations),
 }));
+
+/* ------------------------------------------------------------------ *
+ * Project stages — Discovery > Design > Build > QA > Launch. A project's
+ * tasks can be filed under a stage; progress per stage is derived from
+ * task status categories. Stages may run in parallel.
+ * ------------------------------------------------------------------ */
+export const stageStatus = pgEnum("stage_status", ["not_started", "active", "completed"]);
+
+export const projectStages = pgTable(
+  "project_stages",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 120 }).notNull(),
+    position: doublePrecision("position").notNull().default(0),
+    status: stageStatus("status").notNull().default("not_started"),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (t) => [index("project_stages_project_idx").on(t.projectId)],
+);
+
+export const projectStagesRelations = relations(projectStages, ({ one, many }) => ({
+  project: one(projects, { fields: [projectStages.projectId], references: [projects.id] }),
+  tasks: many(tasks),
+}));
+
+/** Reusable stage sequences (Settings). One may be the default for new projects. */
+export const stageTemplates = pgTable(
+  "stage_templates",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 120 }).notNull(),
+    /** Ordered stage names. */
+    stages: jsonb("stages").$type<string[]>().notNull().default([]),
+    isDefault: boolean("is_default").notNull().default(false),
+    ...timestamps,
+  },
+  (t) => [index("stage_templates_org_idx").on(t.organizationId)],
+);
+
+export type ProjectStage = typeof projectStages.$inferSelect;
+export type StageTemplate = typeof stageTemplates.$inferSelect;
 
 export const timeEntriesRelations = relations(timeEntries, ({ one }) => ({
   user: one(users, { fields: [timeEntries.userId], references: [users.id] }),

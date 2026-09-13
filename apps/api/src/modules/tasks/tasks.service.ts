@@ -5,6 +5,7 @@ import type { DB } from "../../db/index.js";
 import {
   cycleTasks,
   lists,
+  projectStages,
   statuses,
   tags,
   taskAssignees,
@@ -25,6 +26,7 @@ const TRACKED_FIELDS = [
   "dueDate",
   "startDate",
   "listId",
+  "stageId",
   "timeEstimateMinutes",
 ];
 
@@ -61,6 +63,7 @@ export class TasksService {
       ),
       with: {
         status: true,
+        stage: { columns: { id: true, name: true, status: true } },
         assignees: { with: { user: true } },
         subtasks: true,
       },
@@ -75,6 +78,7 @@ export class TasksService {
       where: and(eq(tasks.id, id), eq(tasks.organizationId, orgId)),
       with: {
         status: true,
+        stage: { columns: { id: true, name: true, status: true } },
         assignees: { with: { user: true } },
         subtasks: { with: { status: true } },
         comments: { with: { author: true } },
@@ -140,7 +144,20 @@ export class TasksService {
     return this.findOne(orgId, taskId);
   }
 
+  /** A stage may only be used by tasks in the project that owns the list's space. */
+  private async assertStageForList(orgId: string, listId: string, stageId: string) {
+    const list = await this.db.query.lists.findFirst({ where: and(eq(lists.id, listId), eq(lists.organizationId, orgId)) });
+    const stage = await this.db.query.projectStages.findFirst({
+      where: and(eq(projectStages.id, stageId), eq(projectStages.organizationId, orgId)),
+      with: { project: { columns: { spaceId: true } } },
+    });
+    if (!list || !stage || stage.project.spaceId !== list.spaceId) {
+      throw new BadRequestException("That stage belongs to a different project");
+    }
+  }
+
   async create(orgId: string, userId: string, dto: CreateTaskDto) {
+    if (dto.stageId) await this.assertStageForList(orgId, dto.listId, dto.stageId);
     const [task] = await this.db
       .insert(tasks)
       .values({
@@ -151,6 +168,7 @@ export class TasksService {
         statusId: dto.statusId,
         priority: dto.priority ?? undefined,
         parentTaskId: dto.parentTaskId,
+        stageId: dto.stageId ?? undefined,
         startDate: dto.startDate ? new Date(dto.startDate) : undefined,
         dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
         timeEstimateMinutes: dto.timeEstimateMinutes ?? undefined,
@@ -201,6 +219,7 @@ export class TasksService {
       where: and(eq(tasks.id, id), eq(tasks.organizationId, orgId)),
     });
     if (!before) throw new NotFoundException("Task not found");
+    if (dto.stageId) await this.assertStageForList(orgId, before.listId, dto.stageId);
 
     // `assigneeIds` is not a column; it is synced separately below.
     const { assigneeIds, ...fields } = dto;

@@ -204,6 +204,8 @@ export interface Task {
   statusId: string | null;
   status: Status | null;
   assignees: { user: Member }[];
+  stageId?: string | null;
+  stage?: { id: string; name: string; status: StageStatus } | null;
   subtasks: { id: string; title?: string; status?: Status | null }[];
   tags?: Tag[];
   cycleId?: string | null;
@@ -268,8 +270,27 @@ export type TaskPatch = Partial<{
   startDate: string | null;
   dueDate: string | null;
   timeEstimateMinutes: number | null;
+  stageId: string | null;
   assigneeIds: string[];
 }>;
+
+export type StageStatus = "not_started" | "active" | "completed";
+export interface Stage {
+  id: string;
+  projectId: string;
+  name: string;
+  position: number;
+  status: StageStatus;
+  startedAt: string | null;
+  completedAt: string | null;
+  progress: { total: number; done: number };
+}
+export interface StageTemplate {
+  id: string;
+  name: string;
+  stages: string[];
+  isDefault: boolean;
+}
 
 export interface MyTask extends Task {
   list: { id: string; name: string } | null;
@@ -836,6 +857,25 @@ export const api = {
   getProjects: (archived = false) =>
     request<Project[]>(`/projects${archived ? "?archived=true" : ""}`),
   getProject: (id: string) => request<Project>(`/projects/${id}`),
+  // ---- Project stages ----
+  getStages: (projectId: string) => request<Stage[]>(`/projects/${projectId}/stages`),
+  getStagesForSpace: (spaceId: string) => request<Stage[]>(`/stages?spaceId=${encodeURIComponent(spaceId)}`),
+  createStage: (projectId: string, name: string) =>
+    request<Stage>(`/projects/${projectId}/stages`, { method: "POST", body: JSON.stringify({ name }) }),
+  reorderStages: (projectId: string, ids: string[]) =>
+    request<Stage[]>(`/projects/${projectId}/stages/order`, { method: "PUT", body: JSON.stringify({ ids }) }),
+  applyStageTemplate: (projectId: string, templateId: string) =>
+    request<Stage[]>(`/projects/${projectId}/stages/apply-template`, { method: "POST", body: JSON.stringify({ templateId }) }),
+  updateStage: (id: string, body: { name?: string; status?: StageStatus; note?: string }) =>
+    request<Stage>(`/stages/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  deleteStage: (id: string) => request<{ id: string }>(`/stages/${id}`, { method: "DELETE" }),
+  getStageActivity: (id: string) => request<ActivityEntry[]>(`/stages/${id}/activity`),
+  getStageTemplates: () => request<StageTemplate[]>(`/stage-templates`),
+  createStageTemplate: (body: { name: string; stages: string[]; isDefault?: boolean }) =>
+    request<StageTemplate>(`/stage-templates`, { method: "POST", body: JSON.stringify(body) }),
+  updateStageTemplate: (id: string, body: Partial<{ name: string; stages: string[]; isDefault: boolean }>) =>
+    request<StageTemplate>(`/stage-templates/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  deleteStageTemplate: (id: string) => request<{ id: string }>(`/stage-templates/${id}`, { method: "DELETE" }),
   createProject: (body: ProjectInput) =>
     request<Project>(`/projects`, { method: "POST", body: JSON.stringify(body) }),
   updateProject: (id: string, body: Partial<ProjectInput>) =>

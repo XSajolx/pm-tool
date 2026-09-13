@@ -19,6 +19,7 @@ export interface RecordActivity {
     | "comment"
     | "list"
     | "cycle"
+    | "stage"
     | "intake_item"
     | "company"
     | "contact"

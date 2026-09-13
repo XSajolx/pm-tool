@@ -71,6 +71,13 @@
       "when": 1789329888591,
       "tag": "0009_legal_black_panther",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1789337910109,
+      "tag": "0010_stale_union_jack",
+      "breakpoints": true
     }
   ]
 }
