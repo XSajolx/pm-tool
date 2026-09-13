@@ -270,14 +270,13 @@ export const tags = pgTable(
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    spaceId: uuid("space_id")
-      .notNull()
-      .references(() => spaces.id, { onDelete: "cascade" }),
+    /** Legacy: tags used to belong to a space. Workspace tags (row 30) leave this null. */
+    spaceId: uuid("space_id").references(() => spaces.id, { onDelete: "set null" }),
     name: varchar("name", { length: 64 }).notNull(),
     color: varchar("color", { length: 16 }).notNull().default("#6b7280"),
     ...timestamps,
   },
-  (t) => [uniqueIndex("tags_space_name_uq").on(t.spaceId, t.name)],
+  (t) => [uniqueIndex("tags_org_name_uq").on(t.organizationId, t.name)],
 );
 
 export const taskTags = pgTable(

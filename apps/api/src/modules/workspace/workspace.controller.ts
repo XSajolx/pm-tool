@@ -113,16 +113,49 @@ export class WorkspaceController {
     return this.workspace.deleteStatus(auth.orgId, id, reassignTo || undefined);
   }
 
+  /** Tags are workspace-wide; the space-scoped paths stay as aliases for older clients. */
+  @Get("tags")
+  tags(@Auth() auth: AuthContext, @Query("usage") usage?: string) {
+    return usage === "true" ? this.workspace.tagsWithUsage(auth.orgId) : this.workspace.tagsForOrg(auth.orgId);
+  }
+
   @Get("spaces/:id/tags")
-  tags(@Auth() auth: AuthContext, @Param("id") spaceId: string) {
-    return this.workspace.tagsForSpace(auth.orgId, spaceId);
+  tagsForSpace(@Auth() auth: AuthContext) {
+    return this.workspace.tagsForOrg(auth.orgId);
+  }
+
+  @Post("tags")
+  @Roles("owner", "admin", "member")
+  @UsePipes(new ZodValidationPipe(tagSchema))
+  createTag(@Auth() auth: AuthContext, @Body() dto: z.infer<typeof tagSchema>) {
+    return this.workspace.createTag(auth.orgId, dto);
   }
 
   @Post("spaces/:id/tags")
   @Roles("owner", "admin", "member")
   @UsePipes(new ZodValidationPipe(tagSchema))
-  createTag(@Auth() auth: AuthContext, @Param("id") spaceId: string, @Body() dto: z.infer<typeof tagSchema>) {
-    return this.workspace.createTag(auth.orgId, spaceId, dto);
+  createTagInSpace(@Auth() auth: AuthContext, @Body() dto: z.infer<typeof tagSchema>) {
+    return this.workspace.createTag(auth.orgId, dto);
+  }
+
+  @Patch("tags/:id")
+  @Roles("owner", "admin")
+  @UsePipes(new ZodValidationPipe(tagSchema.partial()))
+  updateTag(@Auth() auth: AuthContext, @Param("id") id: string, @Body() dto: Partial<z.infer<typeof tagSchema>>) {
+    return this.workspace.updateTag(auth.orgId, id, dto);
+  }
+
+  @Post("tags/:id/merge")
+  @Roles("owner", "admin")
+  @UsePipes(new ZodValidationPipe(z.object({ into: z.string().uuid() })))
+  mergeTag(@Auth() auth: AuthContext, @Param("id") id: string, @Body() dto: { into: string }) {
+    return this.workspace.mergeTag(auth.orgId, id, dto.into);
+  }
+
+  @Delete("tags/:id")
+  @Roles("owner", "admin")
+  retireTag(@Auth() auth: AuthContext, @Param("id") id: string) {
+    return this.workspace.retireTag(auth.orgId, id);
   }
 
   @Get("members")

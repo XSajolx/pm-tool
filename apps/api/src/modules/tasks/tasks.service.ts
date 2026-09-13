@@ -113,14 +113,11 @@ export class TasksService {
 
   /** Tag must belong to the task's space — labels don't leak across spaces. */
   async addTag(orgId: string, actorId: string, taskId: string, tagId: string) {
-    const task = await this.findOne(orgId, taskId);
-    const [list] = await this.db.select().from(lists).where(eq(lists.id, task.listId));
+    await this.findOne(orgId, taskId);
     const tag = await this.db.query.tags.findFirst({
-      where: and(eq(tags.id, tagId), eq(tags.organizationId, orgId)),
+      where: and(eq(tags.id, tagId), eq(tags.organizationId, orgId), isNull(tags.archivedAt)),
     });
-    if (!tag || !list || tag.spaceId !== list.spaceId) {
-      throw new BadRequestException("Tag does not belong to this task's space");
-    }
+    if (!tag) throw new BadRequestException("Tag not found in this workspace");
     await this.db.insert(taskTags).values({ taskId, tagId }).onConflictDoNothing();
     await this.activity.record({
       orgId,

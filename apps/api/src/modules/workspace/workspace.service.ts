@@ -1,5 +1,5 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, asc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
 import {
@@ -12,6 +12,7 @@ import {
   spaces,
   statuses,
   tags,
+  taskTags,
   tasks,
   users,
 } from "../../db/schema.js";
@@ -170,31 +171,92 @@ export class WorkspaceService {
     return { id, deleted: true, movedTasks: n };
   }
 
-  /* ---- Tags (labels) live on the space, like statuses ---- */
+  /* ---- Tags are workspace-wide (row 30): one colour-coded set, usable in every project ---- */
 
-  async tagsForSpace(orgId: string, spaceId: string) {
+  async tagsForOrg(orgId: string) {
     return this.db.query.tags.findMany({
-      where: and(eq(tags.organizationId, orgId), eq(tags.spaceId, spaceId), isNull(tags.archivedAt)),
+      where: and(eq(tags.organizationId, orgId), isNull(tags.archivedAt)),
       orderBy: (t) => [asc(t.name)],
     });
   }
 
-  async createTag(orgId: string, spaceId: string, dto: { name: string; color?: string }) {
-    await this.assertSpace(orgId, spaceId);
-    const [row] = await this.db
-      .insert(tags)
-      .values({ organizationId: orgId, spaceId, name: dto.name.trim(), color: dto.color ?? "#6b7280" })
-      .onConflictDoNothing()
-      .returning();
-    if (row) return row;
-    // Same name already exists on this space — return it rather than 409ing.
-    const existing = await this.db.query.tags.findFirst({
-      where: and(eq(tags.spaceId, spaceId), eq(tags.name, dto.name.trim())),
-    });
-    return existing!;
+  /** Tags with how many live tasks use each — for the Settings manager. */
+  async tagsWithUsage(orgId: string) {
+    const rows = await this.tagsForOrg(orgId);
+    if (!rows.length) return [];
+    const counts = await this.db
+      .select({ tagId: taskTags.tagId, n: sql<number>`count(*)::int` })
+      .from(taskTags)
+      .innerJoin(tasks, eq(tasks.id, taskTags.taskId))
+      .where(and(inArray(taskTags.tagId, rows.map((t) => t.id)), isNull(tasks.archivedAt)))
+      .groupBy(taskTags.tagId);
+    const byId = new Map(counts.map((c) => [c.tagId, c.n]));
+    return rows.map((t) => ({ ...t, taskCount: byId.get(t.id) ?? 0 }));
   }
 
-  /** Org members for assignee pickers / avatars. */
+  /** Case-insensitive by name: "Bug" and "bug" are the same tag. */
+  async createTag(orgId: string, dto: { name: string; color?: string }) {
+    const name = dto.name.trim();
+    const existing = await this.db.query.tags.findFirst({
+      where: and(eq(tags.organizationId, orgId), sql`lower(${tags.name}) = lower(${name})`),
+    });
+    if (existing) {
+      if (existing.archivedAt) {
+        const [revived] = await this.db.update(tags).set({ archivedAt: null, color: dto.color ?? existing.color }).where(eq(tags.id, existing.id)).returning();
+        return revived!;
+      }
+      return existing;
+    }
+    const [row] = await this.db
+      .insert(tags)
+      .values({ organizationId: orgId, spaceId: null, name, color: dto.color ?? "#6b7280" })
+      .returning();
+    return row!;
+  }
+
+  async updateTag(orgId: string, id: string, dto: { name?: string; color?: string }) {
+    const [row] = await this.db
+      .update(tags)
+      .set({ ...(dto.name !== undefined ? { name: dto.name.trim() } : {}), ...(dto.color !== undefined ? { color: dto.color } : {}), updatedAt: new Date() })
+      .where(and(eq(tags.id, id), eq(tags.organizationId, orgId)))
+      .returning();
+    if (!row) throw new NotFoundException("Tag not found");
+    return row;
+  }
+
+  /** Move every use of `id` onto `intoId`, then retire `id`. */
+  async mergeTag(orgId: string, id: string, intoId: string) {
+    if (id === intoId) throw new BadRequestException("Pick a different tag to merge into");
+    const [from, into] = await Promise.all([
+      this.db.query.tags.findFirst({ where: and(eq(tags.id, id), eq(tags.organizationId, orgId)) }),
+      this.db.query.tags.findFirst({ where: and(eq(tags.id, intoId), eq(tags.organizationId, orgId)) }),
+    ]);
+    if (!from || !into) throw new NotFoundException("Tag not found");
+    await this.db.transaction(async (tx) => {
+      const uses = await tx.select({ taskId: taskTags.taskId }).from(taskTags).where(eq(taskTags.tagId, id));
+      if (uses.length) {
+        await tx
+          .insert(taskTags)
+          .values(uses.map((u) => ({ taskId: u.taskId, tagId: intoId })))
+          .onConflictDoNothing();
+        await tx.delete(taskTags).where(eq(taskTags.tagId, id));
+      }
+      await tx.update(tags).set({ archivedAt: new Date(), updatedAt: new Date() }).where(eq(tags.id, id));
+    });
+    return { merged: from.name, into: into.name };
+  }
+
+  /** Retire: the tag disappears from pickers and filters; existing task links stay for history. */
+  async retireTag(orgId: string, id: string) {
+    const [row] = await this.db
+      .update(tags)
+      .set({ archivedAt: new Date(), updatedAt: new Date() })
+      .where(and(eq(tags.id, id), eq(tags.organizationId, orgId)))
+      .returning();
+    if (!row) throw new NotFoundException("Tag not found");
+    return { id, retired: true };
+  }
+
   async members(orgId: string) {
     const rows = await this.db.query.memberships.findMany({
       where: eq(memberships.organizationId, orgId),

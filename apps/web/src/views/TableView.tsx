@@ -36,6 +36,7 @@ export function TableView({ tasks, statuses, members, sort, sortDir, onSort, onO
               <Th className="w-28" onClick={() => onSort("priority")}>
                 Priority{arrow("priority")}
               </Th>
+              <Th className="w-40">Tags</Th>
               <Th className="w-28">Estimate</Th>
               <Th className="w-32">Stage</Th>
             </tr>
@@ -57,13 +58,22 @@ export function TableView({ tasks, statuses, members, sort, sortDir, onSort, onO
                 <Td>
                   <PriorityCell task={t} onUpdate={onUpdate} />
                 </Td>
+                <Td>
+                  <span className="flex flex-wrap gap-1">
+                    {(t.tags ?? []).map((tag) => (
+                      <span key={tag.id} className="rounded-full px-1.5 text-[10px] font-medium" style={{ background: `${tag.color}22`, color: tag.color }}>
+                        {tag.name}
+                      </span>
+                    ))}
+                  </span>
+                </Td>
                 <Td className="text-xs text-slate-500">{t.timeEstimateMinutes ? formatEstimate(t.timeEstimateMinutes) : "—"}</Td>
                 <Td className="text-xs text-slate-500">{t.stage?.name ?? "—"}</Td>
               </tr>
             ))}
             {!rows.length && (
               <tr>
-                <td colSpan={8} className="px-4 py-6 text-center text-xs text-muted-foreground">
+                <td colSpan={9} className="px-4 py-6 text-center text-xs text-muted-foreground">
                   No tasks
                 </td>
               </tr>

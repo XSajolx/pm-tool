@@ -99,6 +99,8 @@ export interface Tag {
   id: string;
   name: string;
   color: string;
+  /** Only present from getTags({ usage: true }). */
+  taskCount?: number;
 }
 
 export interface SpaceOverview {
@@ -1047,9 +1049,14 @@ export const api = {
     }),
   removeBookmark: (spaceId: string, id: string) =>
     request<{ id: string }>(`/spaces/${spaceId}/bookmarks/${id}`, { method: "DELETE" }),
-  getTags: (spaceId: string) => request<Tag[]>(`/spaces/${spaceId}/tags`),
-  createTag: (spaceId: string, body: { name: string; color?: string }) =>
-    request<Tag>(`/spaces/${spaceId}/tags`, { method: "POST", body: JSON.stringify(body) }),
+  getTags: (opts: { usage?: boolean } = {}) => request<Tag[]>(`/tags${opts.usage ? "?usage=true" : ""}`),
+  createTag: (body: { name: string; color?: string }) =>
+    request<Tag>(`/tags`, { method: "POST", body: JSON.stringify(body) }),
+  updateTag: (id: string, body: { name?: string; color?: string }) =>
+    request<Tag>(`/tags/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  mergeTag: (id: string, into: string) =>
+    request<{ merged: string; into: string }>(`/tags/${id}/merge`, { method: "POST", body: JSON.stringify({ into }) }),
+  retireTag: (id: string) => request<{ id: string }>(`/tags/${id}`, { method: "DELETE" }),
   addTaskTag: (taskId: string, tagId: string) =>
     request<Task>(`/tasks/${taskId}/tags`, { method: "POST", body: JSON.stringify({ tagId }) }),
   removeTaskTag: (taskId: string, tagId: string) =>

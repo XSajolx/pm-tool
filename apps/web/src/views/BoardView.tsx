@@ -135,6 +135,15 @@ function CardBody({ task, dragging }: { task: Task; dragging?: boolean }) {
         )}
         <p className="text-sm leading-snug text-slate-800">{task.title}</p>
       </div>
+      {task.tags && task.tags.length > 0 && (
+        <div className="mt-1.5 flex flex-wrap gap-1">
+          {task.tags.map((t) => (
+            <span key={t.id} className="rounded-full px-1.5 text-[10px] font-medium" style={{ background: `${t.color}22`, color: t.color }}>
+              {t.name}
+            </span>
+          ))}
+        </div>
+      )}
       <div className="mt-2.5 flex items-center justify-between">
         <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
           {task.reference ?? ""}

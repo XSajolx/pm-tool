@@ -102,10 +102,11 @@ export function SubtasksSection({ task, listId }: { task: Task; listId: string }
 }
 
 /** Labels on the task, drawn from the space's tag set; new ones can be made inline. */
-export function TagsField({ task, spaceId }: { task: Task; spaceId?: string }) {
+export function TagsField({ task }: { task: Task; spaceId?: string }) {
   const qc = useQueryClient();
   const [newName, setNewName] = useState("");
-  const { data: all = [] } = useQuery({ queryKey: ["tags", spaceId], queryFn: () => api.getTags(spaceId!), enabled: Boolean(spaceId) });
+  const { data: all = [] } = useQuery({ queryKey: ["tags"], queryFn: () => api.getTags() });
+  const spaceId = "workspace";
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ["task", task.id] });
     qc.invalidateQueries({ queryKey: ["tasks"] });
@@ -113,10 +114,10 @@ export function TagsField({ task, spaceId }: { task: Task; spaceId?: string }) {
   const add = useMutation({ mutationFn: (tagId: string) => api.addTaskTag(task.id, tagId), onSuccess: refresh });
   const remove = useMutation({ mutationFn: (tagId: string) => api.removeTaskTag(task.id, tagId), onSuccess: refresh });
   const create = useMutation({
-    mutationFn: () => api.createTag(spaceId!, { name: newName.trim(), color: TAG_COLORS[newName.length % TAG_COLORS.length] }),
+    mutationFn: () => api.createTag({ name: newName.trim(), color: TAG_COLORS[newName.length % TAG_COLORS.length] }),
     onSuccess: (tag) => {
       setNewName("");
-      qc.invalidateQueries({ queryKey: ["tags", spaceId] });
+      qc.invalidateQueries({ queryKey: ["tags"] });
       add.mutate(tag.id);
     },
   });

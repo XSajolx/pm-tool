@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, type StageTemplate, type Status } from "../lib/api.js";
+import { api, type StageTemplate, type Status, type Tag } from "../lib/api.js";
 import { useAuth } from "../lib/auth.js";
 import { PRIORITY } from "../components/ui.js";
 import type { Priority } from "../lib/api.js";
@@ -9,12 +9,13 @@ import type { Priority } from "../lib/api.js";
  * Workspace settings. Sections are added as the roadmap lands; each one is a
  * self-contained panel that owns its own queries.
  */
-type Section = "statuses" | "priorities" | "stages";
+type Section = "statuses" | "priorities" | "stages" | "tags";
 
 const SECTIONS: { id: Section; label: string; hint: string }[] = [
   { id: "statuses", label: "Task statuses", hint: "Per space: names, colours, order, done state" },
   { id: "priorities", label: "Priorities", hint: "The four priority levels" },
   { id: "stages", label: "Stage templates", hint: "Default stage sequences for new projects" },
+  { id: "tags", label: "Tags", hint: "Workspace tags: rename, recolour, merge, retire" },
 ];
 
 export function SettingsPage() {
@@ -50,6 +51,7 @@ export function SettingsPage() {
           {section === "statuses" && <StatusSettings canEdit={canEdit} />}
           {section === "priorities" && <PrioritySettings />}
           {section === "stages" && <StageTemplateSettings canEdit={canEdit} />}
+          {section === "tags" && <TagSettings canEdit={canEdit} />}
         </div>
       </div>
     </div>
@@ -399,6 +401,117 @@ function TemplateRow({ template, canEdit, onSave, onDelete }: { template: StageT
           </button>
         )}
       </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * Tags — one workspace-wide set used across every project
+ * ------------------------------------------------------------------ */
+const TAG_PALETTE = ["#6366f1", "#0ea5e9", "#22c55e", "#f59e0b", "#ef4444", "#a855f7", "#64748b", "#ec4899", "#14b8a6"];
+
+function TagSettings({ canEdit }: { canEdit: boolean }) {
+  const qc = useQueryClient();
+  const { data: tags = [] } = useQuery({ queryKey: ["tags", "usage"], queryFn: () => api.getTags({ usage: true }) });
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ["tags"] });
+    qc.invalidateQueries({ queryKey: ["tasks"] });
+  };
+  const [newName, setNewName] = useState("");
+  const [merging, setMerging] = useState<Tag | null>(null);
+  const [mergeInto, setMergeInto] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  const create = useMutation({
+    mutationFn: () => api.createTag({ name: newName.trim(), color: TAG_PALETTE[tags.length % TAG_PALETTE.length] }),
+    onSuccess: () => {
+      setNewName("");
+      invalidate();
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+  const update = useMutation({
+    mutationFn: ({ id, ...body }: { id: string; name?: string; color?: string }) => api.updateTag(id, body),
+    onSuccess: invalidate,
+    onError: (e: Error) => setError(e.message),
+  });
+  const merge = useMutation({
+    mutationFn: ({ id, into }: { id: string; into: string }) => api.mergeTag(id, into),
+    onSuccess: () => {
+      setMerging(null);
+      setMergeInto("");
+      invalidate();
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+  const retire = useMutation({ mutationFn: (id: string) => api.retireTag(id), onSuccess: invalidate, onError: (e: Error) => setError(e.message) });
+
+  return (
+    <div>
+      <h1 className="text-lg font-semibold text-slate-900">Tags</h1>
+      <p className="mb-4 text-xs text-muted-foreground">
+        One colour-coded set for the whole workspace (bug, design, client-review…), so filters mean the same thing in every project.
+        Retired tags disappear from pickers; merging moves every task to the other tag.
+      </p>
+      {error && (
+        <div className="mb-3 flex items-center justify-between rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+          {error}
+          <button type="button" onClick={() => setError(null)} className="ml-3 text-red-500">✕</button>
+        </div>
+      )}
+      <div className="overflow-hidden rounded-lg border border-border bg-white">
+        {tags.map((t) => (
+          <div key={t.id} className="flex items-center gap-3 border-b border-border px-3 py-2 last:border-b-0">
+            <label className="relative h-5 w-5 shrink-0 cursor-pointer rounded-full ring-1 ring-black/10" style={{ background: t.color }} title="Colour">
+              <input type="color" value={t.color} disabled={!canEdit} onChange={(e) => update.mutate({ id: t.id, color: e.target.value })} className="absolute inset-0 cursor-pointer opacity-0" />
+            </label>
+            <InlineName value={t.name} disabled={!canEdit} onCommit={(name) => update.mutate({ id: t.id, name })} />
+            <span className="w-20 text-right text-[11px] text-muted-foreground">
+              {t.taskCount ?? 0} task{(t.taskCount ?? 0) === 1 ? "" : "s"}
+            </span>
+            {canEdit && (
+              <>
+                <button type="button" onClick={() => setMerging(t)} className="text-xs text-slate-500 hover:text-indigo-700">Merge…</button>
+                <button type="button" onClick={() => retire.mutate(t.id)} className="text-xs text-slate-400 hover:text-red-500">Retire</button>
+              </>
+            )}
+          </div>
+        ))}
+        {!tags.length && <p className="px-3 py-3 text-xs text-muted-foreground">No tags yet.</p>}
+        {canEdit && (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (newName.trim()) create.mutate();
+            }}
+            className="flex items-center gap-2 bg-muted/40 px-3 py-2"
+          >
+            <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="New tag (e.g. client-review)…" className="flex-1 rounded-md border border-border bg-white px-2 py-1 text-sm outline-none focus:border-indigo-400" />
+            <button type="submit" disabled={!newName.trim() || create.isPending} className="rounded-md bg-indigo-600 px-3 py-1 text-xs font-medium text-white disabled:opacity-50">Add tag</button>
+          </form>
+        )}
+      </div>
+
+      {merging && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/30" onClick={() => setMerging(null)}>
+          <div className="w-96 rounded-lg bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-sm font-semibold text-slate-900">Merge “{merging.name}” into…</h2>
+            <p className="mt-1 text-xs text-muted-foreground">Every task tagged “{merging.name}” gets the tag you pick, and “{merging.name}” is retired.</p>
+            <select value={mergeInto} onChange={(e) => setMergeInto(e.target.value)} className="mt-3 w-full rounded-md border border-border bg-white px-2 py-1 text-sm">
+              <option value="">Choose a tag…</option>
+              {tags.filter((t) => t.id !== merging.id).map((t) => (
+                <option key={t.id} value={t.id}>{t.name}</option>
+              ))}
+            </select>
+            <div className="mt-4 flex justify-end gap-2">
+              <button type="button" onClick={() => setMerging(null)} className="rounded-md px-3 py-1.5 text-xs text-slate-600 hover:bg-muted">Cancel</button>
+              <button type="button" disabled={!mergeInto} onClick={() => merge.mutate({ id: merging.id, into: mergeInto })} className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50">
+                Merge tags
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

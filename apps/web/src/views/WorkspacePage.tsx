@@ -25,6 +25,7 @@ const VIEWS: { key: ViewKey; label: string; icon: string }[] = [
 interface ViewSettings {
   priority?: string;
   assignee?: string;
+  tag?: string;
   groupBy?: GroupBy;
   sort?: SortKey;
   sortDir?: SortDir;
@@ -40,12 +41,14 @@ export function WorkspacePage() {
   const [draft, setDraft] = useState("");
   const [assigneeFilter, setAssigneeFilter] = useState("all");
   const [priorityFilter, setPriorityFilter] = useState("all");
+  const [tagFilter, setTagFilter] = useState("all");
   const [groupBy, setGroupBy] = useState<GroupBy>("status");
   const [sort, setSort] = useState<SortKey>("manual");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
 
   const { data: spaces = [] } = useQuery({ queryKey: ["spaces"], queryFn: api.getSpaces });
   const { data: members = [] } = useQuery({ queryKey: ["members"], queryFn: api.getMembers });
+  const { data: tags = [] } = useQuery({ queryKey: ["tags"], queryFn: () => api.getTags() });
 
   const ctx = useMemo(() => {
     for (const s of spaces) {
@@ -130,6 +133,7 @@ export function WorkspacePage() {
     () =>
       tasks.filter((t) => {
         if (priorityFilter !== "all" && t.priority !== priorityFilter) return false;
+        if (tagFilter !== "all" && !(t.tags ?? []).some((tag) => tag.id === tagFilter)) return false;
         if (assigneeFilter === "unassigned" && t.assignees.length) return false;
         if (
           assigneeFilter !== "all" &&
@@ -139,7 +143,7 @@ export function WorkspacePage() {
           return false;
         return true;
       }),
-    [tasks, priorityFilter, assigneeFilter],
+    [tasks, priorityFilter, assigneeFilter, tagFilter],
   );
 
   return (
@@ -173,12 +177,13 @@ export function WorkspacePage() {
           listId={listId}
           spaceId={spaceId}
           layout={view}
-          filters={{ priority: priorityFilter, assignee: assigneeFilter, groupBy, sort, sortDir }}
+          filters={{ priority: priorityFilter, assignee: assigneeFilter, tag: tagFilter, groupBy, sort, sortDir }}
           onApply={(v) => {
             setView(v.layout);
             const f = v.filters as ViewSettings;
             setPriorityFilter(f.priority ?? "all");
             setAssigneeFilter(f.assignee ?? "all");
+            setTagFilter(f.tag ?? "all");
             setGroupBy(f.groupBy ?? "status");
             setSort(f.sort ?? "manual");
             setSortDir(f.sortDir ?? "asc");
@@ -226,6 +231,12 @@ export function WorkspacePage() {
               ...members.map((m) => ({ value: m.id, label: m.name })),
             ]}
           />
+          <FilterSelect
+            label="Tag"
+            value={tagFilter}
+            onChange={setTagFilter}
+            options={[{ value: "all", label: "Any tag" }, ...tags.map((t) => ({ value: t.id, label: t.name }))]}
+          />
         </div>
       </div>
 
@@ -241,7 +252,7 @@ export function WorkspacePage() {
         <Button variant="primary" onClick={() => draft.trim() && createTask.mutate(draft.trim())}>
           Add Task
         </Button>
-        {(assigneeFilter !== "all" || priorityFilter !== "all") && (
+        {(assigneeFilter !== "all" || priorityFilter !== "all" || tagFilter !== "all") && (
           <span className="text-xs text-muted-foreground">
             {filtered.length} of {tasks.length} shown
           </span>
