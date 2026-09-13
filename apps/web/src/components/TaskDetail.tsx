@@ -136,14 +136,24 @@ export function TaskDetail({ taskId, listId, spaceId, statuses, members, onClose
                 </select>
               </Field>
 
+              <Field label="Start date">
+                <DateInput
+                  value={task.startDate}
+                  onChange={(iso) => save.mutate({ startDate: iso })}
+                />
+              </Field>
+
               <Field label="Due date">
-                <input
-                  type="date"
-                  value={task.dueDate ? task.dueDate.slice(0, 10) : ""}
-                  onChange={(e) =>
-                    save.mutate({ dueDate: new Date(e.target.value).toISOString() })
-                  }
-                  className="rounded-md border border-border bg-white px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-indigo-500/30"
+                <DateInput
+                  value={task.dueDate}
+                  onChange={(iso) => save.mutate({ dueDate: iso })}
+                />
+              </Field>
+
+              <Field label="Estimate">
+                <EstimateInput
+                  minutes={task.timeEstimateMinutes}
+                  onChange={(m) => save.mutate({ timeEstimateMinutes: m })}
                 />
               </Field>
 
@@ -229,4 +239,70 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       {children}
     </div>
   );
+}
+
+/** Date picker that can also clear the value (sends null). Dates are stored as UTC midnight. */
+function DateInput({ value, onChange }: { value: string | null; onChange: (iso: string | null) => void }) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <input
+        type="date"
+        value={value ? value.slice(0, 10) : ""}
+        onChange={(e) => onChange(e.target.value ? new Date(e.target.value + "T00:00:00Z").toISOString() : null)}
+        className="rounded-md border border-border bg-white px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-indigo-500/30"
+      />
+      {value && (
+        <button type="button" onClick={() => onChange(null)} title="Clear" className="text-xs text-slate-400 hover:text-red-500">
+          ✕
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** Estimate typed as "2h", "90m", "1h 30m" or "1.5"; stored as whole minutes. */
+export function EstimateInput({ minutes, onChange }: { minutes: number | null; onChange: (m: number | null) => void }) {
+  const [text, setText] = useState(formatMinutes(minutes));
+  useEffect(() => setText(formatMinutes(minutes)), [minutes]);
+  const commit = () => {
+    const parsed = parseEstimate(text);
+    if (parsed === undefined) {
+      setText(formatMinutes(minutes));
+      return;
+    }
+    if (parsed !== minutes) onChange(parsed);
+  };
+  return (
+    <input
+      value={text}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+      placeholder="e.g. 2h 30m"
+      className="w-28 rounded-md border border-border bg-white px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-indigo-500/30"
+    />
+  );
+}
+
+export function formatMinutes(m: number | null | undefined): string {
+  if (!m) return "";
+  const h = Math.floor(m / 60);
+  const rest = m % 60;
+  return h && rest ? `${h}h ${rest}m` : h ? `${h}h` : `${rest}m`;
+}
+
+/** Returns null for empty, undefined for unparseable. */
+export function parseEstimate(text: string): number | null | undefined {
+  const t = text.trim().toLowerCase();
+  if (!t) return null;
+  if (/^\d+(\.\d+)?$/.test(t)) return Math.round(parseFloat(t) * 60);
+  let total = 0;
+  let matched = false;
+  for (const m of t.matchAll(/(\d+(?:\.\d+)?)\s*(h|hr|hrs|hour|hours|m|min|mins|minute|minutes|d|day|days)/g)) {
+    matched = true;
+    const n = parseFloat(m[1]!);
+    const unit = m[2]!;
+    total += unit.startsWith("d") ? n * 8 * 60 : unit.startsWith("h") ? n * 60 : n;
+  }
+  return matched ? Math.round(total) : undefined;
 }

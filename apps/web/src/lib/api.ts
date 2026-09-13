@@ -197,7 +197,10 @@ export interface Task {
   description: string | null;
   reference: string | null;
   priority: Priority | null;
+  startDate: string | null;
   dueDate: string | null;
+  /** Whole minutes. */
+  timeEstimateMinutes: number | null;
   statusId: string | null;
   status: Status | null;
   assignees: { user: Member }[];
@@ -255,6 +258,18 @@ export interface TaskComment {
   assignee: { id: string; name: string; avatarUrl: string | null } | null;
   task?: { id: string; title: string; reference: string | null; status: Status | null } | null;
 }
+
+/** Fields PATCH /tasks/:id accepts. `null` clears a value. */
+export type TaskPatch = Partial<{
+  title: string;
+  description: string;
+  statusId: string;
+  priority: Priority | null;
+  startDate: string | null;
+  dueDate: string | null;
+  timeEstimateMinutes: number | null;
+  assigneeIds: string[];
+}>;
 
 export interface MyTask extends Task {
   list: { id: string; name: string } | null;
@@ -622,18 +637,28 @@ export const api = {
     listId: string;
     title: string;
     statusId?: string;
-    priority?: Priority;
+    priority?: Priority | null;
+    parentTaskId?: string;
+    startDate?: string | null;
+    dueDate?: string | null;
+    timeEstimateMinutes?: number | null;
+    assigneeIds?: string[];
+    description?: string;
   }) => request<Task>(`/tasks`, { method: "POST", body: JSON.stringify(body) }),
-  updateTask: (
-    id: string,
-    body: Partial<{
-      title: string;
-      description: string;
-      statusId: string;
-      priority: Priority;
-      dueDate: string;
-    }>,
-  ) => request<Task>(`/tasks/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  updateTask: (id: string, body: TaskPatch) =>
+    request<Task>(`/tasks/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  // ---- Statuses (per space; owner/admin) ----
+  createStatus: (spaceId: string, body: { name: string; color?: string; category?: Status["category"] }) =>
+    request<Status>(`/spaces/${spaceId}/statuses`, { method: "POST", body: JSON.stringify(body) }),
+  updateStatus: (id: string, body: Partial<{ name: string; color: string; category: Status["category"] }>) =>
+    request<Status>(`/statuses/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  reorderStatuses: (spaceId: string, ids: string[]) =>
+    request<Status[]>(`/spaces/${spaceId}/statuses/order`, { method: "PUT", body: JSON.stringify({ ids }) }),
+  deleteStatus: (id: string, reassignTo?: string) =>
+    request<{ id: string; deleted: boolean; movedTasks: number }>(
+      `/statuses/${id}${reassignTo ? "?reassignTo=" + reassignTo : ""}`,
+      { method: "DELETE" },
+    ),
   deleteTask: (id: string) => request<void>(`/tasks/${id}`, { method: "DELETE" }),
   addAssignee: (taskId: string, userId: string) =>
     request<Task>(`/tasks/${taskId}/assignees`, {

@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, UsePipes } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, UsePipes } from "@nestjs/common";
 import { z } from "zod";
 import { ZodValidationPipe } from "../../common/zod-validation.pipe.js";
 import { WorkspaceService } from "./workspace.service.js";
@@ -16,6 +16,12 @@ const tagSchema = z.object({
   name: z.string().min(1).max(64),
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
 });
+const statusSchema = z.object({
+  name: z.string().min(1).max(64),
+  color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+  category: z.enum(["not_started", "active", "done", "closed"]).optional(),
+});
+const statusOrderSchema = z.object({ ids: z.array(z.string().uuid()).min(1) });
 const inviteSchema = z.object({
   email: z.string().email(),
   name: z.string().max(255).optional(),
@@ -77,6 +83,34 @@ export class WorkspaceController {
   @Get("spaces/:id/statuses")
   statuses(@Auth() auth: AuthContext, @Param("id") spaceId: string) {
     return this.workspace.statusesForSpace(auth.orgId, spaceId);
+  }
+
+  @Post("spaces/:id/statuses")
+  @Roles("owner", "admin")
+  @UsePipes(new ZodValidationPipe(statusSchema))
+  createStatus(@Auth() auth: AuthContext, @Param("id") spaceId: string, @Body() dto: z.infer<typeof statusSchema>) {
+    return this.workspace.createStatus(auth.orgId, spaceId, dto);
+  }
+
+  @Put("spaces/:id/statuses/order")
+  @Roles("owner", "admin")
+  @UsePipes(new ZodValidationPipe(statusOrderSchema))
+  reorderStatuses(@Auth() auth: AuthContext, @Param("id") spaceId: string, @Body() dto: z.infer<typeof statusOrderSchema>) {
+    return this.workspace.reorderStatuses(auth.orgId, spaceId, dto.ids);
+  }
+
+  @Patch("statuses/:id")
+  @Roles("owner", "admin")
+  @UsePipes(new ZodValidationPipe(statusSchema.partial()))
+  updateStatus(@Auth() auth: AuthContext, @Param("id") id: string, @Body() dto: Partial<z.infer<typeof statusSchema>>) {
+    return this.workspace.updateStatus(auth.orgId, id, dto);
+  }
+
+  /** Tasks in the deleted status move to `reassignTo` (required when any task uses it). */
+  @Delete("statuses/:id")
+  @Roles("owner", "admin")
+  deleteStatus(@Auth() auth: AuthContext, @Param("id") id: string, @Query("reassignTo") reassignTo?: string) {
+    return this.workspace.deleteStatus(auth.orgId, id, reassignTo || undefined);
   }
 
   @Get("spaces/:id/tags")

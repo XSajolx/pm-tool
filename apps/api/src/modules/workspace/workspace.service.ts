@@ -17,6 +17,8 @@ import {
 } from "../../db/schema.js";
 import type { Role } from "../auth/auth.types.js";
 
+type StatusCategory = "not_started" | "active" | "done" | "closed";
+
 /** The statuses every new space starts with — same set the seed and Projects use. */
 const DEFAULT_STATUSES = [
   { name: "To Do", category: "not_started", color: "#94a3b8", position: 1 },
@@ -100,6 +102,72 @@ export class WorkspaceService {
       where: and(eq(statuses.organizationId, orgId), eq(statuses.spaceId, spaceId)),
       orderBy: (s) => [asc(s.position)],
     });
+  }
+
+  async createStatus(orgId: string, spaceId: string, dto: { name: string; color?: string; category?: StatusCategory }) {
+    await this.assertSpace(orgId, spaceId);
+    const [max] = await this.db
+      .select({ m: sql<number>`coalesce(max(${statuses.position}), 0)` })
+      .from(statuses)
+      .where(eq(statuses.spaceId, spaceId));
+    const [row] = await this.db
+      .insert(statuses)
+      .values({
+        organizationId: orgId,
+        spaceId,
+        name: dto.name.trim(),
+        color: dto.color ?? "#6b7280",
+        category: dto.category ?? "active",
+        position: Number(max?.m ?? 0) + 1,
+      })
+      .returning();
+    return row!;
+  }
+
+  async updateStatus(orgId: string, id: string, dto: { name?: string; color?: string; category?: StatusCategory }) {
+    const [row] = await this.db
+      .update(statuses)
+      .set({ ...dto, name: dto.name?.trim() })
+      .where(and(eq(statuses.id, id), eq(statuses.organizationId, orgId)))
+      .returning();
+    if (!row) throw new NotFoundException("Status not found");
+    return row;
+  }
+
+  /** Positions follow the order of `ids`; ids from another space are ignored. */
+  async reorderStatuses(orgId: string, spaceId: string, ids: string[]) {
+    await this.assertSpace(orgId, spaceId);
+    await this.db.transaction(async (tx) => {
+      for (const [i, id] of ids.entries()) {
+        await tx
+          .update(statuses)
+          .set({ position: i + 1 })
+          .where(and(eq(statuses.id, id), eq(statuses.spaceId, spaceId), eq(statuses.organizationId, orgId)));
+      }
+    });
+    return this.statusesForSpace(orgId, spaceId);
+  }
+
+  async deleteStatus(orgId: string, id: string, reassignTo?: string) {
+    const status = await this.db.query.statuses.findFirst({
+      where: and(eq(statuses.id, id), eq(statuses.organizationId, orgId)),
+    });
+    if (!status) throw new NotFoundException("Status not found");
+    const siblings = await this.statusesForSpace(orgId, status.spaceId);
+    if (siblings.length <= 1) throw new BadRequestException("A space needs at least one status");
+    const [cnt] = await this.db
+      .select({ n: sql<number>`count(*)` })
+      .from(tasks)
+      .where(and(eq(tasks.statusId, id), isNull(tasks.archivedAt)));
+    const n = Number(cnt?.n ?? 0);
+    const inUse = n > 0;
+    if (inUse) {
+      const target = siblings.find((s) => s.id === reassignTo);
+      if (!target) throw new BadRequestException("Tasks use this status — pick another status to move them to");
+      await this.db.update(tasks).set({ statusId: target.id }).where(eq(tasks.statusId, id));
+    }
+    await this.db.delete(statuses).where(eq(statuses.id, id));
+    return { id, deleted: true, movedTasks: n };
   }
 
   /* ---- Tags (labels) live on the space, like statuses ---- */

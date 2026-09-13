@@ -149,9 +149,11 @@ export class TasksService {
         title: dto.title,
         description: dto.description,
         statusId: dto.statusId,
-        priority: dto.priority,
+        priority: dto.priority ?? undefined,
         parentTaskId: dto.parentTaskId,
+        startDate: dto.startDate ? new Date(dto.startDate) : undefined,
         dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
+        timeEstimateMinutes: dto.timeEstimateMinutes ?? undefined,
         createdById: userId,
       })
       .returning();
@@ -200,9 +202,13 @@ export class TasksService {
     });
     if (!before) throw new NotFoundException("Task not found");
 
+    // `assigneeIds` is not a column; it is synced separately below.
+    const { assigneeIds, ...fields } = dto;
+    const toDate = (v: string | null | undefined) => (v === undefined ? undefined : v ? new Date(v) : null);
     const patch: Record<string, unknown> = {
-      ...dto,
-      dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
+      ...fields,
+      startDate: toDate(dto.startDate),
+      dueDate: toDate(dto.dueDate),
       updatedAt: new Date(),
     };
 
@@ -223,9 +229,11 @@ export class TasksService {
       .where(and(eq(tasks.id, id), eq(tasks.organizationId, orgId)))
       .returning();
 
+    if (assigneeIds) await this.syncAssignees(orgId, userId, id, assigneeIds);
+
     const changes = this.activity.diff(
       before as unknown as Record<string, unknown>,
-      dto as unknown as Record<string, unknown>,
+      fields as unknown as Record<string, unknown>,
       TRACKED_FIELDS,
     );
 
@@ -261,6 +269,18 @@ export class TasksService {
     }
 
     return task;
+  }
+
+
+  /** Replace the assignee set (used by PATCH and bulk edits); records add/remove activity per user. */
+  async syncAssignees(orgId: string, actorId: string, taskId: string, userIds: string[]) {
+    const current = await this.db.query.taskAssignees.findMany({
+      where: and(eq(taskAssignees.taskId, taskId), eq(taskAssignees.organizationId, orgId)),
+    });
+    const have = new Set(current.map((a) => a.userId));
+    const want = new Set(userIds);
+    for (const userId of want) if (!have.has(userId)) await this.addAssignee(orgId, actorId, taskId, userId);
+    for (const userId of have) if (!want.has(userId)) await this.removeAssignee(orgId, actorId, taskId, userId);
   }
 
   async addAssignee(orgId: string, actorId: string, taskId: string, userId: string) {
