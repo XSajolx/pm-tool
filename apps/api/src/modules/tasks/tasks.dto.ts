@@ -25,3 +25,17 @@ export const updateTaskSchema = createTaskSchema.partial().omit({ listId: true }
 
 export type CreateTaskDto = z.infer<typeof createTaskSchema>;
 export type UpdateTaskDto = z.infer<typeof updateTaskSchema>;
+
+/** PATCH /tasks/bulk — the same patch applied to many tasks, plus tag add/remove and move-to-list. */
+export const bulkUpdateSchema = z.object({
+  ids: z.array(z.string().uuid()).min(1).max(200),
+  patch: updateTaskSchema
+    .pick({ statusId: true, priority: true, dueDate: true, startDate: true, assigneeIds: true, stageId: true, milestoneId: true })
+    .extend({
+      addTagIds: z.array(z.string().uuid()).optional(),
+      removeTagIds: z.array(z.string().uuid()).optional(),
+      /** Move to another list (possibly another project/space). */
+      listId: z.string().uuid().optional(),
+    }),
+});
+export type BulkUpdateDto = z.infer<typeof bulkUpdateSchema>;

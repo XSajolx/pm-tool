@@ -316,6 +316,19 @@ export type MilestoneWrite = Partial<{
   clientVisible: boolean;
 }>;
 
+export type BulkTaskPatch = Partial<{
+  statusId: string;
+  priority: Priority | null;
+  dueDate: string | null;
+  startDate: string | null;
+  assigneeIds: string[];
+  stageId: string | null;
+  milestoneId: string | null;
+  addTagIds: string[];
+  removeTagIds: string[];
+  listId: string;
+}>;
+
 export type StageStatus = "not_started" | "active" | "completed";
 export interface Stage {
   id: string;
@@ -774,6 +787,11 @@ export const api = {
       body: JSON.stringify({ resolved }),
     }),
   getMyTasks: (includeDone = false) => request<MyTask[]>(`/tasks/mine${includeDone ? "?includeDone=true" : ""}`),
+  bulkUpdateTasks: (ids: string[], patch: BulkTaskPatch) =>
+    request<{ updated: number; failed: { id: string; error?: string }[] }>(`/tasks/bulk`, {
+      method: "PATCH",
+      body: JSON.stringify({ ids, patch }),
+    }),
   completeTask: (id: string) => request<Task>(`/tasks/${id}/complete`, { method: "POST" }),
   reopenTask: (id: string) => request<Task>(`/tasks/${id}/reopen`, { method: "POST" }),
   getRelations: (taskId: string) => request<TaskRelation[]>(`/tasks/${taskId}/relations`),

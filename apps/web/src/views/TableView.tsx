@@ -12,10 +12,13 @@ interface Props {
   onSort: (key: SortKey) => void;
   onOpenTask: (id: string) => void;
   onUpdate: UpdateTask;
+  selected: Set<string>;
+  onToggleSelect: (id: string, checked: boolean) => void;
+  onToggleAll: (checked: boolean) => void;
 }
 
 /** Flat spreadsheet-style Table view: click a header to sort, edit cells inline. */
-export function TableView({ tasks, statuses, members, sort, sortDir, onSort, onOpenTask, onUpdate }: Props) {
+export function TableView({ tasks, statuses, members, sort, sortDir, onSort, onOpenTask, onUpdate, selected, onToggleSelect, onToggleAll }: Props) {
   const rows = useMemo(() => sortTasks(tasks, sort, sortDir, statuses), [tasks, sort, sortDir, statuses]);
   const arrow = (key: SortKey) => (sort === key ? (sortDir === "asc" ? " ↑" : " ↓") : "");
   return (
@@ -24,6 +27,15 @@ export function TableView({ tasks, statuses, members, sort, sortDir, onSort, onO
         <table className="w-full border-collapse text-sm">
           <thead>
             <tr className="border-b border-border bg-muted/50 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              <Th className="w-8">
+                <input
+                  type="checkbox"
+                  checked={rows.length > 0 && rows.every((t) => selected.has(t.id))}
+                  onChange={(e) => onToggleAll(e.target.checked)}
+                  className="h-3.5 w-3.5 cursor-pointer accent-indigo-600"
+                  aria-label="Select all"
+                />
+              </Th>
               <Th className="w-12">ID</Th>
               <Th onClick={() => onSort("title")}>Name{arrow("title")}</Th>
               <Th className="w-40" onClick={() => onSort("status")}>
@@ -43,7 +55,17 @@ export function TableView({ tasks, statuses, members, sort, sortDir, onSort, onO
           </thead>
           <tbody>
             {rows.map((t) => (
-              <tr key={t.id} onClick={() => onOpenTask(t.id)} className="cursor-pointer border-b border-border last:border-0 hover:bg-muted/40">
+              <tr key={t.id} onClick={() => onOpenTask(t.id)} className={`cursor-pointer border-b border-border last:border-0 hover:bg-muted/40 ${selected.has(t.id) ? "bg-indigo-50/60" : ""}`}>
+                <Td>
+                  <input
+                    type="checkbox"
+                    checked={selected.has(t.id)}
+                    onClick={(e) => e.stopPropagation()}
+                    onChange={(e) => onToggleSelect(t.id, e.target.checked)}
+                    className="h-3.5 w-3.5 cursor-pointer accent-indigo-600"
+                    aria-label="Select task"
+                  />
+                </Td>
                 <Td className="text-xs text-muted-foreground">{t.reference}</Td>
                 <Td className={`font-medium ${t.status?.category === "done" ? "text-slate-400 line-through" : "text-slate-800"}`}>{t.title}</Td>
                 <Td>
@@ -73,7 +95,7 @@ export function TableView({ tasks, statuses, members, sort, sortDir, onSort, onO
             ))}
             {!rows.length && (
               <tr>
-                <td colSpan={9} className="px-4 py-6 text-center text-xs text-muted-foreground">
+                <td colSpan={10} className="px-4 py-6 text-center text-xs text-muted-foreground">
                   No tasks
                 </td>
               </tr>

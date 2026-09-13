@@ -10,7 +10,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import type { Session } from "@supabase/supabase-js";
 import { supabase, supabaseConfigured } from "./supabase.js";
-import { api, API_CONFIGURED, setActiveOrg, getActiveOrg, type AuthedUser, type Membership } from "./api.js";
+import { api, API_CONFIGURED, setActiveOrg, getActiveOrg, type AuthedUser, type Membership, ApiError } from "./api.js";
 
 interface AuthState {
   /** null while we're still restoring a persisted session. */
@@ -112,16 +112,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     let active = true;
     setLoading(true);
-    loadMe()
-      .catch((err) => {
-        // A token we can't exchange for a user is useless — drop it rather than
-        // leaving the app in a half-signed-in state.
-        console.error("Failed to load profile", err);
-        void supabase.auth.signOut();
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
+    // Only a rejected token means the session is useless. A network blip or a
+    // restarting API is retried for a while instead of signing the user out.
+    const attempt = async (tries: number): Promise<void> => {
+      try {
+        await loadMe();
+      } catch (err) {
+        if (!active) return;
+        const status = err instanceof ApiError ? err.status : -1;
+        if (status === 401 || status === 403) {
+          console.error("Session rejected by the API — signing out", err);
+          void supabase.auth.signOut();
+          return;
+        }
+        if (tries >= 15) {
+          console.error("Failed to load profile after retries", err);
+          return;
+        }
+        await new Promise((r) => setTimeout(r, 2000));
+        if (active) return attempt(tries + 1);
+      }
+    };
+    void attempt(0).finally(() => {
+      if (active) setLoading(false);
+    });
     return () => {
       active = false;
     };

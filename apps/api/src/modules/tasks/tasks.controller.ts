@@ -12,12 +12,7 @@ import {
 import { z } from "zod";
 import { ZodValidationPipe } from "../../common/zod-validation.pipe.js";
 import { TasksService } from "./tasks.service.js";
-import {
-  createTaskSchema,
-  updateTaskSchema,
-  type CreateTaskDto,
-  type UpdateTaskDto,
-} from "./tasks.dto.js";
+import { createTaskSchema, updateTaskSchema, type CreateTaskDto, type UpdateTaskDto, bulkUpdateSchema, type BulkUpdateDto } from "./tasks.dto.js";
 import { Auth, Roles } from "../auth/auth.decorators.js";
 import type { AuthContext } from "../auth/auth.types.js";
 import { NotificationsService } from "../notifications/notifications.service.js";
@@ -80,6 +75,14 @@ export class TasksController {
   @UsePipes(new ZodValidationPipe(createTaskSchema))
   create(@Auth() auth: AuthContext, @Body() dto: CreateTaskDto) {
     return this.tasks.create(auth.orgId, auth.userId, dto);
+  }
+
+  /** Declared before ":id" so "bulk" is not read as a task id. */
+  @Patch("bulk")
+  @Roles("owner", "admin", "member")
+  @UsePipes(new ZodValidationPipe(bulkUpdateSchema))
+  bulk(@Auth() auth: AuthContext, @Body() dto: BulkUpdateDto) {
+    return this.tasks.bulkUpdate(auth.orgId, auth.userId, dto);
   }
 
   @Patch(":id")

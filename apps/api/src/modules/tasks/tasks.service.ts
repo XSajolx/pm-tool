@@ -14,7 +14,7 @@ import {
   taskTags,
   tasks,
 } from "../../db/schema.js";
-import type { CreateTaskDto, UpdateTaskDto } from "./tasks.dto.js";
+import type { BulkUpdateDto, CreateTaskDto, UpdateTaskDto } from "./tasks.dto.js";
 import { ActivityService, type FieldChange } from "../activity/activity.service.js";
 import { NotificationsService } from "../notifications/notifications.service.js";
 
@@ -330,6 +330,77 @@ export class TasksService {
     return task;
   }
 
+
+  /**
+   * Apply one change set to many tasks. Each task goes through `update` so
+   * status/completion rules, activity and notifications behave exactly as a
+   * single edit would. Moving to a list in another space re-maps the status
+   * to that space's first status and drops stage/milestone (they are
+   * project-specific).
+   */
+  async bulkUpdate(orgId: string, userId: string, dto: BulkUpdateDto) {
+    const { addTagIds = [], removeTagIds = [], listId, ...patch } = dto.patch;
+    let targetList: { id: string; spaceId: string } | null = null;
+    let targetStatusId: string | undefined;
+    if (listId) {
+      const list = await this.db.query.lists.findFirst({
+        where: and(eq(lists.id, listId), eq(lists.organizationId, orgId)),
+        columns: { id: true, spaceId: true },
+      });
+      if (!list) throw new NotFoundException("Target list not found");
+      targetList = list;
+      const first = await this.db.query.statuses.findFirst({
+        where: and(eq(statuses.spaceId, list.spaceId), eq(statuses.organizationId, orgId)),
+        orderBy: (st, { asc }) => [asc(st.position)],
+      });
+      targetStatusId = first?.id;
+    }
+
+    const results: { id: string; ok: boolean; error?: string }[] = [];
+    for (const id of dto.ids) {
+      try {
+        const before = await this.db.query.tasks.findFirst({
+          where: and(eq(tasks.id, id), eq(tasks.organizationId, orgId)),
+          with: { list: { columns: { spaceId: true } } },
+        });
+        if (!before) throw new NotFoundException("Task not found");
+
+        if (targetList && targetList.id !== before.listId) {
+          const crossSpace = targetList.spaceId !== before.list.spaceId;
+          await this.db
+            .update(tasks)
+            .set({
+              listId: targetList.id,
+              ...(crossSpace ? { statusId: targetStatusId ?? null, stageId: null, milestoneId: null } : {}),
+              updatedAt: new Date(),
+            })
+            .where(eq(tasks.id, id));
+          // Subtasks travel with their parent.
+          await this.db
+            .update(tasks)
+            .set({ listId: targetList.id, ...(crossSpace ? { statusId: targetStatusId ?? null, stageId: null, milestoneId: null } : {}) })
+            .where(eq(tasks.parentTaskId, id));
+          await this.activity.record({
+            orgId,
+            actorId: userId,
+            entityType: "task",
+            entityId: id,
+            action: "moved",
+            changes: [{ field: "listId", from: before.listId, to: targetList.id }],
+          });
+        }
+
+        const hasPatch = Object.values(patch).some((v) => v !== undefined);
+        if (hasPatch) await this.update(orgId, userId, id, patch);
+        for (const tagId of addTagIds) await this.addTag(orgId, userId, id, tagId);
+        for (const tagId of removeTagIds) await this.removeTag(orgId, userId, id, tagId);
+        results.push({ id, ok: true });
+      } catch (e) {
+        results.push({ id, ok: false, error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+    return { updated: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok), results };
+  }
 
   /** Replace the assignee set (used by PATCH and bulk edits); records add/remove activity per user. */
   async syncAssignees(orgId: string, actorId: string, taskId: string, userIds: string[]) {

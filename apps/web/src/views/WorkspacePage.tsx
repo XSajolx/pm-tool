@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useSearch } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, type Priority, type Task, type TaskPatch } from "../lib/api.js";
+import { api, type BulkTaskPatch, type Member, type Priority, type Status, type Tag, type Task, type TaskPatch, type SpaceTree } from "../lib/api.js";
 import { Button, PRIORITY } from "../components/ui.js";
 import { TaskDetail } from "../components/TaskDetail.js";
 import { ViewsAndCycles } from "../components/ViewsAndCycles.js";
@@ -42,6 +42,7 @@ export function WorkspacePage() {
   const [assigneeFilter, setAssigneeFilter] = useState("all");
   const [priorityFilter, setPriorityFilter] = useState("all");
   const [tagFilter, setTagFilter] = useState("all");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [groupBy, setGroupBy] = useState<GroupBy>("status");
   const [sort, setSort] = useState<SortKey>("manual");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
@@ -128,6 +129,22 @@ export function WorkspacePage() {
     },
   });
   const onUpdate = (taskId: string, patch: TaskPatch) => updateTask.mutate({ taskId, patch });
+
+  const toggleSelect = (id: string, checked: boolean) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  const bulk = useMutation({
+    mutationFn: (patch: BulkTaskPatch) => api.bulkUpdateTasks([...selected], patch),
+    onSuccess: () => {
+      setSelected(new Set());
+      qc.invalidateQueries({ queryKey: ["tasks"] });
+      qc.invalidateQueries({ queryKey: ["my-tasks"] });
+    },
+  });
 
   const filtered = useMemo(
     () =>
@@ -260,6 +277,22 @@ export function WorkspacePage() {
         )}
       </div>
 
+      {selected.size > 0 && (
+        <BulkBar
+          count={selected.size}
+          statuses={statuses}
+          members={members}
+          tags={tags}
+          spaces={spaces}
+          currentListId={listId}
+          pending={bulk.isPending}
+          onApply={(patch) => bulk.mutate(patch)}
+          onClear={() => setSelected(new Set())}
+          onSelectAll={() => setSelected(new Set(filtered.map((t) => t.id)))}
+          total={filtered.length}
+        />
+      )}
+
       {/* Active view */}
       <div className="flex-1 overflow-auto bg-[#fafafa]">
         {isLoading ? (
@@ -281,6 +314,8 @@ export function WorkspacePage() {
             sortDir={sortDir}
             onOpenTask={setOpenTaskId}
             onUpdate={onUpdate}
+            selected={selected}
+            onToggleSelect={toggleSelect}
           />
         ) : view === "calendar" ? (
           <CalendarView tasks={filtered} onOpenTask={setOpenTaskId} onReschedule={(taskId, dueDate) => onUpdate(taskId, { dueDate })} />
@@ -300,6 +335,9 @@ export function WorkspacePage() {
             }}
             onOpenTask={setOpenTaskId}
             onUpdate={onUpdate}
+            selected={selected}
+            onToggleSelect={toggleSelect}
+            onToggleAll={(checked) => setSelected(checked ? new Set(filtered.map((t) => t.id)) : new Set())}
           />
         )}
       </div>
@@ -403,6 +441,114 @@ function SaveTemplateButton({ listId, listName, disabled }: { listId: string; li
         </form>
       )}
       {result && <span className="absolute right-0 top-full z-30 mt-1 whitespace-nowrap rounded-md bg-slate-800 px-2 py-1 text-[11px] text-white">{result}</span>}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * Bulk actions bar (row 35): change status, assignee, due date, tags or
+ * list/project for every selected task in one go.
+ * ------------------------------------------------------------------ */
+function BulkBar({
+  count,
+  total,
+  statuses,
+  members,
+  tags,
+  spaces,
+  currentListId,
+  pending,
+  onApply,
+  onClear,
+  onSelectAll,
+}: {
+  count: number;
+  total: number;
+  statuses: Status[];
+  members: Member[];
+  tags: Tag[];
+  spaces: SpaceTree[];
+  currentListId: string;
+  pending: boolean;
+  onApply: (patch: BulkTaskPatch) => void;
+  onClear: () => void;
+  onSelectAll: () => void;
+}) {
+  const sel = "rounded-md border border-indigo-300 bg-white px-2 py-1 text-xs text-slate-700";
+  const lists = spaces.flatMap((sp) => [
+    ...sp.lists.map((l) => ({ id: l.id, label: `${sp.name} › ${l.name}` })),
+    ...sp.folders.flatMap((f) => f.lists.map((l) => ({ id: l.id, label: `${sp.name} › ${f.name} › ${l.name}` }))),
+  ]);
+  return (
+    <div className="flex flex-wrap items-center gap-2 border-b border-indigo-200 bg-indigo-50 px-5 py-2 text-xs">
+      <span className="font-semibold text-indigo-800">
+        {count} selected
+        {count < total && (
+          <button type="button" onClick={onSelectAll} className="ml-2 font-normal text-indigo-600 underline-offset-2 hover:underline">
+            select all {total}
+          </button>
+        )}
+      </span>
+      <select value="" disabled={pending} onChange={(e) => e.target.value && onApply({ statusId: e.target.value })} className={sel}>
+        <option value="">Status…</option>
+        {statuses.map((s) => (
+          <option key={s.id} value={s.id}>
+            {s.name}
+          </option>
+        ))}
+      </select>
+      <select value="" disabled={pending} onChange={(e) => e.target.value && onApply({ priority: e.target.value === "none" ? null : (e.target.value as Priority) })} className={sel}>
+        <option value="">Priority…</option>
+        {(Object.keys(PRIORITY) as Priority[]).map((p) => (
+          <option key={p} value={p}>
+            {PRIORITY[p].label}
+          </option>
+        ))}
+        <option value="none">No priority</option>
+      </select>
+      <select
+        value=""
+        disabled={pending}
+        onChange={(e) => e.target.value && onApply({ assigneeIds: e.target.value === "none" ? [] : [e.target.value] })}
+        className={sel}
+      >
+        <option value="">Assign to…</option>
+        {members.map((m) => (
+          <option key={m.id} value={m.id}>
+            {m.name}
+          </option>
+        ))}
+        <option value="none">Unassign</option>
+      </select>
+      <label className="flex items-center gap-1 text-slate-600">
+        Due
+        <input type="date" disabled={pending} onChange={(e) => e.target.value && onApply({ dueDate: `${e.target.value}T00:00:00.000Z` })} className={sel} />
+        <button type="button" disabled={pending} onClick={() => onApply({ dueDate: null })} className="text-slate-500 hover:text-red-500" title="Clear due date">
+          ✕
+        </button>
+      </label>
+      <select value="" disabled={pending} onChange={(e) => e.target.value && onApply({ addTagIds: [e.target.value] })} className={sel}>
+        <option value="">Add tag…</option>
+        {tags.map((t) => (
+          <option key={t.id} value={t.id}>
+            {t.name}
+          </option>
+        ))}
+      </select>
+      <select value="" disabled={pending} onChange={(e) => e.target.value && onApply({ listId: e.target.value })} className={sel}>
+        <option value="">Move to list…</option>
+        {lists
+          .filter((l) => l.id !== currentListId)
+          .map((l) => (
+            <option key={l.id} value={l.id}>
+              {l.label}
+            </option>
+          ))}
+      </select>
+      <button type="button" onClick={onClear} className="ml-auto text-slate-500 hover:text-slate-800">
+        Clear selection
+      </button>
+      {pending && <span className="text-indigo-700">Applying…</span>}
     </div>
   );
 }

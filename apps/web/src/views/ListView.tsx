@@ -13,6 +13,8 @@ interface Props {
   sortDir: SortDir;
   onOpenTask: (id: string) => void;
   onUpdate: UpdateTask;
+  selected: Set<string>;
+  onToggleSelect: (id: string, checked: boolean) => void;
 }
 
 /**
@@ -20,7 +22,7 @@ interface Props {
  * default), sortable, with inline edits for status, assignee, due date and
  * priority. Clicking the row itself opens the task panel.
  */
-export function ListView({ tasks, statuses, members, groupBy, sort, sortDir, onOpenTask, onUpdate }: Props) {
+export function ListView({ tasks, statuses, members, groupBy, sort, sortDir, onOpenTask, onUpdate, selected, onToggleSelect }: Props) {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const groups = useMemo(() => {
     const sorted = sortTasks(tasks, sort, sortDir, statuses);
@@ -30,7 +32,8 @@ export function ListView({ tasks, statuses, members, groupBy, sort, sortDir, onO
   return (
     <div className="p-4">
       <div className="overflow-hidden rounded-lg border border-border bg-white">
-        <div className="grid grid-cols-[1fr_130px_130px_120px_110px] items-center gap-2 border-b border-border bg-muted/50 px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+        <div className="grid grid-cols-[24px_1fr_130px_130px_120px_110px] items-center gap-2 border-b border-border bg-muted/50 px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <span />
           <span>Name</span>
           <span>Status</span>
           <span>Assignee</span>
@@ -60,8 +63,16 @@ export function ListView({ tasks, statuses, members, groupBy, sort, sortDir, onO
                     tabIndex={0}
                     onClick={() => onOpenTask(t.id)}
                     onKeyDown={(e) => e.key === "Enter" && onOpenTask(t.id)}
-                    className="grid w-full cursor-pointer grid-cols-[1fr_130px_130px_120px_110px] items-center gap-2 border-b border-border px-4 py-2 text-left last:border-0 hover:bg-muted/40"
+                    className={`grid w-full cursor-pointer grid-cols-[24px_1fr_130px_130px_120px_110px] items-center gap-2 border-b border-border px-4 py-2 text-left last:border-0 hover:bg-muted/40 ${selected.has(t.id) ? "bg-indigo-50/60" : ""}`}
                   >
+                    <input
+                      type="checkbox"
+                      checked={selected.has(t.id)}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={(e) => onToggleSelect(t.id, e.target.checked)}
+                      className="h-3.5 w-3.5 cursor-pointer accent-indigo-600"
+                      aria-label="Select task"
+                    />
                     <span className="flex min-w-0 items-center gap-2 text-sm text-slate-800">
                       {t.reference && <span className="text-[11px] text-muted-foreground">{t.reference}</span>}
                       <span className={`truncate ${t.status?.category === "done" ? "text-slate-400 line-through" : ""}`}>{t.title}</span>
