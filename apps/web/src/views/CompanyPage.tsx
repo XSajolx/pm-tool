@@ -4,11 +4,12 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api.js";
 import { fmtMoney, fmtShortDate } from "../lib/format.js";
 import { NotesPanel } from "../components/NotesPanel.js";
+import { CrmTasks } from "../components/CrmTasks.js";
 import { NotFound } from "../components/NotFound.js";
 import { STAGE_LABEL } from "./DealsPage.js";
 import { cn } from "../lib/utils.js";
 
-type Tab = "contacts" | "deals" | "estimates" | "notes";
+type Tab = "contacts" | "deals" | "tasks" | "estimates" | "notes";
 
 /** One company: details, its people, its pipeline, its paperwork, its notes. */
 export function CompanyPage() {
@@ -21,6 +22,9 @@ export function CompanyPage() {
     queryFn: () => api.getEstimates({ companyId }),
     enabled: tab === "estimates",
   });
+  // Open follow-ups count for the tab label (row 38).
+  const { data: crmTasks = [] } = useQuery({ queryKey: ["crm-tasks", { companyId }], queryFn: () => api.getCrmTasks({ companyId }) });
+  const openTasks = crmTasks.filter((t) => t.status?.category !== "done").length;
 
   if (isError) return <NotFound what="company" />;
   if (!company) {
@@ -48,7 +52,7 @@ export function CompanyPage() {
         </div>
 
         <div className="mt-5 flex gap-1 border-b border-border">
-          {(["contacts", "deals", "estimates", "notes"] as Tab[]).map((t) => (
+          {(["contacts", "deals", "tasks", "estimates", "notes"] as Tab[]).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -60,6 +64,7 @@ export function CompanyPage() {
               {t}
               {t === "contacts" && contacts.length ? ` (${contacts.length})` : ""}
               {t === "deals" && deals.length ? ` (${deals.length})` : ""}
+              {t === "tasks" && openTasks ? ` (${openTasks})` : ""}
             </button>
           ))}
         </div>
@@ -103,6 +108,8 @@ export function CompanyPage() {
               <Empty text="No deals with this company." link={{ to: "/crm/deals", label: "Open the pipeline" }} />
             )
           )}
+
+          {tab === "tasks" && <CrmTasks link={{ companyId }} />}
 
           {tab === "estimates" && (
             estimates.length ? (

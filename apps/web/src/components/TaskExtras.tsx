@@ -286,3 +286,102 @@ export function MilestoneField({ task, spaceId }: { task: Task; spaceId?: string
     </div>
   );
 }
+
+/**
+ * Row 38: attach the task to a client, contact and/or deal. Picking a deal
+ * fills in its company; picking a contact fills in theirs. The company name
+ * links to the client's page, where the task shows under "Tasks".
+ */
+export function CrmLinkField({ task }: { task: Task }) {
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const { data: companies = [] } = useQuery({ queryKey: ["companies"], queryFn: () => api.getCompanies(), enabled: open });
+  const companyId = task.companyId ?? task.company?.id ?? "";
+  const { data: contacts = [] } = useQuery({
+    queryKey: ["contacts", { companyId }],
+    queryFn: () => api.getContacts(companyId ? { companyId } : {}),
+    enabled: open,
+  });
+  const { data: deals = [] } = useQuery({ queryKey: ["deals"], queryFn: api.getDeals, enabled: open });
+  const set = useMutation({
+    mutationFn: (patch: TaskPatch) => api.updateTask(task.id, patch),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["task", task.id] });
+      qc.invalidateQueries({ queryKey: ["tasks"] });
+      qc.invalidateQueries({ queryKey: ["crm-tasks"] });
+    },
+  });
+  const linked = task.company || task.contact || task.deal;
+  const sel = "w-full rounded-md border border-border bg-white px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-indigo-500/30";
+  const visibleDeals = companyId ? deals.filter((d) => d.company?.id === companyId || d.id === task.dealId) : deals;
+
+  return (
+    <div className="grid grid-cols-[90px_1fr] items-start gap-2">
+      <span className="pt-1 text-xs font-medium text-muted-foreground">Client</span>
+      <div className="space-y-1.5">
+        {!open && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            {task.company && (
+              <Link to="/crm/companies/$companyId" params={{ companyId: task.company.id }} className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-xs text-indigo-700 hover:bg-indigo-100">
+                🏢 {task.company.name}
+              </Link>
+            )}
+            {task.contact && (
+              <span className="rounded-full border border-border bg-muted px-2 py-0.5 text-xs text-slate-700">
+                👤 {[task.contact.firstName, task.contact.lastName].filter(Boolean).join(" ")}
+              </span>
+            )}
+            {task.deal && (
+              <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs text-emerald-700" title={`Deal · ${task.deal.stage}`}>
+                💼 {task.deal.title}
+              </span>
+            )}
+            <button type="button" onClick={() => setOpen(true)} className="rounded-full border border-dashed border-border px-2 py-0.5 text-xs text-slate-500 hover:bg-muted">
+              {linked ? "Change" : "+ Link to client, contact or deal"}
+            </button>
+          </div>
+        )}
+        {open && (
+          <div className="space-y-1.5 rounded-md border border-border bg-[#fbfbfa] p-2">
+            <select
+              value={companyId}
+              onChange={(e) => set.mutate({ companyId: e.target.value || null, contactId: null, dealId: null })}
+              className={sel}
+              aria-label="Company"
+            >
+              <option value="">No company</option>
+              {companies.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+            <select value={task.contactId ?? task.contact?.id ?? ""} onChange={(e) => set.mutate({ contactId: e.target.value || null })} className={sel} aria-label="Contact">
+              <option value="">No contact</option>
+              {contacts.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.fullName}
+                  {c.company && !companyId ? ` · ${c.company.name}` : ""}
+                </option>
+              ))}
+            </select>
+            <select value={task.dealId ?? task.deal?.id ?? ""} onChange={(e) => set.mutate({ dealId: e.target.value || null })} className={sel} aria-label="Deal">
+              <option value="">No deal</option>
+              {visibleDeals.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.title}
+                  {d.company && !companyId ? ` · ${d.company.name}` : ""}
+                </option>
+              ))}
+            </select>
+            <div className="flex justify-end">
+              <button type="button" onClick={() => setOpen(false)} className="text-xs font-medium text-indigo-600 hover:text-indigo-700">
+                Done
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

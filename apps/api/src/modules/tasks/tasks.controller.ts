@@ -53,6 +53,17 @@ export class TasksController {
     return this.tasks.mine(auth.orgId, auth.userId, includeDone === "true");
   }
 
+  /** Follow-ups attached to a company, contact or deal (row 38). */
+  @Get("crm")
+  forCrm(
+    @Auth() auth: AuthContext,
+    @Query("companyId") companyId?: string,
+    @Query("contactId") contactId?: string,
+    @Query("dealId") dealId?: string,
+  ) {
+    return this.tasks.forCrm(auth.orgId, { companyId, contactId, dealId });
+  }
+
   @Post(":id/complete")
   @Roles("owner", "admin", "member")
   complete(@Auth() auth: AuthContext, @Param("id") id: string) {

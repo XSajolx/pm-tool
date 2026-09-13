@@ -213,6 +213,13 @@ export interface Task {
   recurrence?: Recurrence | null;
   recurrenceInterval?: number;
   recurredFromId?: string | null;
+  /** CRM links (row 38). */
+  companyId?: string | null;
+  contactId?: string | null;
+  dealId?: string | null;
+  company?: { id: string; name: string } | null;
+  contact?: { id: string; firstName: string; lastName: string | null } | null;
+  deal?: { id: string; title: string; stage: DealStage } | null;
   parentTaskId?: string | null;
   subtasks: {
     id: string;
@@ -283,6 +290,9 @@ export type Recurrence = "daily" | "weekly" | "monthly";
 export type TaskPatch = Partial<{
   recurrence: Recurrence | null;
   recurrenceInterval: number;
+  companyId: string | null;
+  contactId: string | null;
+  dealId: string | null;
   title: string;
   description: string;
   statusId: string;
@@ -734,7 +744,18 @@ export const api = {
     timeEstimateMinutes?: number | null;
     assigneeIds?: string[];
     description?: string;
+    companyId?: string | null;
+    contactId?: string | null;
+    dealId?: string | null;
   }) => request<Task>(`/tasks`, { method: "POST", body: JSON.stringify(body) }),
+  /** Tasks attached to a company / contact / deal (row 38). */
+  getCrmTasks: (link: { companyId?: string; contactId?: string; dealId?: string }) => {
+    const q = new URLSearchParams();
+    if (link.companyId) q.set("companyId", link.companyId);
+    if (link.contactId) q.set("contactId", link.contactId);
+    if (link.dealId) q.set("dealId", link.dealId);
+    return request<MyTask[]>(`/tasks/crm?${q.toString()}`);
+  },
   updateTask: (id: string, body: TaskPatch) =>
     request<Task>(`/tasks/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   // ---- Statuses (per space; owner/admin) ----

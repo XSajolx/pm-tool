@@ -16,6 +16,10 @@ export const createTaskSchema = z.object({
   milestoneId: z.string().uuid().nullable().optional(),
   startDate: isoDate.nullable().optional(),
   dueDate: isoDate.nullable().optional(),
+  /** CRM links (row 38); null clears. A deal fills in its company/contact when those are left out. */
+  companyId: z.string().uuid().nullable().optional(),
+  contactId: z.string().uuid().nullable().optional(),
+  dealId: z.string().uuid().nullable().optional(),
   recurrence: z.enum(["daily", "weekly", "monthly"]).nullable().optional(),
   recurrenceInterval: z.number().int().min(1).max(365).optional(),
   /** Whole minutes; null clears the estimate. */

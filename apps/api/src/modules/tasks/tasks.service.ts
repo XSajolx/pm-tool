@@ -3,7 +3,10 @@ import { and, eq, inArray, isNull, or } from "drizzle-orm";
 import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
 import {
+  companies,
+  contacts,
   cycleTasks,
+  deals,
   lists,
   milestones,
   projectStages,
@@ -29,8 +32,18 @@ const TRACKED_FIELDS = [
   "listId",
   "stageId",
   "milestoneId",
+  "companyId",
+  "contactId",
+  "dealId",
   "timeEstimateMinutes",
 ];
+
+/** Relation shape for the CRM links a task carries (row 38). */
+const CRM_WITH = {
+  company: { columns: { id: true, name: true } },
+  contact: { columns: { id: true, firstName: true, lastName: true } },
+  deal: { columns: { id: true, title: true, stage: true } },
+} as const;
 
 /** Given relation A→B, the row we mirror onto B so both tasks show the link. */
 const INVERSE_RELATION = {
@@ -67,6 +80,7 @@ export class TasksService {
         status: true,
         stage: { columns: { id: true, name: true, status: true } },
         milestone: { columns: { id: true, name: true, targetDate: true, reachedAt: true } },
+        ...CRM_WITH,
         assignees: { with: { user: true } },
         subtasks: true,
       },
@@ -83,6 +97,7 @@ export class TasksService {
         status: true,
         stage: { columns: { id: true, name: true, status: true } },
         milestone: { columns: { id: true, name: true, targetDate: true, reachedAt: true } },
+        ...CRM_WITH,
         assignees: { with: { user: true } },
         subtasks: {
           with: { status: true, assignees: { with: { user: true } } },
@@ -172,9 +187,74 @@ export class TasksService {
     }
   }
 
+  /**
+   * Row 38: CRM links must belong to this org. Picking a deal fills in its
+   * company and contact unless the caller set them explicitly, so a follow-up
+   * on a deal also shows on the client's page.
+   */
+  private async assertCrmLinks(orgId: string, dto: { companyId?: string | null; contactId?: string | null; dealId?: string | null }) {
+    const out: { companyId?: string | null; contactId?: string | null; dealId?: string | null } = {};
+    if (dto.dealId !== undefined) out.dealId = dto.dealId;
+    if (dto.companyId !== undefined) out.companyId = dto.companyId;
+    if (dto.contactId !== undefined) out.contactId = dto.contactId;
+    if (dto.dealId) {
+      const deal = await this.db.query.deals.findFirst({
+        where: and(eq(deals.id, dto.dealId), eq(deals.organizationId, orgId)),
+        columns: { id: true, companyId: true, contactId: true },
+      });
+      if (!deal) throw new BadRequestException("Unknown deal");
+      if (dto.companyId === undefined && deal.companyId) out.companyId = deal.companyId;
+      if (dto.contactId === undefined && deal.contactId) out.contactId = deal.contactId;
+    }
+    if (out.companyId) {
+      const c = await this.db.query.companies.findFirst({ where: and(eq(companies.id, out.companyId), eq(companies.organizationId, orgId)), columns: { id: true } });
+      if (!c) throw new BadRequestException("Unknown company");
+    }
+    if (out.contactId) {
+      const c = await this.db.query.contacts.findFirst({ where: and(eq(contacts.id, out.contactId), eq(contacts.organizationId, orgId)), columns: { id: true, companyId: true } });
+      if (!c) throw new BadRequestException("Unknown contact");
+      // A contact implies their company when none was chosen.
+      if (out.companyId === undefined && c.companyId) out.companyId = c.companyId;
+    }
+    return out;
+  }
+
+  /**
+   * Tasks attached to a company, contact or deal — the "follow-ups" list on a
+   * client's page. Open tasks first, then done ones; each row carries its
+   * list/space so the page can say where the work lives.
+   */
+  async forCrm(orgId: string, link: { companyId?: string; contactId?: string; dealId?: string }) {
+    const filters = [
+      link.companyId ? eq(tasks.companyId, link.companyId) : null,
+      link.contactId ? eq(tasks.contactId, link.contactId) : null,
+      link.dealId ? eq(tasks.dealId, link.dealId) : null,
+    ].filter((f): f is NonNullable<typeof f> => Boolean(f));
+    if (!filters.length) throw new BadRequestException("companyId, contactId or dealId is required");
+    const rows = await this.db.query.tasks.findMany({
+      where: and(eq(tasks.organizationId, orgId), isNull(tasks.archivedAt), or(...filters)),
+      with: {
+        status: true,
+        ...CRM_WITH,
+        assignees: { with: { user: true } },
+        list: { columns: { id: true, name: true, spaceId: true }, with: { space: { columns: { id: true, name: true } } } },
+      },
+      orderBy: (t, { asc }) => [asc(t.dueDate), asc(t.createdAt)],
+    });
+    const rank = (t: (typeof rows)[number]) => (t.status?.category === "done" ? 1 : 0);
+    return rows
+      .sort((a, b) => rank(a) - rank(b))
+      .map((t) => ({
+        ...t,
+        subtasks: [],
+        list: t.list ? { id: t.list.id, name: t.list.name, spaceId: t.list.spaceId, spaceName: t.list.space?.name ?? null } : null,
+      }));
+  }
+
   async create(orgId: string, userId: string, dto: CreateTaskDto) {
     if (dto.stageId) await this.assertStageForList(orgId, dto.listId, dto.stageId);
     if (dto.milestoneId) await this.assertMilestoneForList(orgId, dto.listId, dto.milestoneId);
+    const crm = await this.assertCrmLinks(orgId, dto);
     let statusId = dto.statusId;
     if (dto.parentTaskId) {
       // Subtasks are one level deep: a subtask cannot have its own subtasks.
@@ -210,6 +290,9 @@ export class TasksService {
         milestoneId: dto.milestoneId ?? undefined,
         recurrence: dto.recurrence ?? undefined,
         recurrenceInterval: dto.recurrenceInterval ?? undefined,
+        companyId: crm.companyId ?? undefined,
+        contactId: crm.contactId ?? undefined,
+        dealId: crm.dealId ?? undefined,
         startDate: dto.startDate ? new Date(dto.startDate) : undefined,
         dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
         timeEstimateMinutes: dto.timeEstimateMinutes ?? undefined,
@@ -262,9 +345,11 @@ export class TasksService {
     if (!before) throw new NotFoundException("Task not found");
     if (dto.stageId) await this.assertStageForList(orgId, before.listId, dto.stageId);
     if (dto.milestoneId) await this.assertMilestoneForList(orgId, before.listId, dto.milestoneId);
+    const crm = await this.assertCrmLinks(orgId, dto);
 
     // `assigneeIds` is not a column; it is synced separately below.
-    const { assigneeIds, ...fields } = dto;
+    const { assigneeIds, ...rest } = dto;
+    const fields = { ...rest, ...crm };
     const toDate = (v: string | null | undefined) => (v === undefined ? undefined : v ? new Date(v) : null);
     const patch: Record<string, unknown> = {
       ...fields,
@@ -344,7 +429,7 @@ export class TasksService {
   private async spawnNextOccurrence(
     orgId: string,
     userId: string,
-    done: { id: string; listId: string; title: string; description: string | null; priority: "urgent" | "high" | "normal" | "low" | null; timeEstimateMinutes: number | null; dueDate: Date | null; startDate: Date | null; stageId: string | null; milestoneId: string | null; recurrence: "daily" | "weekly" | "monthly" | null; recurrenceInterval: number },
+    done: { id: string; listId: string; title: string; description: string | null; priority: "urgent" | "high" | "normal" | "low" | null; timeEstimateMinutes: number | null; dueDate: Date | null; startDate: Date | null; stageId: string | null; milestoneId: string | null; recurrence: "daily" | "weekly" | "monthly" | null; recurrenceInterval: number; companyId: string | null; contactId: string | null; dealId: string | null },
   ) {
     const advance = (d: Date) => {
       const next = new Date(d);
@@ -390,6 +475,9 @@ export class TasksService {
         recurrence: done.recurrence,
         recurrenceInterval: done.recurrenceInterval,
         recurredFromId: done.id,
+        companyId: done.companyId,
+        contactId: done.contactId,
+        dealId: done.dealId,
         position: Date.now(),
         createdById: userId,
       })
@@ -773,6 +861,9 @@ function describeChanges(changes: FieldChange[]) {
     listId: "list",
     stageId: "stage",
     milestoneId: "milestone",
+    companyId: "company",
+    contactId: "contact",
+    dealId: "deal",
     priority: "priority",
     title: "title",
     description: "description",

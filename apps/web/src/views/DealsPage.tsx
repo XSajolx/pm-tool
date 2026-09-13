@@ -16,6 +16,7 @@ import { api, type Deal, type DealStage } from "../lib/api.js";
 import { useAuth } from "../lib/auth.js";
 import { fmtMoney, fmtShortDate } from "../lib/format.js";
 import { NotesPanel } from "../components/NotesPanel.js";
+import { CrmTasks } from "../components/CrmTasks.js";
 import { useEscape } from "../lib/useEscape.js";
 import { CrmField, input } from "./CompaniesPage.js";
 import { cn } from "../lib/utils.js";
@@ -322,6 +323,11 @@ function DealDrawer({ dealId, onClose }: { dealId: string; onClose: () => void }
                   <p className="text-xs text-muted-foreground">An admin can convert this deal into a project once it is won.</p>
                 )}
               </div>
+            </div>
+
+            <div className="border-t border-border px-5 py-4">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Tasks</p>
+              <CrmTasks link={{ dealId }} compact />
             </div>
 
             <div className="border-t border-border px-5 py-4">

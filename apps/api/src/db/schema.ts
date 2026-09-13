@@ -224,6 +224,10 @@ export const tasks = pgTable(
     recurrenceInterval: integer("recurrence_interval").notNull().default(1),
     /** The task this one was spawned from, so a series can be traced. */
     recurredFromId: uuid("recurred_from_id"),
+    /** CRM links (row 38): follow-ups show up on the client's page. */
+    companyId: uuid("company_id").references((): AnyPgColumn => companies.id, { onDelete: "set null" }),
+    contactId: uuid("contact_id").references((): AnyPgColumn => contacts.id, { onDelete: "set null" }),
+    dealId: uuid("deal_id").references((): AnyPgColumn => deals.id, { onDelete: "set null" }),
     statusId: uuid("status_id").references(() => statuses.id),
     /** Short human key like "PM-142", unique per org. */
     reference: varchar("reference", { length: 32 }),
@@ -244,6 +248,9 @@ export const tasks = pgTable(
     index("tasks_status_idx").on(t.statusId),
     index("tasks_stage_idx").on(t.stageId),
     index("tasks_milestone_idx").on(t.milestoneId),
+    index("tasks_company_idx").on(t.companyId),
+    index("tasks_contact_idx").on(t.contactId),
+    index("tasks_deal_idx").on(t.dealId),
     // Hot path: "give me this org's tasks" — org first, then list.
     index("tasks_org_list_idx").on(t.organizationId, t.listId),
     uniqueIndex("tasks_org_reference_uq").on(t.organizationId, t.reference),
@@ -471,6 +478,9 @@ export const tasksRelations = relations(tasks, ({ one, many }) => ({
   status: one(statuses, { fields: [tasks.statusId], references: [statuses.id] }),
   stage: one(projectStages, { fields: [tasks.stageId], references: [projectStages.id] }),
   milestone: one(milestones, { fields: [tasks.milestoneId], references: [milestones.id] }),
+  company: one(companies, { fields: [tasks.companyId], references: [companies.id] }),
+  contact: one(contacts, { fields: [tasks.contactId], references: [contacts.id] }),
+  deal: one(deals, { fields: [tasks.dealId], references: [deals.id] }),
   parent: one(tasks, { fields: [tasks.parentTaskId], references: [tasks.id], relationName: "subtasks" }),
   subtasks: many(tasks, { relationName: "subtasks" }),
   assignees: many(taskAssignees),
@@ -1481,13 +1491,16 @@ export const companiesRelations = relations(companies, ({ one, many }) => ({
   owner: one(users, { fields: [companies.ownerId], references: [users.id] }),
   contacts: many(contacts),
   deals: many(deals),
+  tasks: many(tasks),
 }));
 
-export const contactsRelations = relations(contacts, ({ one }) => ({
+export const contactsRelations = relations(contacts, ({ one, many }) => ({
   company: one(companies, { fields: [contacts.companyId], references: [companies.id] }),
+  tasks: many(tasks),
 }));
 
-export const dealsRelations = relations(deals, ({ one }) => ({
+export const dealsRelations = relations(deals, ({ one, many }) => ({
+  tasks: many(tasks),
   company: one(companies, { fields: [deals.companyId], references: [companies.id] }),
   contact: one(contacts, { fields: [deals.contactId], references: [contacts.id] }),
   project: one(projects, { fields: [deals.projectId], references: [projects.id] }),

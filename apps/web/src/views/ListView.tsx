@@ -81,6 +81,11 @@ export function ListView({ tasks, statuses, members, groupBy, sort, sortDir, onO
                           ↻
                         </span>
                       )}
+                      {t.company && (
+                        <span className="shrink-0 rounded-full border border-indigo-200 bg-indigo-50 px-1.5 text-[10px] text-indigo-700" title={t.deal ? `${t.company.name} · ${t.deal.title}` : t.company.name}>
+                          🏢 {t.company.name}
+                        </span>
+                      )}
                       {t.subtasks.length > 0 && (
                         <span className="shrink-0 rounded bg-muted px-1 text-[10px] text-muted-foreground">
                           {t.subtasks.filter((s) => s.status?.category === "done").length}/{t.subtasks.length}
