@@ -30,6 +30,7 @@ const linkEntity = z.enum(["project", "task", "company", "deal"]);
 const linkSchema = z.object({ entityType: linkEntity, entityId: z.string().uuid() });
 const reviewRequestSchema = z.object({ approverId: z.string().uuid(), note: z.string().max(2000).optional() });
 const reviewDecisionSchema = z.object({ approve: z.boolean(), note: z.string().max(2000).optional() });
+const supersedeSchema = z.object({ byDocumentId: z.string().uuid(), effectiveFrom: z.string().datetime().nullable().optional() });
 const accessSchema = z.object({
   access: z.enum(["default", "restricted"]),
   userIds: z.array(z.string().uuid()).max(100).optional(),
@@ -59,6 +60,36 @@ export class DocumentsController {
       },
       { userId: auth.userId, role: auth.role },
     );
+  }
+
+  /* Row 69: recent & starred (declared before ":id"). */
+  @Get("recent")
+  recent(@Auth() auth: AuthContext) {
+    return this.documents.recent(auth.orgId, { userId: auth.userId, role: auth.role });
+  }
+
+  @Get("starred")
+  starred(@Auth() auth: AuthContext) {
+    return this.documents.starred(auth.orgId, { userId: auth.userId, role: auth.role });
+  }
+
+  @Post(":id/star")
+  toggleStar(@Auth() auth: AuthContext, @Param("id") id: string) {
+    return this.documents.toggleStar(auth.orgId, auth.userId, id);
+  }
+
+  /** Row 70: this doc is replaced by a newer one from a date; the old one stays readable. */
+  @Post(":id/supersede")
+  @Roles("owner", "admin", "member")
+  @UsePipes(new ZodValidationPipe(supersedeSchema))
+  supersede(@Auth() auth: AuthContext, @Param("id") id: string, @Body() dto: z.infer<typeof supersedeSchema>) {
+    return this.documents.supersede(auth.orgId, { userId: auth.userId, role: auth.role }, id, dto.byDocumentId, dto.effectiveFrom);
+  }
+
+  @Delete(":id/supersede")
+  @Roles("owner", "admin", "member")
+  unsupersede(@Auth() auth: AuthContext, @Param("id") id: string) {
+    return this.documents.unsupersede(auth.orgId, { userId: auth.userId, role: auth.role }, id);
   }
 
   /** Row 67: branded PDF export (internal blocks stripped, snippets expanded). */
@@ -121,8 +152,11 @@ export class DocumentsController {
   }
 
   @Get(":id")
-  get(@Auth() auth: AuthContext, @Param("id") id: string) {
-    return this.documents.get(auth.orgId, id, { userId: auth.userId, role: auth.role });
+  async get(@Auth() auth: AuthContext, @Param("id") id: string) {
+    const doc = await this.documents.get(auth.orgId, id, { userId: auth.userId, role: auth.role });
+    // Row 69: opening a doc puts it in "Recent" — best effort, never blocks the read.
+    void this.documents.recordVisit(auth.orgId, auth.userId, id).catch(() => undefined);
+    return doc;
   }
 
   @Post()

@@ -141,6 +141,7 @@ export function DocsPage() {
           </button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
+          <RecentStarred />
           {tree.roots.length ? (
             tree.roots.map((d) => <TreeNode key={d.id} doc={d} childrenOf={tree.childrenOf} depth={0} />)
           ) : (
@@ -205,6 +206,7 @@ export function DocsPage() {
                           {d.title}
                           {d.access === "restricted" && <span className="ml-1.5 text-xs text-slate-400" title="Restricted">🔒</span>}
                           {d.reviewStatus && d.reviewStatus !== "draft" && <ReviewBadge status={d.reviewStatus} small />}
+                          {d.supersededById && <span className="ml-1.5 rounded-full bg-amber-50 px-1.5 text-[10px] font-medium text-amber-800">Superseded</span>}
                         </p>
                         <div className="opacity-0 transition group-hover:opacity-100">
                           <ActionMenu
@@ -356,6 +358,7 @@ export function DocPage() {
           )}
           <span className="text-muted-foreground">/</span>
           <span className="truncate text-sm font-semibold text-slate-800">{doc.title}</span>
+          <StarButton doc={doc} />
           <ReviewBadge status={doc.reviewStatus} />
           <select
             value={doc.projectId ?? ""}
@@ -426,6 +429,30 @@ export function DocPage() {
               className="w-full bg-transparent text-3xl font-semibold tracking-tight text-slate-900 outline-none placeholder:text-slate-300"
               placeholder="Untitled"
             />
+            {doc.supersededBy && (
+              <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                <span>⚠️ Superseded{doc.effectiveFrom ? ` from ${new Date(doc.effectiveFrom).toLocaleDateString()}` : ""} by</span>
+                <Link to="/docs/$docId" params={{ docId: doc.supersededBy.id }} className="font-medium underline underline-offset-2 hover:text-amber-950">
+                  {doc.supersededBy.icon ? `${doc.supersededBy.icon} ` : ""}
+                  {doc.supersededBy.title}
+                </Link>
+                <span className="text-xs text-amber-800/80">— kept for reference.</span>
+              </div>
+            )}
+            {doc.supersedes.length > 0 && (
+              <p className="mt-3 text-xs text-muted-foreground">
+                Supersedes{" "}
+                {doc.supersedes.map((d, i) => (
+                  <span key={d.id}>
+                    {i > 0 ? ", " : ""}
+                    <Link to="/docs/$docId" params={{ docId: d.id }} className="text-indigo-600 hover:underline">
+                      {d.title}
+                    </Link>
+                    {d.effectiveFrom ? ` (from ${new Date(d.effectiveFrom).toLocaleDateString()})` : ""}
+                  </span>
+                ))}
+              </p>
+            )}
             <div className="mt-4">
               <DocEditor
                 docId={doc.id}
@@ -665,6 +692,9 @@ function DocSidePanel({
         </Section>
         <Section title="Review & sign-off">
           <ReviewSection doc={doc} />
+        </Section>
+        <Section title="Versioning">
+          <SupersedeSection doc={doc} allDocs={allDocs} />
         </Section>
         <Section title="Access">
           <AccessSection doc={doc} />
@@ -1019,6 +1049,108 @@ function ShareButton({ doc }: { doc: Doc }) {
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+/** Row 69: the docs I keep coming back to — starred, and the last few I opened — across every project. */
+function RecentStarred() {
+  const { data: recent = [] } = useQuery({ queryKey: ["documents", "recent"], queryFn: api.getRecentDocs });
+  const { data: starred = [] } = useQuery({ queryKey: ["documents", "starred"], queryFn: api.getStarredDocs });
+  if (!recent.length && !starred.length) return null;
+  const Row = ({ d }: { d: DocSummary }) => (
+    <Link to="/docs/$docId" params={{ docId: d.id }} className="flex items-center gap-1.5 rounded-md px-2 py-1 text-sm text-slate-700 hover:bg-muted [&.active]:bg-indigo-50 [&.active]:text-indigo-700">
+      <DocIcon icon={d.icon} />
+      <span className="min-w-0 flex-1 truncate">{d.title}</span>
+      {d.project && <span className="max-w-[70px] truncate text-[10px] text-muted-foreground">{d.project.name}</span>}
+    </Link>
+  );
+  return (
+    <div className="mb-3 space-y-3">
+      {starred.length > 0 && (
+        <div>
+          <p className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">★ Starred</p>
+          {starred.map((d) => (
+            <Row key={d.id} d={d} />
+          ))}
+        </div>
+      )}
+      {recent.length > 0 && (
+        <div>
+          <p className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Recent</p>
+          {recent.slice(0, 6).map((d) => (
+            <Row key={d.id} d={d} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StarButton({ doc }: { doc: Doc }) {
+  const qc = useQueryClient();
+  const toggle = useMutation({
+    mutationFn: () => api.toggleDocStar(doc.id),
+    onSuccess: ({ starred }) => {
+      qc.setQueryData(["document", doc.id], { ...doc, starred });
+      qc.invalidateQueries({ queryKey: ["documents"] });
+    },
+  });
+  return (
+    <button type="button" onClick={() => toggle.mutate()} title={doc.starred ? "Unstar" : "Star this doc"} className={`rounded px-1 text-base leading-none ${doc.starred ? "text-amber-500" : "text-slate-300 hover:text-amber-500"}`}>
+      {doc.starred ? "★" : "☆"}
+    </button>
+  );
+}
+
+/**
+ * Row 70: mark this doc as replaced by a newer one (e.g. SOW v1 → SOW v2)
+ * with an effective date. The old doc stays readable and says where to look.
+ */
+function SupersedeSection({ doc, allDocs }: { doc: Doc; allDocs: DocSummary[] }) {
+  const qc = useQueryClient();
+  const [byId, setById] = useState("");
+  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const done = (updated: Doc) => {
+    qc.setQueryData(["document", doc.id], updated);
+    qc.invalidateQueries({ queryKey: ["documents"] });
+  };
+  const mark = useMutation({ mutationFn: () => api.supersedeDoc(doc.id, { byDocumentId: byId, effectiveFrom: date ? new Date(`${date}T00:00:00`).toISOString() : null }), onSuccess: done });
+  const clear = useMutation({ mutationFn: () => api.unsupersedeDoc(doc.id), onSuccess: done });
+  if (doc.supersededBy) {
+    return (
+      <div className="space-y-1.5 text-xs">
+        <p className="text-slate-700">
+          Superseded by <span className="font-medium">{doc.supersededBy.title}</span>
+          {doc.effectiveFrom ? ` from ${new Date(doc.effectiveFrom).toLocaleDateString()}` : ""}.
+        </p>
+        <button type="button" onClick={() => clear.mutate()} className="text-red-600 hover:underline">
+          Undo — this is current again
+        </button>
+      </div>
+    );
+  }
+  const candidates = allDocs.filter((d) => d.id !== doc.id && !d.supersededById);
+  return (
+    <div className="space-y-1.5 text-xs">
+      <p className="text-muted-foreground">Replaced by a newer version? Point readers to it; this doc stays readable.</p>
+      <select value={byId} onChange={(e) => setById(e.target.value)} className="w-full rounded-md border border-border bg-white px-2 py-1">
+        <option value="">Newer doc…</option>
+        {candidates.map((d) => (
+          <option key={d.id} value={d.id}>
+            {d.icon ? `${d.icon} ` : ""}
+            {d.title}
+            {d.project ? ` (${d.project.name})` : ""}
+          </option>
+        ))}
+      </select>
+      <label className="flex items-center gap-2 text-slate-600">
+        Effective from
+        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="rounded-md border border-border px-2 py-1" />
+      </label>
+      <button type="button" disabled={!byId || mark.isPending} onClick={() => mark.mutate()} className="rounded-md bg-amber-600 px-2.5 py-1 font-medium text-white hover:bg-amber-700 disabled:opacity-50">
+        Mark as superseded
+      </button>
     </div>
   );
 }

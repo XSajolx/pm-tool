@@ -1831,6 +1831,10 @@ export const documents = pgTable(
     settings: jsonb("settings").$type<DocumentSettings>().notNull().default({}),
     /** Row 62 */
     access: docAccess("access").notNull().default("default"),
+    /** Row 70: this doc was replaced by a newer one from `effectiveFrom`; it stays readable. */
+    supersededById: uuid("superseded_by_id").references((): AnyPgColumn => documents.id, { onDelete: "set null" }),
+    supersededAt: timestamp("superseded_at", { withTimezone: true }),
+    effectiveFrom: timestamp("effective_from", { withTimezone: true }),
     /** Row 65: public read-only link (internal-only blocks stripped). Null = not shared. */
     shareToken: varchar("share_token", { length: 64 }),
     sharedAt: timestamp("shared_at", { withTimezone: true }),
@@ -1880,6 +1884,41 @@ export const documentAccessRelations = relations(documentAccess, ({ one }) => ({
   document: one(documents, { fields: [documentAccess.documentId], references: [documents.id] }),
   user: one(users, { fields: [documentAccess.userId], references: [users.id] }),
 }));
+
+/** Row 69: per-person starred docs and last-opened times, across every project. */
+export const documentStars = pgTable(
+  "document_stars",
+  {
+    documentId: uuid("document_id")
+      .notNull()
+      .references((): AnyPgColumn => documents.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex("document_stars_pk").on(t.documentId, t.userId), index("document_stars_user_idx").on(t.userId)],
+);
+
+export const documentVisits = pgTable(
+  "document_visits",
+  {
+    documentId: uuid("document_id")
+      .notNull()
+      .references((): AnyPgColumn => documents.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    lastOpenedAt: timestamp("last_opened_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex("document_visits_pk").on(t.documentId, t.userId), index("document_visits_user_idx").on(t.userId, t.lastOpenedAt)],
+);
 
 /** Row 68: the docs every new project starts with (brief, kickoff notes, SOW, QA checklist…). */
 export const docTemplates = pgTable(
@@ -1953,6 +1992,8 @@ export const documentsRelations = relations(documents, ({ one, many }) => ({
   links: many(documentLinks),
   accessList: many(documentAccess),
   approver: one(users, { fields: [documents.approverId], references: [users.id], relationName: "document_approver" }),
+  supersededBy: one(documents, { fields: [documents.supersededById], references: [documents.id], relationName: "document_supersedes" }),
+  supersedes: many(documents, { relationName: "document_supersedes" }),
   reviewRequestedBy: one(users, { fields: [documents.reviewRequestedById], references: [users.id], relationName: "document_review_requester" }),
   project: one(projects, { fields: [documents.projectId], references: [projects.id] }),
   parent: one(documents, {

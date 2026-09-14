@@ -196,6 +196,11 @@ export interface DocSummary {
   parentId: string | null;
   /** Row 62 */
   access?: DocAccess;
+  /** Row 69 */
+  starred?: boolean;
+  lastOpenedAt?: string;
+  /** Row 70 */
+  supersededById?: string | null;
   /** Row 63 */
   reviewStatus?: DocReviewStatus;
   approver?: { id: string; name: string } | null;
@@ -228,6 +233,14 @@ export interface Doc {
   access: DocAccess;
   accessUsers: { id: string; name: string }[];
   accessRoles: string[];
+  /** Row 69 */
+  starred: boolean;
+  /** Row 70: replaced by a newer doc from `effectiveFrom`; `supersedes` lists what this one replaced. */
+  supersededById: string | null;
+  supersededAt: string | null;
+  effectiveFrom: string | null;
+  supersededBy: DocRef | null;
+  supersedes: (DocRef & { effectiveFrom: string | null })[];
   /** Row 65: share link token (null = not shared). */
   shareToken: string | null;
   sharedAt: string | null;
@@ -1523,6 +1536,14 @@ export const api = {
     request<Doc>(`/documents/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   duplicateDocument: (id: string) => request<Doc>(`/documents/${id}/duplicate`, { method: "POST" }),
   deleteDocument: (id: string) => request<{ id: string }>(`/documents/${id}`, { method: "DELETE" }),
+  /** Row 70: supersede. */
+  supersedeDoc: (id: string, body: { byDocumentId: string; effectiveFrom?: string | null }) =>
+    request<Doc>(`/documents/${id}/supersede`, { method: "POST", body: JSON.stringify(body) }),
+  unsupersedeDoc: (id: string) => request<Doc>(`/documents/${id}/supersede`, { method: "DELETE" }),
+  /** Row 69: recent & starred. */
+  getRecentDocs: () => request<DocSummary[]>(`/documents/recent`),
+  getStarredDocs: () => request<DocSummary[]>(`/documents/starred`),
+  toggleDocStar: (id: string) => request<{ documentId: string; starred: boolean }>(`/documents/${id}/star`, { method: "POST" }),
   /** Row 68: doc starter kit. */
   getDocTemplates: () => request<DocTemplate[]>(`/doc-templates`),
   createDocTemplate: (body: { title: string; icon?: string | null; content?: Record<string, unknown> | null; inKit?: boolean }) =>

@@ -2,7 +2,7 @@ import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundEx
 import { and, desc, eq, ilike, inArray, isNull, or } from "drizzle-orm";
 import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
-import { companies, deals, documentAccess, documentLinks, documents, projectMembers, projects, tasks, type DocumentSettings } from "../../db/schema.js";
+import { companies, deals, documentAccess, documentLinks, documentStars, documentVisits, documents, projectMembers, projects, tasks, type DocumentSettings } from "../../db/schema.js";
 import type { Role } from "../auth/auth.types.js";
 import { ChatEventsService } from "../chat/chat-events.service.js";
 import { NotificationsService } from "../notifications/notifications.service.js";
@@ -82,15 +82,18 @@ export class DocumentsService {
       orderBy: desc(documents.updatedAt),
     });
     const ctx = viewer ? await this.viewerContext(orgId, viewer) : null;
+    const stars = viewer ? await this.starSet(viewer.userId) : new Set<string>();
     return rows
       .filter((d) => !ctx || this.canSee(d, ctx))
       .map((d) => ({
       id: d.id,
+      starred: stars.has(d.id),
       title: d.title,
       icon: d.icon,
       cover: d.cover,
       parentId: d.parentId,
       access: d.access,
+      supersededById: d.supersededById,
       reviewStatus: d.reviewStatus,
       approver: d.approver ? { id: d.approver.id, name: d.approver.name } : null,
       excerpt: d.body.replace(/\s+/g, " ").trim().slice(0, 160),
@@ -110,6 +113,8 @@ export class DocumentsService {
         accessList: { with: { user: { columns: { id: true, name: true } } } },
         approver: { columns: { id: true, name: true } },
         reviewRequestedBy: { columns: { id: true, name: true } },
+        supersededBy: { columns: { id: true, title: true, icon: true } },
+        supersedes: { columns: { id: true, title: true, icon: true, effectiveFrom: true }, where: isNull(documents.archivedAt) },
         parent: { columns: { id: true, title: true, icon: true } },
         children: {
           columns: { id: true, title: true, icon: true, updatedAt: true },
@@ -124,10 +129,12 @@ export class DocumentsService {
       if (!this.canSee(row, ctx)) throw new ForbiddenException("You don't have access to this document");
     }
     const links = await this.linksFor(orgId, id);
+    const starred = viewer ? (await this.starSet(viewer.userId)).has(id) : false;
     const { accessList, approver, reviewRequestedBy, ...rest } = row;
     return {
       ...rest,
       links,
+      starred,
       approver: approver ? { id: approver.id, name: approver.name } : null,
       reviewRequestedBy: reviewRequestedBy ? { id: reviewRequestedBy.id, name: reviewRequestedBy.name } : null,
       accessUsers: accessList.filter((a) => a.user).map((a) => ({ id: a.user!.id, name: a.user!.name })),
@@ -183,6 +190,78 @@ export class DocumentsService {
       .set({ ...dto, settings, ...reopen, updatedById: userId, updatedAt: new Date() })
       .where(eq(documents.id, id));
     return this.get(orgId, id);
+  }
+
+  /* ---------------- Row 70: supersede ---------------- */
+
+  /** Mark `id` as replaced by `byDocumentId` from `effectiveFrom` (default now). The old doc stays readable. */
+  async supersede(orgId: string, actor: Viewer, id: string, byDocumentId: string, effectiveFrom?: string | null) {
+    if (byDocumentId === id) throw new BadRequestException("A doc can't supersede itself");
+    await this.get(orgId, id, actor);
+    const newer = await this.get(orgId, byDocumentId, actor);
+    if (newer.supersededById === id) throw new BadRequestException("That doc is already superseded by this one");
+    await this.db
+      .update(documents)
+      .set({ supersededById: byDocumentId, supersededAt: new Date(), effectiveFrom: effectiveFrom ? new Date(effectiveFrom) : new Date(), updatedById: actor.userId, updatedAt: new Date() })
+      .where(eq(documents.id, id));
+    return this.get(orgId, id, actor);
+  }
+
+  async unsupersede(orgId: string, actor: Viewer, id: string) {
+    await this.get(orgId, id, actor);
+    await this.db.update(documents).set({ supersededById: null, supersededAt: null, effectiveFrom: null, updatedAt: new Date() }).where(eq(documents.id, id));
+    return this.get(orgId, id, actor);
+  }
+
+  /* ---------------- Row 69: recent & starred ---------------- */
+
+  async recordVisit(orgId: string, userId: string, documentId: string) {
+    await this.db
+      .insert(documentVisits)
+      .values({ organizationId: orgId, userId, documentId, lastOpenedAt: new Date() })
+      .onConflictDoUpdate({ target: [documentVisits.documentId, documentVisits.userId], set: { lastOpenedAt: new Date() } });
+  }
+
+  async toggleStar(orgId: string, userId: string, documentId: string) {
+    const existing = await this.db.query.documentStars.findFirst({ where: and(eq(documentStars.documentId, documentId), eq(documentStars.userId, userId)) });
+    if (existing) {
+      await this.db.delete(documentStars).where(and(eq(documentStars.documentId, documentId), eq(documentStars.userId, userId)));
+      return { documentId, starred: false };
+    }
+    await this.get(orgId, documentId);
+    await this.db.insert(documentStars).values({ organizationId: orgId, userId, documentId }).onConflictDoNothing();
+    return { documentId, starred: true };
+  }
+
+  /** My last-opened docs (visible to me), newest first. */
+  async recent(orgId: string, viewer: Viewer, limit = 8) {
+    const visits = await this.db.query.documentVisits.findMany({
+      where: and(eq(documentVisits.organizationId, orgId), eq(documentVisits.userId, viewer.userId)),
+      orderBy: [desc(documentVisits.lastOpenedAt)],
+      limit: limit * 3,
+    });
+    if (!visits.length) return [];
+    const order = new Map(visits.map((v, i) => [v.documentId, i]));
+    const rows = await this.list(orgId, {}, viewer);
+    return rows
+      .filter((d) => order.has(d.id))
+      .sort((a, b) => order.get(a.id)! - order.get(b.id)!)
+      .slice(0, limit)
+      .map((d) => ({ ...d, lastOpenedAt: visits.find((v) => v.documentId === d.id)!.lastOpenedAt }));
+  }
+
+  async starred(orgId: string, viewer: Viewer) {
+    const stars = await this.db.query.documentStars.findMany({ where: and(eq(documentStars.organizationId, orgId), eq(documentStars.userId, viewer.userId)) });
+    if (!stars.length) return [];
+    const ids = new Set(stars.map((s) => s.documentId));
+    const rows = await this.list(orgId, {}, viewer);
+    return rows.filter((d) => ids.has(d.id)).map((d) => ({ ...d, starred: true }));
+  }
+
+  /** Star flags for a viewer, folded into list/get payloads. */
+  private async starSet(userId: string) {
+    const stars = await this.db.query.documentStars.findMany({ where: eq(documentStars.userId, userId), columns: { documentId: true } });
+    return new Set(stars.map((s) => s.documentId));
   }
 
   /* ---------------- Row 67: branded PDF ---------------- */
