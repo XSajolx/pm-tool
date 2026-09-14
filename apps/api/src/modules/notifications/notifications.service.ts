@@ -18,6 +18,7 @@ import {
 } from "../../db/schema.js";
 import { ChatGateway } from "../chat/chat.gateway.js";
 import { MailerService } from "./mailer.service.js";
+import { resolveDigest, type DigestPrefs } from "./digest.prefs.js";
 import type { FieldChange } from "../activity/activity.service.js";
 
 /**
@@ -734,11 +735,11 @@ export class NotificationsService {
         eq(notificationPreferences.userId, userId),
       ),
     });
-    return { channels: resolveChannels(row), emailConfigured: this.mailer.configured };
+    return { channels: resolveChannels(row), digest: resolveDigest(row?.digest), emailConfigured: this.mailer.configured };
   }
 
   /** Merge a partial matrix (`{ mention: { email: false } }`) into the stored one. */
-  async updatePreferences(orgId: string, userId: string, patch: Partial<Record<NotifType, Partial<ChannelPrefs>>>) {
+  async updatePreferences(orgId: string, userId: string, patch: Partial<Record<NotifType, Partial<ChannelPrefs>>> & { digest?: Partial<DigestPrefs> }) {
     const current = await this.db.query.notificationPreferences.findFirst({
       where: and(eq(notificationPreferences.organizationId, orgId), eq(notificationPreferences.userId, userId)),
     });
@@ -747,14 +748,16 @@ export class NotificationsService {
     for (const type of NOTIF_TYPES) {
       if (patch[type]) next[type] = { ...resolved[type], ...patch[type] };
     }
+    // Row 76: the digest schedule lives beside the matrix.
+    const digest = resolveDigest({ ...(current?.digest ?? {}), ...(patch.digest ?? {}) });
     await this.db
       .insert(notificationPreferences)
-      .values({ organizationId: orgId, userId, ...DEFAULT_PREFERENCES, channels: next })
+      .values({ organizationId: orgId, userId, ...DEFAULT_PREFERENCES, channels: next, digest })
       .onConflictDoUpdate({
         target: [notificationPreferences.organizationId, notificationPreferences.userId],
-        set: { channels: next, updatedAt: new Date() },
+        set: { channels: next, digest, updatedAt: new Date() },
       });
-    return { channels: next, emailConfigured: this.mailer.configured };
+    return { channels: next, digest, emailConfigured: this.mailer.configured };
   }
 
   /**

@@ -521,8 +521,31 @@ export interface ChannelPrefs {
   email: boolean;
   push: boolean;
 }
+/** Row 76 */
+export interface DigestPrefs {
+  frequency: "off" | "daily" | "weekly";
+  hour: number;
+  weekday: number;
+  inApp: boolean;
+  email: boolean;
+}
+export interface DigestItem {
+  id: string;
+  title: string;
+  meta?: string | null;
+  link?: string;
+}
+export interface DigestSections {
+  period: "daily" | "weekly";
+  since: string;
+  dueToday: DigestItem[];
+  overdue: DigestItem[];
+  assignments: DigestItem[];
+  mentions: DigestItem[];
+}
 export interface NotificationPreferences {
   channels: Record<NotifType, ChannelPrefs>;
+  digest: DigestPrefs;
   /** False when the server has no mail provider - email switches still save, but nothing goes out. */
   emailConfigured: boolean;
 }
@@ -1230,6 +1253,9 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ until }),
     }),
+  /** Row 76: digest. */
+  previewDigest: () => request<DigestSections>(`/notifications/digest/preview`),
+  sendDigestNow: () => request<{ sent: boolean; sections: DigestSections }>(`/notifications/digest/send`, { method: "POST" }),
   /** Row 75: approve / reject from the inbox card. */
   decideApproval: (id: string, body: { approve: boolean; note?: string }) =>
     request<AppNotification>(`/notifications/${id}/decide`, { method: "POST", body: JSON.stringify(body) }),
@@ -1241,7 +1267,7 @@ export const api = {
     request<{ muted: boolean }>(`/notifications/mutes/${entityType}/${entityId}`, { method: "DELETE" }),
   getNotificationPreferences: () =>
     request<NotificationPreferences>(`/notifications/preferences`),
-  updateNotificationPreferences: (patch: Partial<Record<NotifType, Partial<ChannelPrefs>>>) =>
+  updateNotificationPreferences: (patch: Partial<Record<NotifType, Partial<ChannelPrefs>>> & { digest?: Partial<DigestPrefs> }) =>
     request<NotificationPreferences>(`/notifications/preferences`, {
       method: "PATCH",
       body: JSON.stringify(patch),

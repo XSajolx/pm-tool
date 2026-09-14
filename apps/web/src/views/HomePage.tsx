@@ -5,6 +5,8 @@ import {
   api,
   type ApprovalMeta,
   type AppNotification,
+  type DigestItem,
+  type DigestSections,
   type InboxTab,
   type MutableEntity,
   type MyTask,
@@ -26,6 +28,7 @@ const VERB_LABEL: Record<string, string> = {
   mentioned: "mentioned you",
   posted: "posted",
   follow_up: "— follow-up due",
+  digest: "— your summary",
   due_soon: "— due soon",
   overdue: "— overdue",
   doc_review_requested: "asked you to review",
@@ -482,6 +485,7 @@ function NotificationRow({
         </span>
       </span>
       {n.data?.approval ? <ApprovalCard n={n} approval={n.data.approval as ApprovalMeta} /> : null}
+      {n.verb === "digest" && n.data?.sections ? <DigestCard sections={n.data.sections as DigestSections} /> : null}
     </li>
   );
 }
@@ -556,6 +560,112 @@ function ApprovalCard({ n, approval }: { n: AppNotification; approval: ApprovalM
         </>
       )}
       {decide.isError && <span className="text-xs text-red-600">{(decide.error as Error).message}</span>}
+    </div>
+  );
+}
+
+/** Row 76: the expanded digest under its inbox row - every item links to the thing itself. */
+function DigestCard({ sections }: { sections: DigestSections }) {
+  const navigate = useNavigate();
+  const Group = ({ label, items, tone }: { label: string; items: DigestItem[]; tone: string }) =>
+    items.length ? (
+      <div>
+        <p className={cn("text-[11px] font-semibold uppercase tracking-wide", tone)}>
+          {label} · {items.length}
+        </p>
+        <ul className="mt-0.5 space-y-0.5">
+          {items.slice(0, 8).map((i) => (
+            <li key={i.id} className="truncate text-xs text-slate-700">
+              <button type="button" onClick={() => i.link && navigate({ to: i.link as "/" })} className="hover:underline">
+                {i.title}
+              </button>
+              {i.meta && /^\d{4}-\d{2}-\d{2}T/.test(i.meta) ? <span className="text-muted-foreground"> · {new Date(i.meta).toLocaleDateString()}</span> : null}
+            </li>
+          ))}
+          {items.length > 8 && <li className="text-[11px] text-muted-foreground">+{items.length - 8} more</li>}
+        </ul>
+      </div>
+    ) : null;
+  const empty = !sections.dueToday.length && !sections.overdue.length && !sections.assignments.length && !sections.mentions.length;
+  return (
+    <div className="col-span-full ml-5 grid gap-3 rounded-md border border-border bg-[#fbfbfa] p-3 sm:grid-cols-2" onClick={(e) => e.stopPropagation()}>
+      {empty ? (
+        <p className="text-xs text-muted-foreground">All clear - nothing due, overdue, newly assigned or unread.</p>
+      ) : (
+        <>
+          <Group label="Due today" items={sections.dueToday} tone="text-indigo-700" />
+          <Group label="Overdue" items={sections.overdue} tone="text-red-700" />
+          <Group label="New assignments" items={sections.assignments} tone="text-slate-700" />
+          <Group label="Unread mentions" items={sections.mentions} tone="text-amber-700" />
+        </>
+      )}
+    </div>
+  );
+}
+
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+/** Row 76: schedule + channels for the digest, and a "send now" for instant gratification. */
+function DigestSettings() {
+  const qc = useQueryClient();
+  const { data: prefs } = useQuery({ queryKey: ["notification-preferences"], queryFn: api.getNotificationPreferences });
+  const update = useMutation({
+    mutationFn: api.updateNotificationPreferences,
+    onSuccess: (next) => qc.setQueryData(["notification-preferences"], next),
+  });
+  const sendNow = useMutation({
+    mutationFn: api.sendDigestNow,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["notifications"] });
+      qc.invalidateQueries({ queryKey: ["unread-count"] });
+    },
+  });
+  const d = prefs?.digest;
+  if (!d) return null;
+  const set = (patch: Partial<typeof d>) => update.mutate({ digest: patch });
+  const sel = "rounded-md border border-border bg-white px-1.5 py-0.5 text-xs";
+  return (
+    <div className="mt-1 border-t border-border px-2 pt-2">
+      <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Digest</p>
+      <div className="flex flex-wrap items-center gap-2 text-xs text-slate-700">
+        <select value={d.frequency} onChange={(e) => set({ frequency: e.target.value as typeof d.frequency })} className={sel}>
+          <option value="off">Off</option>
+          <option value="daily">Daily</option>
+          <option value="weekly">Weekly</option>
+        </select>
+        {d.frequency === "weekly" && (
+          <select value={d.weekday} onChange={(e) => set({ weekday: Number(e.target.value) })} className={sel}>
+            {WEEKDAYS.map((w, i) => (
+              <option key={w} value={i}>
+                {w}
+              </option>
+            ))}
+          </select>
+        )}
+        {d.frequency !== "off" && (
+          <select value={d.hour} onChange={(e) => set({ hour: Number(e.target.value) })} className={sel} title="Send at">
+            {Array.from({ length: 24 }, (_, h) => (
+              <option key={h} value={h}>
+                {h === 0 ? "12am" : h < 12 ? `${h}am` : h === 12 ? "12pm" : `${h - 12}pm`}
+              </option>
+            ))}
+          </select>
+        )}
+        {d.frequency !== "off" && (
+          <>
+            <label className="flex items-center gap-1">
+              <input type="checkbox" checked={d.inApp} onChange={(e) => set({ inApp: e.target.checked })} className="accent-indigo-600" /> In-app
+            </label>
+            <label className="flex items-center gap-1">
+              <input type="checkbox" checked={d.email} onChange={(e) => set({ email: e.target.checked })} className="accent-indigo-600" /> Email
+            </label>
+          </>
+        )}
+        <button type="button" onClick={() => sendNow.mutate()} disabled={sendNow.isPending} className="ml-auto text-indigo-600 hover:underline disabled:opacity-50" title="Compose and deliver a digest right now">
+          {sendNow.isPending ? "Sending…" : sendNow.isSuccess ? "Sent ✓" : "Send me one now"}
+        </button>
+      </div>
+      <p className="mt-1 text-[11px] text-muted-foreground">Tasks due today, overdue items, new assignments and unread mentions - one message instead of twenty.</p>
     </div>
   );
 }
@@ -664,6 +774,7 @@ function PreferencesPopover({ onClose }: { onClose: () => void }) {
             ))}
           </tbody>
         </table>
+        <DigestSettings />
         <MutedList />
         <div className="mt-1 space-y-1 border-t border-border px-2 pt-2 text-[11px] text-muted-foreground">
           {prefs && !prefs.emailConfigured && <p>Email is not connected on this server yet - switches are saved, mail goes out once it is.</p>}

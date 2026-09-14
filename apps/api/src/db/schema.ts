@@ -774,6 +774,9 @@ export const notificationPreferences = pgTable(
      * Null = defaults (the legacy booleans above still seed the in-app column).
      */
     channels: jsonb("channels").$type<Record<string, { inApp?: boolean; email?: boolean; push?: boolean }>>(),
+    /** Row 76: `{ frequency: off|daily|weekly, hour, weekday, inApp, email }`. Null = off. */
+    digest: jsonb("digest").$type<{ frequency?: "off" | "daily" | "weekly"; hour?: number; weekday?: number; inApp?: boolean; email?: boolean }>(),
+    digestLastSentAt: timestamp("digest_last_sent_at", { withTimezone: true }),
     ...timestamps,
   },
   (t) => [uniqueIndex("notification_prefs_org_user_uq").on(t.organizationId, t.userId)],

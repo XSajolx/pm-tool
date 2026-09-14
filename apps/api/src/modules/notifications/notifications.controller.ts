@@ -3,12 +3,24 @@ import { z } from "zod";
 import { ZodValidationPipe } from "../../common/zod-validation.pipe.js";
 import { NOTIF_TYPES, NotificationsService, type InboxTab, type MutableEntity } from "./notifications.service.js";
 import { RemindersService } from "./reminders.service.js";
+import { DigestService } from "./digest.service.js";
 import { Auth } from "../auth/auth.decorators.js";
 import type { AuthContext } from "../auth/auth.types.js";
 
 /** Row 73: `{ mention: { email: false }, reminders: { push: true } }` - any subset. */
 const channelSchema = z.object({ inApp: z.boolean().optional(), email: z.boolean().optional(), push: z.boolean().optional() });
-const preferencesSchema = z.object(Object.fromEntries(NOTIF_TYPES.map((t) => [t, channelSchema.optional()])) as Record<(typeof NOTIF_TYPES)[number], z.ZodOptional<typeof channelSchema>>);
+/** Row 76 */
+const digestSchema = z.object({
+  frequency: z.enum(["off", "daily", "weekly"]).optional(),
+  hour: z.number().int().min(0).max(23).optional(),
+  weekday: z.number().int().min(0).max(6).optional(),
+  inApp: z.boolean().optional(),
+  email: z.boolean().optional(),
+});
+const preferencesSchema = z.object({
+  ...(Object.fromEntries(NOTIF_TYPES.map((t) => [t, channelSchema.optional()])) as Record<(typeof NOTIF_TYPES)[number], z.ZodOptional<typeof channelSchema>>),
+  digest: digestSchema.optional(),
+});
 
 const snoozeSchema = z.object({ until: z.string().datetime() });
 /** Row 75 */
@@ -30,7 +42,20 @@ export class NotificationsController {
   constructor(
     private readonly notifications: NotificationsService,
     private readonly reminders: RemindersService,
+    private readonly digest: DigestService,
   ) {}
+
+  /** Row 76: what my digest would contain right now. */
+  @Get("digest/preview")
+  digestPreview(@Auth() auth: AuthContext) {
+    return this.digest.preview(auth.orgId, auth.userId);
+  }
+
+  /** Row 76: send my digest now, regardless of schedule. */
+  @Post("digest/send")
+  digestSend(@Auth() auth: AuthContext) {
+    return this.digest.sendNow(auth.orgId, auth.userId);
+  }
 
   /** Row 72: run the due-date reminder sweep now (it also runs every 5 minutes). */
   @Post("reminders/sweep")
