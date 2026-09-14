@@ -5,6 +5,7 @@ import type { DB } from "../../db/index.js";
 import { companies, deals, documentAccess, documentLinks, documentStars, documentVisits, documents, projectMembers, projects, tasks, type DocumentSettings } from "../../db/schema.js";
 import type { Role } from "../auth/auth.types.js";
 import { ChatEventsService } from "../chat/chat-events.service.js";
+import { ActivityService } from "../activity/activity.service.js";
 import { NotificationsService, pendingApproval } from "../notifications/notifications.service.js";
 import { notifications } from "../../db/schema.js";
 import { randomBytes } from "node:crypto";
@@ -40,6 +41,7 @@ export class DocumentsService {
     private readonly chatEvents: ChatEventsService,
     private readonly notifications: NotificationsService,
     private readonly snippets: SnippetsService,
+    private readonly activity: ActivityService,
   ) {}
 
   /** Row 65 + 66: what leaves the team — internal blocks gone, snippets expanded. */
@@ -175,6 +177,7 @@ export class DocumentsService {
         updatedById: userId,
       })
       .returning();
+    await this.activity.record({ orgId, actorId: userId, entityType: "document", entityId: row!.id, action: "created" });
     // Row 50: a doc filed under a project is shared with its channel.
     if (row!.projectId) {
       await this.chatEvents.postProjectEvent(orgId, row!.projectId, userId, {
@@ -203,6 +206,17 @@ export class DocumentsService {
       .update(documents)
       .set({ ...dto, settings, ...reopen, updatedById: userId, updatedAt: new Date() })
       .where(eq(documents.id, id));
+    if (contentChanged) {
+      // Row 102: one activity row per edit; the project feed shows the latest per editor.
+      await this.activity.record({
+        orgId,
+        actorId: userId,
+        entityType: "document",
+        entityId: id,
+        action: "edited",
+        changes: dto.title && dto.title !== current.title ? [{ field: "title", from: current.title, to: dto.title }] : [],
+      });
+    }
     if (contentChanged) await this.pingFollowers(orgId, userId, id, "doc_edited", current.title, dto.title && dto.title !== current.title ? `Renamed to "${dto.title}"` : "Content changed");
     return this.get(orgId, id);
   }
@@ -363,6 +377,7 @@ export class DocumentsService {
       body: note?.trim() || "Please review and sign off",
       data: { documentId: id, approval: pendingApproval("doc_review") },
     });
+    await this.activity.record({ orgId, actorId: actor.userId, entityType: "document", entityId: id, action: "review_requested" });
     await this.pingFollowers(orgId, actor.userId, id, "doc_review_requested", doc.title, "Sent for review", [approverId]);
     return this.get(orgId, id);
   }
@@ -387,6 +402,7 @@ export class DocumentsService {
       .where(eq(documents.id, id));
     // Row 75: flip the inbox card(s) whether this came from the doc page or the inbox.
     await this.notifications.resolveApproval("document", id, approve ? "approved" : "rejected", note, actor.userId);
+    await this.activity.record({ orgId, actorId: actor.userId, entityType: "document", entityId: id, action: approve ? "approved" : "rejected" });
     await this.pingFollowers(orgId, actor.userId, id, approve ? "doc_approved" : "doc_rejected", doc.title, note?.trim() || (approve ? "Signed off" : "Sent back for changes"), [doc.reviewRequestedBy?.id, doc.createdBy?.id].filter((x): x is string => Boolean(x)));
     const receivers = new Set([doc.reviewRequestedBy?.id, doc.createdBy?.id].filter((x): x is string => Boolean(x) && x !== actor.userId));
     for (const receiverId of receivers) {

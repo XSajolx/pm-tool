@@ -3,6 +3,7 @@ import { z } from "zod";
 import { ZodValidationPipe } from "../../common/zod-validation.pipe.js";
 import { ProjectsService } from "./projects.service.js";
 import { ProjectAccessService } from "../access/project-access.service.js";
+import { ActivityService } from "../activity/activity.service.js";
 import { Auth, Roles } from "../auth/auth.decorators.js";
 import type { AuthContext } from "../auth/auth.types.js";
 
@@ -32,6 +33,7 @@ export class ProjectsController {
   constructor(
     private readonly projects: ProjectsService,
     private readonly access: ProjectAccessService,
+    private readonly activity_: ActivityService,
   ) {}
 
   @Get()
@@ -74,6 +76,13 @@ export class ProjectsController {
   @Roles("owner", "admin")
   archive(@Auth() auth: AuthContext, @Param("id") id: string) {
     return this.projects.archive(auth.orgId, auth.userId, id);
+  }
+
+  /** Row 102: everything that happened on this project, newest first. */
+  @Get(":id/activity")
+  async activity(@Auth() auth: AuthContext, @Param("id") id: string, @Query("limit") limit?: string) {
+    await this.access.assertProject(auth.orgId, auth, id);
+    return this.activity_.listForProject(auth.orgId, id, Math.min(500, Math.max(1, Number(limit) || 150)));
   }
 
   /* Row 39: project team (mirrored into the project channel). */

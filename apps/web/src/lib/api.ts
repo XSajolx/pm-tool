@@ -379,6 +379,18 @@ export interface ActivityEntry {
   actor: { id: string; name: string; avatarUrl: string | null } | null;
 }
 
+/** Row 102: one project's feed, with the entity each row is about. */
+export interface ProjectActivityEntry extends ActivityEntry {
+  entityType: string;
+  entityId: string;
+  entity: { type: string; id: string; label: string | null };
+}
+export interface ProjectActivity {
+  entries: ProjectActivityEntry[];
+  statuses: Record<string, string>;
+  users: Record<string, string>;
+}
+
 /** Row 71: inbox tabs by type (plus the Replies section and the two parked tabs). */
 export type InboxTab = "all" | "mentions" | "assigned" | "approvals" | "alerts" | "replies" | "later" | "cleared";
 export type TypedInboxTab = "all" | "mentions" | "assigned" | "approvals" | "alerts";
@@ -1510,6 +1522,8 @@ export const api = {
     request<Stage>(`/stages/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteStage: (id: string) => request<{ id: string }>(`/stages/${id}`, { method: "DELETE" }),
   getStageActivity: (id: string) => request<ActivityEntry[]>(`/stages/${id}/activity`),
+  /** Row 102 */
+  getProjectActivity: (projectId: string, limit = 150) => request<ProjectActivity>(`/projects/${projectId}/activity?limit=${limit}`),
   getStageTemplates: () => request<StageTemplate[]>(`/stage-templates`),
   createStageTemplate: (body: { name: string; stages: string[]; isDefault?: boolean }) =>
     request<StageTemplate>(`/stage-templates`, { method: "POST", body: JSON.stringify(body) }),

@@ -12,6 +12,7 @@ import { DocsTab } from "../components/DocsTab.js";
 import { MuteButton } from "../components/MuteButton.js";
 import { FollowButton } from "../components/FollowButton.js";
 import { MilestoneTimeline } from "../components/MilestoneTimeline.js";
+import { ProjectActivityFeed } from "../components/ProjectActivityFeed.js";
 import { cn } from "../lib/utils.js";
 
 /** One project: headline numbers, its lists, who has logged time, recent entries. */
@@ -279,6 +280,9 @@ export function ProjectPage() {
             <DocsTab entityType="project" entityId={project.id} />
           </div>
         </section>
+
+        {/* Row 102 */}
+        <ProjectActivityFeed projectId={project.id} />
 
         <InboundEmailCard projectId={project.id} canManage={canManage} />
 
