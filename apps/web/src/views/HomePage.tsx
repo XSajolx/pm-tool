@@ -22,6 +22,8 @@ const VERB_LABEL: Record<string, string> = {
   mentioned: "mentioned you",
   posted: "posted",
   follow_up: "— follow-up due",
+  due_soon: "— due soon",
+  overdue: "— overdue",
   doc_review_requested: "asked you to review",
   doc_approved: "approved",
   doc_rejected: "sent back",
@@ -316,6 +318,9 @@ function NotificationList({
                         navigate({ to: "/crm/proposals/$proposalId", params: { proposalId: n.entityId } });
                       } else if (n.entityType === "deal") {
                         navigate({ to: "/crm/deals", search: { deal: n.entityId } });
+                      } else if (n.entityType === "milestone" && typeof n.data?.projectId === "string") {
+                        // Row 72: a milestone reminder opens its project.
+                        navigate({ to: "/projects/$projectId", params: { projectId: n.data.projectId } });
                       } else if (n.entityType === "message" && typeof n.data?.channelId === "string") {
                         // Row 41: a chat mention opens the channel it happened in.
                         navigate({ to: "/chat/$channelId", params: { channelId: n.data.channelId } });
@@ -403,7 +408,7 @@ function NotificationRow({
       </span>
 
       <span className="truncate text-sm text-slate-600">
-        <span className="font-medium text-slate-800">{n.triggeredBy?.name ?? "Someone"}</span>{" "}
+        <span className="font-medium text-slate-800">{n.triggeredBy?.name ?? "System"}</span>{" "}
         {VERB_LABEL[n.verb] ?? n.verb}
         {n.body ? <span className="text-muted-foreground"> — {n.body}</span> : null}
       </span>

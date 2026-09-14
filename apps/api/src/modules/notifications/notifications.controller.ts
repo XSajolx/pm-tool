@@ -2,6 +2,7 @@ import { Body, Controller, Get, Param, Patch, Post, Query, UsePipes } from "@nes
 import { z } from "zod";
 import { ZodValidationPipe } from "../../common/zod-validation.pipe.js";
 import { NotificationsService, type InboxTab } from "./notifications.service.js";
+import { RemindersService } from "./reminders.service.js";
 import { Auth } from "../auth/auth.decorators.js";
 import type { AuthContext } from "../auth/auth.types.js";
 
@@ -25,7 +26,16 @@ const clearSchema = z.object({ tab: typedTab.optional() });
  */
 @Controller("notifications")
 export class NotificationsController {
-  constructor(private readonly notifications: NotificationsService) {}
+  constructor(
+    private readonly notifications: NotificationsService,
+    private readonly reminders: RemindersService,
+  ) {}
+
+  /** Row 72: run the due-date reminder sweep now (it also runs every 5 minutes). */
+  @Post("reminders/sweep")
+  sweepReminders() {
+    return this.reminders.sweep();
+  }
 
   /** `?tab=` picks all (default) / mentions / assigned / approvals / alerts / replies / later / cleared. */
   @Get()

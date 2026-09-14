@@ -2038,3 +2038,35 @@ export const bookmarks = pgTable(
 );
 
 export type Bookmark = typeof bookmarks.$inferSelect;
+
+/* ------------------------------------------------------------------ *
+ * Reminders (row 72) - one row per (receiver, thing, kind, due date) so a
+ * "due tomorrow" / "overdue" nudge goes out exactly once. Move the due date
+ * and a fresh reminder is allowed; it never repeats daily for the same date.
+ * ------------------------------------------------------------------ */
+export const reminders = pgTable(
+  "reminders",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    receiverId: uuid("receiver_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** "task" | "milestone" | "timesheet" ... */
+    entityType: varchar("entity_type", { length: 32 }).notNull(),
+    entityId: uuid("entity_id").notNull(),
+    /** "due_soon" | "overdue" | ... */
+    kind: varchar("kind", { length: 24 }).notNull(),
+    /** The due date this reminder was about; a changed date is a new event. */
+    dueAt: timestamp("due_at", { withTimezone: true }).notNull(),
+    sentAt: timestamp("sent_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex("reminders_once_uq").on(t.receiverId, t.entityType, t.entityId, t.kind, t.dueAt),
+    index("reminders_entity_idx").on(t.entityType, t.entityId),
+  ],
+);
+
+export type Reminder = typeof reminders.$inferSelect;
