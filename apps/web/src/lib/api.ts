@@ -496,6 +496,20 @@ export interface PortalProject {
   docs: { id: string; title: string; icon: string | null; updatedAt: string; reviewStatus: string; shareToken: string | null; clientApprovedAt?: string | null; clientApprovedBy?: string | null; clientDecision?: "approved" | "changes_requested" | null }[];
   generatedAt: string;
 }
+/** Row 123 */
+export interface SearchHit {
+  id: string;
+  title: string;
+  subtitle: string;
+  color?: string | null;
+  nav: { kind: "task" | "project" | "document" | "company" | "contacts" | "channel"; id?: string; messageId?: string };
+}
+export interface SearchResult {
+  q: string;
+  total?: number;
+  groups: { type: string; label: string; items: SearchHit[] }[];
+}
+
 /** Row 120 */
 export interface PortalAccess {
   id: string;
@@ -1853,6 +1867,8 @@ export const api = {
     request<TimesheetSubmission>(`/time/timesheet/submissions/${id}/reopen`, { method: "POST", body: JSON.stringify({ reason }) }),
   getTimesheetEvents: (id: string) =>
     request<{ id: string; kind: string; note: string | null; createdAt: string; actor: { id: string; name: string } | null }[]>(`/time/timesheet/submissions/${id}/events`),
+  /** Row 123 */
+  search: (q: string, limit = 8) => request<SearchResult>(`/search?q=${encodeURIComponent(q)}&limit=${limit}`),
   /** Row 120 */
   getPortalAccess: (projectId?: string) => request<PortalAccess[]>(`/portal/access${projectId ? `?projectId=${projectId}` : ""}`),
   createPortalAccess: (body: { email: string; name?: string | null; projectIds: string[]; expiresAt?: string | null; contactId?: string | null; send?: boolean }) =>

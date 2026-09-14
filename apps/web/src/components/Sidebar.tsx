@@ -6,6 +6,7 @@ import { useAuth } from "../lib/auth.js";
 import { closeSocket, getSocket } from "../lib/socket.js";
 import { TimerBar } from "./TimerBar.js";
 import { QuickAdd, useQuickAddShortcut } from "./QuickAdd.js";
+import { GlobalSearch, useGlobalSearchShortcut } from "./GlobalSearch.js";
 import { InviteDialog, NewSpaceDialog } from "./SidebarDialogs.js";
 import { cn } from "../lib/utils.js";
 import { applyPriorityConfig } from "./ui.js";
@@ -76,6 +77,10 @@ export function Sidebar() {
   const [userMenu, setUserMenu] = useState(false);
   const [spaceDialog, setSpaceDialog] = useState(false);
   const [quickAdd, setQuickAdd] = useState(false);
+  // Row 123: global search (Ctrl/⌘+K).
+  const [searchOpen, setSearchOpen] = useState(false);
+  const openSearch = useCallback(() => setSearchOpen(true), []);
+  useGlobalSearchShortcut(openSearch);
   const openQuickAdd = useCallback(() => setQuickAdd(true), []);
   useQuickAddShortcut(openQuickAdd);
   const [inviteDialog, setInviteDialog] = useState(false);
@@ -142,6 +147,17 @@ export function Sidebar() {
       <div className="min-h-0 flex-1 overflow-y-auto">
       {/* Primary nav */}
       <nav className="px-2 py-2">
+        <button
+          type="button"
+          onClick={openSearch}
+          title="Search everything (Ctrl+K)"
+          className="mb-1 flex w-full items-center gap-2.5 rounded-md border border-border bg-white px-2 py-1.5 text-sm text-muted-foreground hover:border-slate-300 hover:text-slate-700"
+          data-testid="open-search"
+        >
+          <span className="text-base leading-none">⌕</span>
+          Search…
+          <kbd className="ml-auto rounded border border-border px-1 text-[10px] font-normal text-slate-400">⌘K</kbd>
+        </button>
         <button
           type="button"
           onClick={openQuickAdd}
@@ -221,6 +237,7 @@ export function Sidebar() {
       </div>
 
       {spaceDialog && <NewSpaceDialog onClose={() => setSpaceDialog(false)} />}
+      {searchOpen && <GlobalSearch onClose={() => setSearchOpen(false)} />}
       <QuickAdd open={quickAdd} onClose={() => setQuickAdd(false)} />
       {inviteDialog && <InviteDialog onClose={() => setInviteDialog(false)} />}
 
