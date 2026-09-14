@@ -1,3 +1,4 @@
+import { MuteButton } from "../components/MuteButton.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -359,6 +360,7 @@ export function DocPage() {
           <span className="text-muted-foreground">/</span>
           <span className="truncate text-sm font-semibold text-slate-800">{doc.title}</span>
           <StarButton doc={doc} />
+          <MuteButton entityType="document" entityId={doc.id} compact />
           <ReviewBadge status={doc.reviewStatus} />
           <select
             value={doc.projectId ?? ""}

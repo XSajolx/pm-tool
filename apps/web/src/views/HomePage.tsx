@@ -5,6 +5,7 @@ import {
   api,
   type AppNotification,
   type InboxTab,
+  type MutableEntity,
   type MyTask,
   type NotifType,
   type TypedInboxTab,
@@ -13,6 +14,7 @@ import {
 import { relativeTime } from "../components/TaskCollaboration.js";
 import { PriorityFlag, StatusPill } from "../components/ui.js";
 import { cn } from "../lib/utils.js";
+import { useToggleMute } from "../components/MuteButton.js";
 
 type Section = "inbox" | "replies" | "assigned" | "mytasks";
 type RowFilter = "all" | "unread" | "important";
@@ -228,9 +230,18 @@ function NotificationList({
   const archive = act(api.archiveNotification);
   const restore = act(api.restoreNotification);
   const flag = act(api.toggleNotificationImportant);
-  const snooze = act((id) =>
-    api.snoozeNotification(id, new Date(Date.now() + 86_400_000).toISOString()),
-  );
+  const snooze = useMutation({
+    mutationFn: ({ id, until }: { id: string; until: Date }) => api.snoozeNotification(id, until.toISOString()),
+    onSuccess: refresh,
+  });
+  // Row 74: mute the thread behind a row, then clear the row itself.
+  const toggleMute = useToggleMute();
+  const muteRow = (n: AppNotification) => {
+    const target = muteTargetOf(n);
+    if (!target) return;
+    toggleMute.mutate({ ...target, muted: false });
+    archive.mutate(n.id);
+  };
 
   const visible = useMemo(
     () =>
@@ -329,7 +340,8 @@ function NotificationList({
                     }}
                     onFlag={() => flag.mutate(n.id)}
                     onRead={() => markRead.mutate(n.id)}
-                    onSnooze={() => snooze.mutate(n.id)}
+                    onSnooze={(until) => snooze.mutate({ id: n.id, until })}
+                    onMute={muteTargetOf(n) ? () => muteRow(n) : undefined}
                     onArchive={() => archive.mutate(n.id)}
                     onRestore={() => restore.mutate(n.id)}
                   />
@@ -362,6 +374,7 @@ function NotificationRow({
   onFlag,
   onRead,
   onSnooze,
+  onMute,
   onArchive,
   onRestore,
 }: {
@@ -370,7 +383,9 @@ function NotificationRow({
   onOpen: () => void;
   onFlag: () => void;
   onRead: () => void;
-  onSnooze: () => void;
+  onSnooze: (until: Date) => void;
+  /** Row 74: absent when the row's entity can't be muted (e.g. a deal). */
+  onMute?: () => void;
   onArchive: () => void;
   onRestore: () => void;
 }) {
@@ -450,13 +465,41 @@ function NotificationRow({
           ) : (
             <>
               {unread && <RowAction label="Mark read" onClick={onRead}>✓</RowAction>}
-              <RowAction label="Snooze a day" onClick={onSnooze}>⏰</RowAction>
+              <SnoozeMenu onPick={onSnooze} />
+              {onMute && <RowAction label="Mute this thread - no more notifications about it" onClick={onMute}>🔕</RowAction>}
               <RowAction label="Clear" onClick={onArchive}>✕</RowAction>
             </>
           )}
         </span>
       </span>
     </li>
+  );
+}
+
+/** Row 74: everything I've muted, with one-click unmute. */
+function MutedList() {
+  const { data: mutes = [] } = useQuery({ queryKey: ["mutes"], queryFn: api.getMutes });
+  const toggle = useToggleMute();
+  if (!mutes.length) return null;
+  return (
+    <div className="mt-1 border-t border-border px-2 pt-2">
+      <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Muted</p>
+      <ul className="max-h-32 space-y-0.5 overflow-y-auto text-xs">
+        {mutes.map((m) => (
+          <li key={m.id} className="flex items-center gap-2">
+            <span className="text-muted-foreground">{m.entityType === "document" ? "doc" : m.entityType}</span>
+            <span className="truncate text-slate-700">{m.name}</span>
+            <button
+              type="button"
+              onClick={() => toggle.mutate({ entityType: m.entityType, entityId: m.entityId, muted: true })}
+              className="ml-auto shrink-0 text-indigo-600 hover:underline"
+            >
+              Unmute
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -537,6 +580,7 @@ function PreferencesPopover({ onClose }: { onClose: () => void }) {
             ))}
           </tbody>
         </table>
+        <MutedList />
         <div className="mt-1 space-y-1 border-t border-border px-2 pt-2 text-[11px] text-muted-foreground">
           {prefs && !prefs.emailConfigured && <p>Email is not connected on this server yet - switches are saved, mail goes out once it is.</p>}
           {perm === "unsupported" ? (
@@ -766,6 +810,64 @@ function MoreLink({ to, label }: { to: string; label: string }) {
       <span className="h-1.5 w-1.5 rounded-full bg-slate-300" />
       {label}
     </Link>
+  );
+}
+
+/** Row 74: which thread a notification belongs to, for the row's Mute action. */
+function muteTargetOf(n: AppNotification): { entityType: MutableEntity; entityId: string } | null {
+  if (n.entityType === "task" || n.entityType === "document") return { entityType: n.entityType, entityId: n.entityId };
+  if (n.entityType === "project") return { entityType: "project", entityId: n.entityId };
+  if (n.entityType === "milestone" && typeof n.data?.projectId === "string") return { entityType: "project", entityId: n.data.projectId };
+  return null;
+}
+
+/** Row 74: snooze presets instead of a fixed "one day". */
+function snoozePresets(): { label: string; until: Date }[] {
+  const now = new Date();
+  const at = (d: Date, h: number) => {
+    const x = new Date(d);
+    x.setHours(h, 0, 0, 0);
+    return x;
+  };
+  const tomorrow = new Date(now);
+  tomorrow.setDate(now.getDate() + 1);
+  const monday = new Date(now);
+  monday.setDate(now.getDate() + ((8 - now.getDay()) % 7 || 7));
+  const evening = at(now, 18);
+  return [
+    { label: "In 1 hour", until: new Date(now.getTime() + 3_600_000) },
+    ...(evening > now ? [{ label: "This evening (6pm)", until: evening }] : []),
+    { label: "Tomorrow 9am", until: at(tomorrow, 9) },
+    { label: "Next Monday 9am", until: at(monday, 9) },
+  ];
+}
+
+function SnoozeMenu({ onPick }: { onPick: (until: Date) => void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span className="relative">
+      <RowAction label="Snooze until…" onClick={() => setOpen((o) => !o)}>⏰</RowAction>
+      {open && (
+        <>
+          <span className="fixed inset-0 z-20" onClick={() => setOpen(false)} />
+          <span className="absolute right-0 top-full z-30 mt-1 flex w-44 flex-col rounded-md border border-border bg-white py-1 text-left shadow-lg">
+            {snoozePresets().map((p) => (
+              <button
+                key={p.label}
+                type="button"
+                onClick={() => {
+                  setOpen(false);
+                  onPick(p.until);
+                }}
+                className="px-3 py-1.5 text-left text-xs text-slate-700 hover:bg-muted"
+              >
+                {p.label}
+              </button>
+            ))}
+          </span>
+        </>
+      )}
+    </span>
   );
 }
 

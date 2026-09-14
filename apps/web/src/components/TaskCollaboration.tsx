@@ -8,6 +8,7 @@ import {
   type Status,
 } from "../lib/api.js";
 import { Avatar } from "./ui.js";
+import { MuteButton } from "./MuteButton.js";
 import { cn } from "../lib/utils.js";
 
 const QUICK_EMOJI = ["👍", "🎉", "🚀", "👀", "🔥"];
@@ -180,6 +181,7 @@ export function TaskCollaboration({ taskId, listId, statuses }: Props) {
           </svg>
           {subscription?.subscribed ? "Following" : "Follow"}
         </button>
+        <MuteButton entityType="task" entityId={taskId} />
       </div>
 
       {/* Relations */}

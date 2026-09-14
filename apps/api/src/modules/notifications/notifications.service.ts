@@ -4,10 +4,16 @@ import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
 import {
   comments,
+  documents,
+  milestones,
+  notificationMutes,
   notificationPreferences,
   notifications,
+  projects,
+  projectStages,
   taskAssignees,
   taskSubscribers,
+  tasks,
   users,
 } from "../../db/schema.js";
 import { ChatGateway } from "../chat/chat.gateway.js";
@@ -36,6 +42,8 @@ export interface ChannelPrefs {
   push: boolean;
 }
 export type ChannelMatrix = Record<NotifType, ChannelPrefs>;
+/** Row 74: what can be muted. */
+export type MutableEntity = "task" | "document" | "project";
 
 const TYPE_FOR_VERB: Record<string, NotifType> = {
   mentioned: "mention",
@@ -306,7 +314,8 @@ export class NotificationsService {
    * whether the row lands in the inbox (in-app), goes out by email, and/or is
    * pushed as a desktop notification. Unknown verbs always reach the inbox.
    */
-  private async insertAndPush(values: (typeof notifications.$inferInsert)[]) {
+  private async insertAndPush(input: (typeof notifications.$inferInsert)[]) {
+    const values = await this.dropMuted(input);
     if (!values.length) return;
     const orgId = values[0]!.organizationId;
     const receiverIds = [...new Set(values.map((v) => v.receiverId))];
@@ -345,6 +354,86 @@ export class NotificationsService {
     for (const v of wantPush) {
       this.gateway.emitToUser(v.receiverId, "notification:push", { title: v.title, body: v.body ?? "", link: linkFor(v), verb: v.verb });
     }
+  }
+
+  /* ---------------------------------------------------------------- *
+   * Row 74: mutes
+   * ---------------------------------------------------------------- */
+
+  /**
+   * Remove rows whose receiver muted the entity itself or the project it
+   * belongs to. Project membership is resolved per entity type: a task via its
+   * stage or milestone, a doc via its project, a milestone via the row's data.
+   */
+  private async dropMuted(values: (typeof notifications.$inferInsert)[]) {
+    if (!values.length) return values;
+    const receiverIds = [...new Set(values.map((v) => v.receiverId))];
+    const mutes = await this.db
+      .select({ userId: notificationMutes.userId, entityType: notificationMutes.entityType, entityId: notificationMutes.entityId })
+      .from(notificationMutes)
+      .where(inArray(notificationMutes.userId, receiverIds));
+    if (!mutes.length) return values;
+    const muted = new Set(mutes.map((m) => `${m.userId}:${m.entityType}:${m.entityId}`));
+
+    // Resolve each entity's project once, only for the types that live in one.
+    const projectOf = new Map<string, string | null>();
+    const taskIds = [...new Set(values.filter((v) => v.entityType === "task").map((v) => v.entityId))];
+    if (taskIds.length) {
+      const rows = await this.db
+        .select({ id: tasks.id, stageProject: projectStages.projectId, milestoneProject: milestones.projectId })
+        .from(tasks)
+        .leftJoin(projectStages, eq(projectStages.id, tasks.stageId))
+        .leftJoin(milestones, eq(milestones.id, tasks.milestoneId))
+        .where(inArray(tasks.id, taskIds));
+      for (const r of rows) projectOf.set(`task:${r.id}`, r.stageProject ?? r.milestoneProject ?? null);
+    }
+    const docIds = [...new Set(values.filter((v) => v.entityType === "document").map((v) => v.entityId))];
+    if (docIds.length) {
+      const rows = await this.db.select({ id: documents.id, projectId: documents.projectId }).from(documents).where(inArray(documents.id, docIds));
+      for (const r of rows) projectOf.set(`document:${r.id}`, r.projectId);
+    }
+    for (const v of values) {
+      if (v.entityType === "milestone" && typeof v.data?.projectId === "string") projectOf.set(`milestone:${v.entityId}`, v.data.projectId);
+      if (v.entityType === "project") projectOf.set(`project:${v.entityId}`, v.entityId);
+    }
+
+    return values.filter((v) => {
+      if (muted.has(`${v.receiverId}:${v.entityType}:${v.entityId}`)) return false;
+      const projectId = projectOf.get(`${v.entityType}:${v.entityId}`);
+      return !(projectId && muted.has(`${v.receiverId}:project:${projectId}`));
+    });
+  }
+
+  /** The caller's mutes, with a display name for each so the list is readable. */
+  async listMutes(orgId: string, userId: string) {
+    const rows = await this.db
+      .select()
+      .from(notificationMutes)
+      .where(and(eq(notificationMutes.organizationId, orgId), eq(notificationMutes.userId, userId)))
+      .orderBy(desc(notificationMutes.createdAt));
+    const ids = (t: string) => rows.filter((m) => m.entityType === t).map((m) => m.entityId);
+    const [t, d, p] = await Promise.all([
+      ids("task").length ? this.db.select({ id: tasks.id, name: tasks.title }).from(tasks).where(inArray(tasks.id, ids("task"))) : [],
+      ids("document").length ? this.db.select({ id: documents.id, name: documents.title }).from(documents).where(inArray(documents.id, ids("document"))) : [],
+      ids("project").length ? this.db.select({ id: projects.id, name: projects.name }).from(projects).where(inArray(projects.id, ids("project"))) : [],
+    ]);
+    const names = new Map([...t, ...d, ...p].map((x) => [x.id, x.name]));
+    return rows.map((m) => ({ ...m, name: names.get(m.entityId) ?? "(deleted)" }));
+  }
+
+  async mute(orgId: string, userId: string, entityType: MutableEntity, entityId: string) {
+    await this.db
+      .insert(notificationMutes)
+      .values({ organizationId: orgId, userId, entityType, entityId })
+      .onConflictDoNothing();
+    return { muted: true };
+  }
+
+  async unmute(userId: string, entityType: MutableEntity, entityId: string) {
+    await this.db
+      .delete(notificationMutes)
+      .where(and(eq(notificationMutes.userId, userId), eq(notificationMutes.entityType, entityType), eq(notificationMutes.entityId, entityId)));
+    return { muted: false };
   }
 
   private categorise(verb: string, receiverIsAssignee: boolean): "primary" | "other" {

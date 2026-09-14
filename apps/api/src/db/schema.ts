@@ -2075,3 +2075,29 @@ export const reminders = pgTable(
 );
 
 export type Reminder = typeof reminders.$inferSelect;
+
+/* ------------------------------------------------------------------ *
+ * Mutes (row 74) - "stop telling me about this thread". Muting a task, doc
+ * or project silences every notification about it (a project mute covers
+ * its tasks, docs and milestones). Unlike unfollowing, it also blocks
+ * @mentions - it's the user's explicit "I know, leave me alone".
+ * ------------------------------------------------------------------ */
+export const notificationMutes = pgTable(
+  "notification_mutes",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** "task" | "document" | "project" */
+    entityType: varchar("entity_type", { length: 16 }).notNull(),
+    entityId: uuid("entity_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex("notification_mutes_uq").on(t.userId, t.entityType, t.entityId)],
+);
+
+export type NotificationMute = typeof notificationMutes.$inferSelect;

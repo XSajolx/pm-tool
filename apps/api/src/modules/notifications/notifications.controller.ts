@@ -1,7 +1,7 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, UsePipes } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UsePipes } from "@nestjs/common";
 import { z } from "zod";
 import { ZodValidationPipe } from "../../common/zod-validation.pipe.js";
-import { NOTIF_TYPES, NotificationsService, type InboxTab } from "./notifications.service.js";
+import { NOTIF_TYPES, NotificationsService, type InboxTab, type MutableEntity } from "./notifications.service.js";
 import { RemindersService } from "./reminders.service.js";
 import { Auth } from "../auth/auth.decorators.js";
 import type { AuthContext } from "../auth/auth.types.js";
@@ -11,6 +11,9 @@ const channelSchema = z.object({ inApp: z.boolean().optional(), email: z.boolean
 const preferencesSchema = z.object(Object.fromEntries(NOTIF_TYPES.map((t) => [t, channelSchema.optional()])) as Record<(typeof NOTIF_TYPES)[number], z.ZodOptional<typeof channelSchema>>);
 
 const snoozeSchema = z.object({ until: z.string().datetime() });
+/** Row 74 */
+const mutableEntity = z.enum(["task", "document", "project"]);
+const muteSchema = z.object({ entityType: mutableEntity, entityId: z.string().uuid() });
 const tabSchema = z.enum(["all", "mentions", "assigned", "approvals", "alerts", "replies", "later", "cleared"]);
 const typedTab = z.enum(["all", "mentions", "assigned", "approvals", "alerts"]);
 const clearSchema = z.object({ tab: typedTab.optional() });
@@ -48,6 +51,26 @@ export class NotificationsController {
   @Get("unread-count")
   unreadCount(@Auth() auth: AuthContext) {
     return this.notifications.unreadCounts(auth.orgId, auth.userId);
+  }
+
+  /* ---- Row 74: mutes ---- */
+
+  @Get("mutes")
+  mutes(@Auth() auth: AuthContext) {
+    return this.notifications.listMutes(auth.orgId, auth.userId);
+  }
+
+  @Post("mutes")
+  @UsePipes(new ZodValidationPipe(muteSchema))
+  mute(@Auth() auth: AuthContext, @Body() dto: z.infer<typeof muteSchema>) {
+    return this.notifications.mute(auth.orgId, auth.userId, dto.entityType, dto.entityId);
+  }
+
+  @Delete("mutes/:entityType/:entityId")
+  unmute(@Auth() auth: AuthContext, @Param("entityType") entityType: string, @Param("entityId") entityId: string) {
+    const parsed = mutableEntity.safeParse(entityType);
+    if (!parsed.success) return { muted: false };
+    return this.notifications.unmute(auth.userId, parsed.data as MutableEntity, entityId);
   }
 
   @Get("preferences")

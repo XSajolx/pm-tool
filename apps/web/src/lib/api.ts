@@ -481,6 +481,16 @@ export interface MyTask extends Task {
   list: { id: string; name: string; spaceId: string; spaceName: string | null } | null;
 }
 
+/** Row 74: a muted thread. */
+export type MutableEntity = "task" | "document" | "project";
+export interface NotificationMute {
+  id: string;
+  entityType: MutableEntity;
+  entityId: string;
+  name: string;
+  createdAt: string;
+}
+
 /** Row 73: per-type delivery switches. */
 export type NotifType =
   | "mention"
@@ -1191,6 +1201,12 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ until }),
     }),
+  /** Row 74: mutes. */
+  getMutes: () => request<NotificationMute[]>(`/notifications/mutes`),
+  muteEntity: (entityType: MutableEntity, entityId: string) =>
+    request<{ muted: boolean }>(`/notifications/mutes`, { method: "POST", body: JSON.stringify({ entityType, entityId }) }),
+  unmuteEntity: (entityType: MutableEntity, entityId: string) =>
+    request<{ muted: boolean }>(`/notifications/mutes/${entityType}/${entityId}`, { method: "DELETE" }),
   getNotificationPreferences: () =>
     request<NotificationPreferences>(`/notifications/preferences`),
   updateNotificationPreferences: (patch: Partial<Record<NotifType, Partial<ChannelPrefs>>>) =>

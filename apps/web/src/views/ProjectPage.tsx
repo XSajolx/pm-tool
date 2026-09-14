@@ -9,6 +9,7 @@ import { PROJECT_STATUS } from "./ProjectsPage.js";
 import { NotFound } from "../components/NotFound.js";
 import { ProjectTeam } from "../components/ProjectTeam.js";
 import { DocsTab } from "../components/DocsTab.js";
+import { MuteButton } from "../components/MuteButton.js";
 import { cn } from "../lib/utils.js";
 
 /** One project: headline numbers, its lists, who has logged time, recent entries. */
@@ -63,6 +64,7 @@ export function ProjectPage() {
         <span className="text-muted-foreground">/</span>
         <span className="h-3 w-3 rounded-full" style={{ background: project.color }} />
         <h1 className="text-sm font-semibold text-slate-800">{project.name}</h1>
+        <MuteButton entityType="project" entityId={project.id} compact />
         {project.company ? (
           <Link
             to="/crm/companies/$companyId"

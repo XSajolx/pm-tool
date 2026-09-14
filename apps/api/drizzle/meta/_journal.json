@@ -267,6 +267,13 @@
       "when": 1789350607296,
       "tag": "0037_notif_channels",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1789350892761,
+      "tag": "0038_notif_mutes",
+      "breakpoints": true
     }
   ]
 }
