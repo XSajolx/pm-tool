@@ -309,6 +309,13 @@
       "when": 1789353375699,
       "tag": "0043_sign_in_attempts",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1789353766161,
+      "tag": "0044_sso_domain",
+      "breakpoints": true
     }
   ]
 }

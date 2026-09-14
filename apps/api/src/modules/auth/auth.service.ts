@@ -86,6 +86,41 @@ export class AuthService {
     }));
   }
 
+  /* ---------------- Row 80: Google Workspace SSO ---------------- */
+
+  /**
+   * A Google-verified sign-in whose e-mail domain matches a workspace's
+   * `ssoDomain` joins that workspace as a member automatically - so the Google
+   * admin adding someone to the company domain is all the onboarding needed.
+   * Password sign-ups never auto-join: anyone can type any address.
+   */
+  async autoJoinBySsoDomain(userId: string, email: string, provider?: string) {
+    if (provider !== "google") return [];
+    const domain = email.split("@")[1]?.toLowerCase();
+    if (!domain) return [];
+    const orgs = await this.db.query.organizations.findMany({ where: eq(organizations.ssoDomain, domain), columns: { id: true, name: true } });
+    const joined: string[] = [];
+    for (const org of orgs) {
+      const existing = await this.membershipIn(userId, org.id);
+      if (existing) continue;
+      await this.db.insert(memberships).values({ organizationId: org.id, userId, role: "member" satisfies Role }).onConflictDoNothing();
+      joined.push(org.name);
+      this.logger.log(`SSO auto-join: ${email} -> ${org.name}`);
+    }
+    return joined;
+  }
+
+  async getSso(orgId: string) {
+    const org = await this.db.query.organizations.findFirst({ where: eq(organizations.id, orgId), columns: { ssoDomain: true } });
+    return { ssoDomain: org?.ssoDomain ?? null, googleProviderHint: "Enable Google under Supabase → Authentication → Providers with your OAuth client; add this app's origin to Redirect URLs." };
+  }
+
+  async updateSso(orgId: string, ssoDomain: string | null) {
+    const clean = ssoDomain?.trim().toLowerCase().replace(/^@/, "") || null;
+    await this.db.update(organizations).set({ ssoDomain: clean, updatedAt: new Date() }).where(eq(organizations.id, orgId));
+    return this.getSso(orgId);
+  }
+
   /** The tenant check behind OrgGuard: is this user a member of this org? */
   async membershipIn(userId: string, orgId: string) {
     return this.db.query.memberships.findFirst({

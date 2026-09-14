@@ -1,14 +1,16 @@
-import { Body, Controller, Get, Post, Query, UsePipes } from "@nestjs/common";
+import { Body, Controller, Get, Patch, Post, Query, UsePipes } from "@nestjs/common";
 import { z } from "zod";
 import { ZodValidationPipe } from "../../common/zod-validation.pipe.js";
 import { AuthService } from "./auth.service.js";
 import { SignInService } from "./sign-in.service.js";
-import { Auth, NoOrg, Public } from "./auth.decorators.js";
+import { Auth, NoOrg, Public, Roles } from "./auth.decorators.js";
 import type { AuthContext } from "./auth.types.js";
 
 const createOrgSchema = z.object({ name: z.string().min(1).max(255) });
 /** Row 79 */
 const signInSchema = z.object({ email: z.string().email().max(320), password: z.string().min(1).max(200) });
+/** Row 80 */
+const ssoSchema = z.object({ ssoDomain: z.string().max(255).regex(/^@?[a-z0-9.-]+\.[a-z]{2,}$/i, "Enter a domain like 4s.digital").nullable() });
 type CreateOrgDto = z.infer<typeof createOrgSchema>;
 
 /**
@@ -51,6 +53,8 @@ export class AuthController {
   @Get("me")
   @NoOrg()
   async me(@Auth() auth: AuthContext) {
+    // Row 80: a Google-verified address on a workspace's domain joins it automatically.
+    await this.auth.autoJoinBySsoDomain(auth.userId, auth.email, auth.provider);
     return {
       user: {
         id: auth.userId,
@@ -59,6 +63,20 @@ export class AuthController {
       },
       memberships: await this.auth.membershipsFor(auth.userId),
     };
+  }
+
+  /* ---- Row 80: Google Workspace SSO settings (org-scoped) ---- */
+
+  @Get("sso")
+  sso(@Auth() auth: AuthContext) {
+    return this.auth.getSso(auth.orgId);
+  }
+
+  @Patch("sso")
+  @Roles("owner", "admin")
+  @UsePipes(new ZodValidationPipe(ssoSchema))
+  updateSso(@Auth() auth: AuthContext, @Body() dto: z.infer<typeof ssoSchema>) {
+    return this.auth.updateSso(auth.orgId, dto.ssoDomain);
   }
 
   /** Bootstrap for a fresh signup that belongs to no org yet. */

@@ -17,6 +17,8 @@ export interface AuthContext {
   /** Present on every org-scoped route (i.e. everything but /auth/me). */
   orgId: string;
   role: Role;
+  /** Row 80: how the session was minted - "google", "email", ... (from Supabase app_metadata). */
+  provider?: string;
 }
 
 declare module "express" {

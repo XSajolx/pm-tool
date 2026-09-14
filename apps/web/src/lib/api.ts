@@ -1675,6 +1675,10 @@ export const api = {
   applyDocStarterKit: (projectId: string, templateIds?: string[]) =>
     request<string[]>(`/doc-templates/apply/${projectId}`, { method: "POST", body: JSON.stringify({ templateIds }) }),
   /** Row 67: branding + PDF export. */
+  /** Row 80: Google Workspace SSO. */
+  getSso: () => request<{ ssoDomain: string | null; googleProviderHint: string }>(`/auth/sso`),
+  updateSso: (ssoDomain: string | null) =>
+    request<{ ssoDomain: string | null; googleProviderHint: string }>(`/auth/sso`, { method: "PATCH", body: JSON.stringify({ ssoDomain }) }),
   getBranding: () => request<{ name: string; brandColor: string; brandLogoUrl: string | null; brandFooter: string | null }>(`/branding`),
   updateBranding: (body: Partial<{ brandColor: string; brandLogoUrl: string | null; brandFooter: string | null }>) =>
     request<{ name: string; brandColor: string; brandLogoUrl: string | null; brandFooter: string | null }>(`/branding`, { method: "PATCH", body: JSON.stringify(body) }),

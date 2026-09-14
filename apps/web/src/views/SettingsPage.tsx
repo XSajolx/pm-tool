@@ -11,7 +11,7 @@ import type { Priority } from "../lib/api.js";
  * Workspace settings. Sections are added as the roadmap lands; each one is a
  * self-contained panel that owns its own queries.
  */
-type Section = "statuses" | "priorities" | "stages" | "tags" | "templates" | "dealstages" | "proposals" | "snippets" | "branding" | "dockit";
+type Section = "statuses" | "priorities" | "stages" | "tags" | "templates" | "dealstages" | "proposals" | "snippets" | "branding" | "dockit" | "sso";
 
 const SECTIONS: { id: Section; label: string; hint: string }[] = [
   { id: "statuses", label: "Task statuses", hint: "Per space: names, colours, order, done state" },
@@ -23,6 +23,7 @@ const SECTIONS: { id: Section; label: string; hint: string }[] = [
   { id: "proposals", label: "Proposal templates", hint: "Fixed sections every proposal starts from" },
   { id: "snippets", label: "Snippets", hint: "Reusable doc content that stays in sync" },
   { id: "branding", label: "Branding", hint: "Colour, logo and footer on PDFs and client pages" },
+  { id: "sso", label: "Sign-in & SSO", hint: "Google Workspace domain that auto-joins" },
   { id: "dockit", label: "Doc starter kit", hint: "Docs every new project starts with" },
 ];
 
@@ -65,6 +66,7 @@ export function SettingsPage() {
           {section === "proposals" && <ProposalTemplateSettings canEdit={canEdit} />}
           {section === "snippets" && <SnippetSettings canEdit={canEdit} />}
           {section === "branding" && <BrandingSettings canEdit={canEdit} />}
+          {section === "sso" && <SsoSettings canEdit={canEdit} />}
           {section === "dockit" && <DocKitSettings canEdit={canEdit} />}
         </div>
       </div>
@@ -889,6 +891,59 @@ function BrandingSettings({ canEdit }: { canEdit: boolean }) {
               {data.brandFooter || data.name} · Page 1 of 1
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * Sign-in & SSO (row 80)
+ * ------------------------------------------------------------------ */
+function SsoSettings({ canEdit }: { canEdit: boolean }) {
+  const qc = useQueryClient();
+  const { data } = useQuery({ queryKey: ["sso"], queryFn: api.getSso });
+  const [domain, setDomain] = useState<string | null>(null);
+  const save = useMutation({
+    mutationFn: (v: string | null) => api.updateSso(v),
+    onSuccess: (next) => {
+      qc.setQueryData(["sso"], next);
+      setDomain(null);
+    },
+  });
+  if (!data) return <p className="text-sm text-muted-foreground">Loading…</p>;
+  const value = domain ?? data.ssoDomain ?? "";
+  return (
+    <div>
+      <h1 className="text-lg font-semibold text-slate-900">Sign-in &amp; SSO</h1>
+      <p className="mt-1 text-sm text-muted-foreground">People sign in with e-mail + password (with reset and lockout) or with their Google Workspace account.</p>
+      <div className="mt-5 max-w-xl space-y-4">
+        <label className="block text-xs font-medium text-slate-600">
+          Google Workspace domain
+          <div className="mt-1 flex items-center gap-2">
+            <span className="text-sm text-slate-500">@</span>
+            <input
+              value={value}
+              disabled={!canEdit}
+              onChange={(e) => setDomain(e.target.value)}
+              placeholder="4s.digital"
+              className="w-64 rounded-md border border-border px-3 py-1.5 text-sm outline-none focus:border-indigo-500 disabled:opacity-60"
+            />
+            {canEdit && domain !== null && domain.trim() !== (data.ssoDomain ?? "") && (
+              <button type="button" onClick={() => save.mutate(domain.trim() || null)} disabled={save.isPending} className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-50">
+                Save
+              </button>
+            )}
+            {save.isError && <span className="text-xs text-red-600">{(save.error as Error).message}</span>}
+          </div>
+        </label>
+        <p className="text-xs text-muted-foreground">
+          Anyone who signs in with a verified Google account on this domain joins <strong>this workspace</strong> as a member automatically - no invite needed. Remove someone from Google Workspace and they can no longer sign in. Password sign-ups never auto-join.
+        </p>
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          <p className="font-medium">One-time setup (Supabase)</p>
+          <p className="mt-0.5">{data.googleProviderHint}</p>
+          <p className="mt-0.5">Microsoft 365 can be added the same way later.</p>
         </div>
       </div>
     </div>

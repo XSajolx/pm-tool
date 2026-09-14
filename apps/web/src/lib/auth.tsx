@@ -23,6 +23,8 @@ interface AuthState {
   loading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (name: string, email: string, password: string) => Promise<{ needsEmailConfirm: boolean }>;
+  /** Row 80: Google Workspace sign-in via Supabase OAuth (redirects away and back). */
+  signInWithGoogle: () => Promise<void>;
   /** Row 79: e-mail a reset link; the link lands on /reset-password. */
   resetPassword: (email: string) => Promise<void>;
   /** Row 79: set a new password for the current (recovery or normal) session. */
@@ -175,6 +177,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (error) throw new Error(error.message);
   }, []);
 
+  const signInWithGoogle = useCallback(async () => {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: `${window.location.origin}${import.meta.env.BASE_URL}`,
+        queryParams: { prompt: "select_account" },
+      },
+    });
+    if (error) throw new Error(/not enabled|unsupported provider/i.test(error.message) ? "Google sign-in isn't switched on yet - an admin needs to enable the Google provider in Supabase." : error.message);
+  }, []);
+
   const resetPassword = useCallback(async (email: string) => {
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: `${window.location.origin}${import.meta.env.BASE_URL}reset-password`,
@@ -239,6 +252,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loading,
       signIn,
       signUp,
+      signInWithGoogle,
       resetPassword,
       updatePassword,
       signOut,
@@ -253,6 +267,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loading,
       signIn,
       signUp,
+      signInWithGoogle,
       resetPassword,
       updatePassword,
       signOut,

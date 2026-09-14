@@ -99,6 +99,8 @@ export const organizations = pgTable(
     brandColor: varchar("brand_color", { length: 16 }).notNull().default("#6366f1"),
     brandLogoUrl: text("brand_logo_url"),
     brandFooter: varchar("brand_footer", { length: 255 }),
+    /** Row 80: Google Workspace domain - a verified Google sign-in on this domain auto-joins as member. */
+    ssoDomain: varchar("sso_domain", { length: 255 }),
     ...timestamps,
   },
   (t) => [uniqueIndex("organizations_slug_uq").on(t.slug)],

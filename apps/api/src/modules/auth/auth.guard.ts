@@ -39,7 +39,8 @@ export class AuthGuard implements CanActivate {
 
     const claims = await this.tokens.verify(header.slice("Bearer ".length).trim());
     const user = await this.auth.resolveUser(claims);
-    req.auth = this.auth.toContext(user);
+    const provider = (claims as { app_metadata?: { provider?: string } }).app_metadata?.provider;
+    req.auth = { ...this.auth.toContext(user), provider };
     return true;
   }
 }
