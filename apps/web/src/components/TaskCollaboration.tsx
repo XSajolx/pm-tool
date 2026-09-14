@@ -9,6 +9,7 @@ import {
 } from "../lib/api.js";
 import { Avatar } from "./ui.js";
 import { MuteButton } from "./MuteButton.js";
+import { FollowButton } from "./FollowButton.js";
 import { cn } from "../lib/utils.js";
 
 const QUICK_EMOJI = ["👍", "🎉", "🚀", "👀", "🔥"];
@@ -85,10 +86,6 @@ export function TaskCollaboration({ taskId, listId, statuses }: Props) {
     queryKey: ["reactions", "task", taskId],
     queryFn: () => api.getReactions("task", taskId),
   });
-  const { data: subscription } = useQuery({
-    queryKey: ["subscription", taskId],
-    queryFn: () => api.getSubscription(taskId),
-  });
   const { data: relations = [] } = useQuery({
     queryKey: ["relations", taskId],
     queryFn: () => api.getRelations(taskId),
@@ -105,12 +102,6 @@ export function TaskCollaboration({ taskId, listId, statuses }: Props) {
   const react = useMutation({
     mutationFn: (emoji: string) => api.toggleReaction("task", taskId, emoji),
     onSuccess: (next) => qc.setQueryData(["reactions", "task", taskId], next),
-  });
-
-  const toggleFollow = useMutation({
-    mutationFn: () =>
-      subscription?.subscribed ? api.unsubscribeTask(taskId) : api.subscribeTask(taskId),
-    onSuccess: (next) => qc.setQueryData(["subscription", taskId], next),
   });
 
   const comment = useMutation({
@@ -163,24 +154,8 @@ export function TaskCollaboration({ taskId, listId, statuses }: Props) {
 
         <EmojiPicker onPick={(e) => react.mutate(e)} />
 
-        <button
-          onClick={() => toggleFollow.mutate()}
-          className={cn(
-            "ml-auto inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium transition",
-            subscription?.subscribed
-              ? "bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
-              : "text-slate-600 hover:bg-muted",
-          )}
-        >
-          <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none">
-            <path
-              d="M18 8a6 6 0 10-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9z"
-              stroke="currentColor"
-              strokeWidth="1.8"
-            />
-          </svg>
-          {subscription?.subscribed ? "Following" : "Follow"}
-        </button>
+        <span className="ml-auto" />
+        <FollowButton entityType="task" entityId={taskId} />
         <MuteButton entityType="task" entityId={taskId} />
       </div>
 

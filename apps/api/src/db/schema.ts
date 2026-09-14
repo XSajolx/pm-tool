@@ -2140,3 +2140,33 @@ export const timesheetSubmissions = pgTable(
 );
 
 export type TimesheetSubmission = typeof timesheetSubmissions.$inferSelect;
+
+/* ------------------------------------------------------------------ *
+ * Follows (row 77) - "tell me what happens here" for a task, doc or
+ * project. Supersedes task_subscribers (kept for the data copy; the app
+ * reads and writes this table only). Assignment and @mentions auto-follow.
+ * ------------------------------------------------------------------ */
+export const follows = pgTable(
+  "follows",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** "task" | "document" | "project" */
+    entityType: varchar("entity_type", { length: 16 }).notNull(),
+    entityId: uuid("entity_id").notNull(),
+    /** "manual" | "assigned" | "mentioned" | "created" - why the follow exists. */
+    reason: varchar("reason", { length: 16 }).notNull().default("manual"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex("follows_uq").on(t.userId, t.entityType, t.entityId),
+    index("follows_entity_idx").on(t.entityType, t.entityId),
+  ],
+);
+
+export type Follow = typeof follows.$inferSelect;

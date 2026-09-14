@@ -515,7 +515,8 @@ export type NotifType =
   | "taskCompleted"
   | "approvals"
   | "reminders"
-  | "chat";
+  | "chat"
+  | "following";
 export interface ChannelPrefs {
   inApp: boolean;
   email: boolean;
@@ -1259,6 +1260,12 @@ export const api = {
   /** Row 75: approve / reject from the inbox card. */
   decideApproval: (id: string, body: { approve: boolean; note?: string }) =>
     request<AppNotification>(`/notifications/${id}/decide`, { method: "POST", body: JSON.stringify(body) }),
+  /** Row 77: follows. */
+  getFollows: () => request<NotificationMute[]>(`/notifications/follows`),
+  followEntity: (entityType: MutableEntity, entityId: string) =>
+    request<{ following: boolean }>(`/notifications/follows`, { method: "POST", body: JSON.stringify({ entityType, entityId }) }),
+  unfollowEntity: (entityType: MutableEntity, entityId: string) =>
+    request<{ following: boolean }>(`/notifications/follows/${entityType}/${entityId}`, { method: "DELETE" }),
   /** Row 74: mutes. */
   getMutes: () => request<NotificationMute[]>(`/notifications/mutes`),
   muteEntity: (entityType: MutableEntity, entityId: string) =>

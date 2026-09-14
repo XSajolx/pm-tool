@@ -6,8 +6,10 @@ import { lists, projects } from "../../db/schema.js";
 import { ChatGateway } from "./chat.gateway.js";
 import { ChatService } from "./chat.service.js";
 
+export type ProjectEventListener = (orgId: string, projectId: string, actorId: string, event: ProjectEvent) => Promise<unknown> | unknown;
+
 export interface ProjectEvent {
-  type: "task_completed" | "stage_changed" | "milestone_reached" | "doc_shared";
+  type: "task_completed" | "stage_changed" | "milestone_reached" | "doc_shared" | "doc_created" | "task_created";
   /** Written after the actor's name: "completed PM-12 Fix login". */
   text: string;
   link?: string;
@@ -31,7 +33,21 @@ export class ChatEventsService {
     private readonly gateway: ChatGateway,
   ) {}
 
+  private readonly listeners: ProjectEventListener[] = [];
+
+  /** Row 77: other modules (notifications) subscribe to every project event without a circular import. */
+  onProjectEvent(fn: ProjectEventListener) {
+    this.listeners.push(fn);
+  }
+
   async postProjectEvent(orgId: string, projectId: string, actorId: string, event: ProjectEvent) {
+    for (const fn of this.listeners) {
+      try {
+        await fn(orgId, projectId, actorId, event);
+      } catch (err) {
+        this.logger.warn(`project event listener failed: ${(err as Error).message}`);
+      }
+    }
     try {
       const ch = await this.chat.projectChannel(orgId, projectId);
       if (!ch || !ch.activityFeed) return;

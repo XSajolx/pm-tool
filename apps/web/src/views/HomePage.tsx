@@ -18,6 +18,7 @@ import { relativeTime } from "../components/TaskCollaboration.js";
 import { PriorityFlag, StatusPill } from "../components/ui.js";
 import { cn } from "../lib/utils.js";
 import { useToggleMute } from "../components/MuteButton.js";
+import { useToggleFollow } from "../components/FollowButton.js";
 
 type Section = "inbox" | "replies" | "assigned" | "mytasks";
 type RowFilter = "all" | "unread" | "important";
@@ -29,6 +30,10 @@ const VERB_LABEL: Record<string, string> = {
   posted: "posted",
   follow_up: "— follow-up due",
   digest: "— your summary",
+  project_activity: "",
+  doc_edited: "edited",
+  doc_shared: "shared",
+  doc_superseded: "superseded this with",
   due_soon: "— due soon",
   overdue: "— overdue",
   doc_review_requested: "asked you to review",
@@ -340,6 +345,8 @@ function NotificationList({
                         navigate({ to: "/crm/proposals/$proposalId", params: { proposalId: n.entityId } });
                       } else if (n.entityType === "deal") {
                         navigate({ to: "/crm/deals", search: { deal: n.entityId } });
+                      } else if (n.entityType === "project") {
+                        navigate({ to: "/projects/$projectId", params: { projectId: n.entityId } });
                       } else if (n.entityType === "timesheet") {
                         navigate({ to: "/timesheets" });
                       } else if (n.entityType === "milestone" && typeof n.data?.projectId === "string") {
@@ -670,6 +677,33 @@ function DigestSettings() {
   );
 }
 
+/** Row 77: everything I follow, with one-click unfollow. */
+function FollowingList() {
+  const { data: follows = [] } = useQuery({ queryKey: ["follows"], queryFn: api.getFollows });
+  const toggle = useToggleFollow();
+  if (!follows.length) return null;
+  return (
+    <div className="mt-1 border-t border-border px-2 pt-2">
+      <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Following · {follows.length}</p>
+      <ul className="max-h-32 space-y-0.5 overflow-y-auto text-xs">
+        {follows.map((f) => (
+          <li key={f.id} className="flex items-center gap-2">
+            <span className="text-muted-foreground">{f.entityType === "document" ? "doc" : f.entityType}</span>
+            <span className="truncate text-slate-700">{f.name}</span>
+            <button
+              type="button"
+              onClick={() => toggle.mutate({ entityType: f.entityType, entityId: f.entityId, following: true })}
+              className="ml-auto shrink-0 text-indigo-600 hover:underline"
+            >
+              Unfollow
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 /** Row 74: everything I've muted, with one-click unmute. */
 function MutedList() {
   const { data: mutes = [] } = useQuery({ queryKey: ["mutes"], queryFn: api.getMutes });
@@ -707,6 +741,7 @@ const NOTIF_TYPE_ROWS: { key: NotifType; label: string }[] = [
   { key: "propertyChange", label: "Property changes" },
   { key: "taskCompleted", label: "Task completed" },
   { key: "chat", label: "Chat activity" },
+  { key: "following", label: "Activity on things I follow" },
 ];
 const CHANNELS: { key: "inApp" | "email" | "push"; label: string }[] = [
   { key: "inApp", label: "In-app" },
@@ -775,6 +810,7 @@ function PreferencesPopover({ onClose }: { onClose: () => void }) {
           </tbody>
         </table>
         <DigestSettings />
+        <FollowingList />
         <MutedList />
         <div className="mt-1 space-y-1 border-t border-border px-2 pt-2 text-[11px] text-muted-foreground">
           {prefs && !prefs.emailConfigured && <p>Email is not connected on this server yet - switches are saved, mail goes out once it is.</p>}

@@ -5,6 +5,7 @@ import type { DB } from "../../db/index.js";
 import {
   comments,
   documents,
+  follows,
   milestones,
   notificationMutes,
   notificationPreferences,
@@ -12,10 +13,10 @@ import {
   projects,
   projectStages,
   taskAssignees,
-  taskSubscribers,
   tasks,
   users,
 } from "../../db/schema.js";
+import { ChatEventsService } from "../chat/chat-events.service.js";
 import { ChatGateway } from "../chat/chat.gateway.js";
 import { MailerService } from "./mailer.service.js";
 import { resolveDigest, type DigestPrefs } from "./digest.prefs.js";
@@ -35,6 +36,7 @@ export const NOTIF_TYPES = [
   "approvals",
   "reminders",
   "chat",
+  "following",
 ] as const;
 export type NotifType = (typeof NOTIF_TYPES)[number];
 export interface ChannelPrefs {
@@ -95,6 +97,10 @@ const TYPE_FOR_VERB: Record<string, NotifType> = {
   overdue: "reminders",
   follow_up: "reminders",
   posted: "chat",
+  project_activity: "following",
+  doc_edited: "following",
+  doc_shared: "following",
+  doc_superseded: "following",
 };
 
 /** Sensible defaults: everything in-app, the addressed stuff also by email, only the urgent stuff as push. */
@@ -109,6 +115,7 @@ export const DEFAULT_CHANNELS: ChannelMatrix = {
   approvals: ch(true, true),
   reminders: ch(true, false),
   chat: ch(false, false),
+  following: ch(false, false),
 };
 
 /** Legacy boolean columns (pre row 73) still seed the in-app switch. */
@@ -207,7 +214,23 @@ export class NotificationsService {
     @Inject(DRIZZLE) private readonly db: DB,
     private readonly gateway: ChatGateway,
     private readonly mailer: MailerService,
+    private readonly chatEvents: ChatEventsService,
   ) {}
+
+  /** Row 77: project followers hear about every project event the chat feed hears about. */
+  onModuleInit() {
+    this.chatEvents.onProjectEvent((orgId, projectId, actorId, event) =>
+      this.notifyFollowers({
+        orgId,
+        entityType: "project",
+        entityId: projectId,
+        actorId,
+        verb: "project_activity",
+        title: event.text,
+        data: { projectId, link: event.link ?? `/projects/${projectId}`, eventType: event.type },
+      }),
+    );
+  }
 
   /* ---------------------------------------------------------------- *
    * Fan-out
@@ -282,6 +305,10 @@ export class NotificationsService {
     try {
       const receivers = [...new Set(input.receiverIds)].filter((id) => id !== input.actorId);
       if (!receivers.length) return;
+      // Row 77: being @mentioned (or handed a comment) on a task makes you a follower.
+      if (input.entityType === "task") {
+        for (const id of receivers) await this.follow(input.orgId, id, "task", input.entityId, "mentioned");
+      }
 
       await this.insertAndPush(
         receivers.map((receiverId) => ({
@@ -514,38 +541,110 @@ export class NotificationsService {
     return "other";
   }
 
-  /** Assignees are auto-subscribed — that's how a task acquires followers. */
-  async subscribe(orgId: string, taskId: string, userId: string) {
+  /* ---------------------------------------------------------------- *
+   * Row 77: follows (tasks, docs, projects)
+   * ---------------------------------------------------------------- */
+
+  async follow(orgId: string, userId: string, entityType: MutableEntity, entityId: string, reason: "manual" | "assigned" | "mentioned" | "created" = "manual") {
     await this.db
-      .insert(taskSubscribers)
-      .values({ taskId, userId, organizationId: orgId })
+      .insert(follows)
+      .values({ organizationId: orgId, userId, entityType, entityId, reason })
       .onConflictDoNothing();
+    return { following: true };
   }
 
-  async unsubscribe(taskId: string, userId: string) {
+  async unfollow(userId: string, entityType: MutableEntity, entityId: string) {
     await this.db
-      .delete(taskSubscribers)
-      .where(and(eq(taskSubscribers.taskId, taskId), eq(taskSubscribers.userId, userId)));
+      .delete(follows)
+      .where(and(eq(follows.userId, userId), eq(follows.entityType, entityType), eq(follows.entityId, entityId)));
+    return { following: false };
   }
 
-  async isSubscribed(taskId: string, userId: string) {
-    const row = await this.db.query.taskSubscribers.findFirst({
-      where: and(eq(taskSubscribers.taskId, taskId), eq(taskSubscribers.userId, userId)),
+  async isFollowing(userId: string, entityType: MutableEntity, entityId: string) {
+    const row = await this.db.query.follows.findFirst({
+      where: and(eq(follows.userId, userId), eq(follows.entityType, entityType), eq(follows.entityId, entityId)),
     });
     return Boolean(row);
   }
 
+  /** Everything I follow, with a display name so the settings list reads well. */
+  async listFollows(orgId: string, userId: string) {
+    const rows = await this.db
+      .select()
+      .from(follows)
+      .where(and(eq(follows.organizationId, orgId), eq(follows.userId, userId)))
+      .orderBy(desc(follows.createdAt));
+    const ids = (t: string) => rows.filter((m) => m.entityType === t).map((m) => m.entityId);
+    const [t, d, p] = await Promise.all([
+      ids("task").length ? this.db.select({ id: tasks.id, name: tasks.title }).from(tasks).where(inArray(tasks.id, ids("task"))) : [],
+      ids("document").length ? this.db.select({ id: documents.id, name: documents.title }).from(documents).where(inArray(documents.id, ids("document"))) : [],
+      ids("project").length ? this.db.select({ id: projects.id, name: projects.name }).from(projects).where(inArray(projects.id, ids("project"))) : [],
+    ]);
+    const names = new Map([...t, ...d, ...p].map((x) => [x.id, x.name]));
+    return rows.map((m) => ({ ...m, name: names.get(m.entityId) ?? "(deleted)" }));
+  }
+
+  private async followersOf(entityType: MutableEntity, entityId: string) {
+    const rows = await this.db.select({ userId: follows.userId }).from(follows).where(and(eq(follows.entityType, entityType), eq(follows.entityId, entityId)));
+    return rows.map((r) => r.userId);
+  }
+
+  /** Fan an event out to a doc's or project's followers (never the actor). */
+  async notifyFollowers(input: {
+    orgId: string;
+    entityType: "document" | "project";
+    entityId: string;
+    actorId: string | null;
+    verb: string;
+    title: string;
+    body?: string | null;
+    data?: Record<string, unknown> | null;
+    exclude?: string[];
+  }) {
+    try {
+      const skip = new Set([input.actorId, ...(input.exclude ?? [])]);
+      const receivers = (await this.followersOf(input.entityType, input.entityId)).filter((id) => !skip.has(id));
+      if (!receivers.length) return;
+      await this.insertAndPush(
+        receivers.map((receiverId) => ({
+          organizationId: input.orgId,
+          receiverId,
+          triggeredById: input.actorId,
+          entityType: input.entityType,
+          entityId: input.entityId,
+          verb: input.verb,
+          category: "other",
+          title: input.title,
+          body: input.body ?? null,
+          data: input.data ?? null,
+        })),
+      );
+    } catch (err) {
+      this.logger.error(`follower fan-out failed for ${input.entityType} ${input.entityId}: ${(err as Error).message}`);
+    }
+  }
+
+  /** Task wrappers kept for the existing call sites. Assignees are auto-followed. */
+  async subscribe(orgId: string, taskId: string, userId: string, reason: "manual" | "assigned" | "mentioned" | "created" = "assigned") {
+    await this.follow(orgId, userId, "task", taskId, reason);
+  }
+
+  async unsubscribe(taskId: string, userId: string) {
+    await this.unfollow(userId, "task", taskId);
+  }
+
+  async isSubscribed(taskId: string, userId: string) {
+    return this.isFollowing(userId, "task", taskId);
+  }
+
   /**
-   * Subscribers plus assignees (assignment implies interest even if the
-   * subscriber row was never written), minus the person who caused the event.
+   * Followers plus assignees (assignment implies interest even if the
+   * follow row was never written), minus the person who caused the event.
    * The assignee set is returned too because it decides Primary vs Other.
    */
   private async subscribersOf(taskId: string, actorId: string) {
     const [subs, assigneeRows] = await Promise.all([
-      this.db
-        .select({ userId: taskSubscribers.userId })
-        .from(taskSubscribers)
-        .where(eq(taskSubscribers.taskId, taskId)),
+      this.followersOf("task", taskId),
       this.db
         .select({ userId: taskAssignees.userId })
         .from(taskAssignees)
@@ -553,11 +652,10 @@ export class NotificationsService {
     ]);
 
     const assignees = new Set(assigneeRows.map((r) => r.userId));
-    const ids = new Set([...subs.map((r) => r.userId), ...assignees]);
+    const ids = new Set([...subs, ...assignees]);
     ids.delete(actorId);
     return { recipients: [...ids], assignees };
   }
-
 
   /* ---------------------------------------------------------------- *
    * Inbox

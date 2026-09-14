@@ -1,11 +1,12 @@
 import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, desc, eq, ilike, inArray, isNull, or } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, isNull, or, gt } from "drizzle-orm";
 import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
 import { companies, deals, documentAccess, documentLinks, documentStars, documentVisits, documents, projectMembers, projects, tasks, type DocumentSettings } from "../../db/schema.js";
 import type { Role } from "../auth/auth.types.js";
 import { ChatEventsService } from "../chat/chat-events.service.js";
 import { NotificationsService, pendingApproval } from "../notifications/notifications.service.js";
+import { notifications } from "../../db/schema.js";
 import { randomBytes } from "node:crypto";
 import { expandSnippets, snippetIds, stripInternal, textOf, toLines, type PmNode } from "./doc-content.js";
 import { renderDocPdf } from "../crm/pdf.js";
@@ -145,6 +146,17 @@ export class DocumentsService {
     };
   }
 
+  /** Row 77: what a doc's followers hear about. Edits are coalesced to one ping per editor per hour. */
+  private async pingFollowers(orgId: string, actorId: string, id: string, verb: "doc_edited" | "doc_shared" | "doc_superseded" | "doc_review_requested" | "doc_approved" | "doc_rejected", title: string, body?: string | null, exclude?: string[]) {
+    if (verb === "doc_edited") {
+      const recent = await this.db.query.notifications.findFirst({
+        where: and(eq(notifications.entityId, id), eq(notifications.verb, "doc_edited"), eq(notifications.triggeredById, actorId), gt(notifications.createdAt, new Date(Date.now() - 60 * 60 * 1000))),
+      });
+      if (recent) return;
+    }
+    await this.notifications.notifyFollowers({ orgId, entityType: "document", entityId: id, actorId, verb, title, body, data: { documentId: id }, exclude });
+  }
+
   async create(orgId: string, userId: string, dto: DocumentWrite & { title: string }) {
     if (dto.parentId) await this.get(orgId, dto.parentId);
     const [row] = await this.db
@@ -172,6 +184,8 @@ export class DocumentsService {
         entityId: row!.id,
       });
     }
+    // Row 77: the author follows their own doc.
+    await this.notifications.follow(orgId, userId, "document", row!.id, "created");
     return this.get(orgId, row!.id);
   }
 
@@ -189,6 +203,7 @@ export class DocumentsService {
       .update(documents)
       .set({ ...dto, settings, ...reopen, updatedById: userId, updatedAt: new Date() })
       .where(eq(documents.id, id));
+    if (contentChanged) await this.pingFollowers(orgId, userId, id, "doc_edited", current.title, dto.title && dto.title !== current.title ? `Renamed to "${dto.title}"` : "Content changed");
     return this.get(orgId, id);
   }
 
@@ -204,6 +219,7 @@ export class DocumentsService {
       .update(documents)
       .set({ supersededById: byDocumentId, supersededAt: new Date(), effectiveFrom: effectiveFrom ? new Date(effectiveFrom) : new Date(), updatedById: actor.userId, updatedAt: new Date() })
       .where(eq(documents.id, id));
+    await this.pingFollowers(orgId, actor.userId, id, "doc_superseded", newer.title, `Replaces this doc${effectiveFrom ? ` from ${new Date(effectiveFrom).toLocaleDateString()}` : ""}`);
     return this.get(orgId, id, actor);
   }
 
@@ -347,6 +363,7 @@ export class DocumentsService {
       body: note?.trim() || "Please review and sign off",
       data: { documentId: id, approval: pendingApproval("doc_review") },
     });
+    await this.pingFollowers(orgId, actor.userId, id, "doc_review_requested", doc.title, "Sent for review", [approverId]);
     return this.get(orgId, id);
   }
 
@@ -370,6 +387,7 @@ export class DocumentsService {
       .where(eq(documents.id, id));
     // Row 75: flip the inbox card(s) whether this came from the doc page or the inbox.
     await this.notifications.resolveApproval("document", id, approve ? "approved" : "rejected", note, actor.userId);
+    await this.pingFollowers(orgId, actor.userId, id, approve ? "doc_approved" : "doc_rejected", doc.title, note?.trim() || (approve ? "Signed off" : "Sent back for changes"), [doc.reviewRequestedBy?.id, doc.createdBy?.id].filter((x): x is string => Boolean(x)));
     const receivers = new Set([doc.reviewRequestedBy?.id, doc.createdBy?.id].filter((x): x is string => Boolean(x) && x !== actor.userId));
     for (const receiverId of receivers) {
       await this.notifications.notifyDirect({

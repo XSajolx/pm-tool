@@ -18,6 +18,7 @@ import { ActivityService } from "../activity/activity.service.js";
 import { StagesService } from "./stages.service.js";
 import { ChatService } from "../chat/chat.service.js";
 import { DocTemplatesService } from "../documents/doc-templates.service.js";
+import { NotificationsService } from "../notifications/notifications.service.js";
 
 export interface ProjectDto {
   name: string;
@@ -62,6 +63,7 @@ export class ProjectsService {
     private readonly stages: StagesService,
     private readonly chat: ChatService,
     private readonly docTemplates: DocTemplatesService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   /* ---------------- Row 39: project team + project channel ---------------- */
@@ -294,6 +296,9 @@ export class ProjectsService {
       // New projects start with the org's default stage sequence (Settings → Stage templates).
       const names = await this.stages.defaultStageNames(orgId);
       if (names.length) await this.stages.appendStages(orgId, userId, project.id, names);
+      // Row 77: creator and lead follow the project from day one.
+      await this.notifications.follow(orgId, userId, "project", project.id, "created");
+      if (project.leadId) await this.notifications.follow(orgId, project.leadId, "project", project.id, "assigned");
       // Row 39: creator + lead form the first team; the project channel follows.
       await this.db
         .insert(projectMembers)

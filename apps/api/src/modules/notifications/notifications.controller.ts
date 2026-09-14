@@ -80,6 +80,26 @@ export class NotificationsController {
     return this.notifications.unreadCounts(auth.orgId, auth.userId);
   }
 
+  /* ---- Row 77: follows ---- */
+
+  @Get("follows")
+  follows(@Auth() auth: AuthContext) {
+    return this.notifications.listFollows(auth.orgId, auth.userId);
+  }
+
+  @Post("follows")
+  @UsePipes(new ZodValidationPipe(muteSchema))
+  follow(@Auth() auth: AuthContext, @Body() dto: z.infer<typeof muteSchema>) {
+    return this.notifications.follow(auth.orgId, auth.userId, dto.entityType, dto.entityId, "manual");
+  }
+
+  @Delete("follows/:entityType/:entityId")
+  unfollow(@Auth() auth: AuthContext, @Param("entityType") entityType: string, @Param("entityId") entityId: string) {
+    const parsed = mutableEntity.safeParse(entityType);
+    if (!parsed.success) return { following: false };
+    return this.notifications.unfollow(auth.userId, parsed.data as MutableEntity, entityId);
+  }
+
   /* ---- Row 74: mutes ---- */
 
   @Get("mutes")
