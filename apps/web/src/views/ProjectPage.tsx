@@ -118,8 +118,50 @@ export function ProjectPage() {
 
       <div className="flex-1 overflow-y-auto p-6">
         {/* Headline numbers */}
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-          <Stat label="Tasks done" value={`${stats.tasksDone} / ${stats.tasksTotal}`} />
+        {/* Row 99: quick links to the project's chat, docs and client */}
+        <div className="mb-4 flex flex-wrap items-center gap-2 text-xs">
+          {stats.channelId ? (
+            <Link to="/chat/$channelId" params={{ channelId: stats.channelId }} className="rounded-full border border-border bg-white px-2.5 py-1 text-slate-700 hover:border-indigo-300 hover:text-indigo-700">
+              💬 Project chat
+            </Link>
+          ) : (
+            <span className="rounded-full border border-border bg-white px-2.5 py-1 text-muted-foreground" title="No chat channel yet - add a team member to create one">💬 No chat yet</span>
+          )}
+          <a href="#project-docs" className="rounded-full border border-border bg-white px-2.5 py-1 text-slate-700 hover:border-indigo-300 hover:text-indigo-700">
+            📄 Docs
+          </a>
+          {project.company && (
+            <Link to="/crm/companies/$companyId" params={{ companyId: project.company.id }} className="rounded-full border border-border bg-white px-2.5 py-1 text-slate-700 hover:border-indigo-300 hover:text-indigo-700">
+              🏢 {project.company.name}
+            </Link>
+          )}
+          {stats.tasksOverdue > 0 && (
+            <span className="ml-auto rounded-full bg-red-50 px-2.5 py-1 font-medium text-red-700">
+              {stats.tasksOverdue} overdue task{stats.tasksOverdue === 1 ? "" : "s"}
+            </span>
+          )}
+        </div>
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-6">
+          <Stat
+            label="Tasks"
+            value={`${stats.tasksDone} / ${stats.tasksTotal}`}
+            hint={stats.tasksTotal ? `${stats.tasksOpen} open${stats.tasksOverdue ? ` · ${stats.tasksOverdue} overdue` : ""}` : "no tasks yet"}
+            bar={stats.tasksTotal ? Math.round((stats.tasksDone / stats.tasksTotal) * 100) : undefined}
+            warn={stats.tasksOverdue > 0}
+          />
+          <Stat label="Hours this week" value={fmtDuration(stats.weekSeconds)} hint="since Monday" />
+          <Stat
+            label="Next milestone"
+            value={stats.nextMilestone ? stats.nextMilestone.name : "None"}
+            hint={
+              stats.nextMilestone
+                ? stats.nextMilestone.targetDate
+                  ? `${stats.nextMilestone.overdue ? "was due" : "due"} ${fmtShortDate(stats.nextMilestone.targetDate)}`
+                  : "no target date"
+                : "all reached"
+            }
+            warn={Boolean(stats.nextMilestone?.overdue)}
+          />
           <Stat
             label="Time logged"
             value={fmtDuration(stats.loggedSeconds)}
@@ -231,7 +273,7 @@ export function ProjectPage() {
         </div>
 
         <section className="mt-6 rounded-lg border border-border bg-white">
-          <h2 className="border-b border-border px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Docs</h2>
+          <h2 id="project-docs" className="border-b border-border px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Docs</h2>
           <div className="p-4">
             <DocsTab entityType="project" entityId={project.id} />
           </div>
@@ -268,7 +310,7 @@ function Stat({
   return (
     <div className="rounded-lg border border-border bg-white p-4">
       <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
-      <p className={cn("mt-1 text-xl font-semibold tabular-nums text-slate-900", warn && "text-red-600")}>
+      <p className={cn("mt-1 truncate text-xl font-semibold tabular-nums text-slate-900", warn && "text-red-600")} title={value}>
         {value}
       </p>
       {hint && <p className="mt-0.5 text-xs text-muted-foreground">{hint}</p>}

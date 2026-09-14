@@ -3,9 +3,11 @@ import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
 import {
+  channels,
   companies,
   lists,
   memberships,
+  milestones,
   projectMembers,
   projects,
   spaces,
@@ -15,6 +17,7 @@ import {
   users,
 } from "../../db/schema.js";
 import { ActivityService } from "../activity/activity.service.js";
+import { startOfWeek } from "../time/time.service.js";
 import { StagesService } from "./stages.service.js";
 import { ChatService } from "../chat/chat.service.js";
 import { DocTemplatesService } from "../documents/doc-templates.service.js";
@@ -51,8 +54,16 @@ const DEFAULT_STATUSES = [
 export interface ProjectStats {
   tasksTotal: number;
   tasksDone: number;
+  /** Row 99: dashboard roll-up. */
+  tasksOpen: number;
+  tasksOverdue: number;
   loggedSeconds: number;
   billableSeconds: number;
+  /** Seconds logged since Monday 00:00 UTC. */
+  weekSeconds: number;
+  nextMilestone: { id: string; name: string; targetDate: string | null; overdue: boolean } | null;
+  /** The project's chat channel, for the dashboard link. */
+  channelId: string | null;
 }
 
 @Injectable()
@@ -397,7 +408,7 @@ export class ProjectsService {
   private async statsFor(orgId: string, rows: { id: string; spaceId: string | null }[]) {
     const out = new Map<string, ProjectStats>();
     for (const r of rows) {
-      out.set(r.id, { tasksTotal: 0, tasksDone: 0, loggedSeconds: 0, billableSeconds: 0 });
+      out.set(r.id, { tasksTotal: 0, tasksDone: 0, tasksOpen: 0, tasksOverdue: 0, loggedSeconds: 0, billableSeconds: 0, weekSeconds: 0, nextMilestone: null, channelId: null });
     }
     if (!rows.length) return out;
 
@@ -408,6 +419,7 @@ export class ProjectsService {
           spaceId: lists.spaceId,
           total: sql<number>`count(*)::int`,
           done: sql<number>`count(*) filter (where ${statuses.category} = 'done')::int`,
+          overdue: sql<number>`count(*) filter (where ${statuses.category} is distinct from 'done' and ${tasks.dueDate} < now())::int`,
         })
         .from(tasks)
         .innerJoin(lists, eq(lists.id, tasks.listId))
@@ -426,15 +438,19 @@ export class ProjectsService {
         if (t) {
           out.get(r.id)!.tasksTotal = t.total;
           out.get(r.id)!.tasksDone = t.done;
+          out.get(r.id)!.tasksOpen = t.total - t.done;
+          out.get(r.id)!.tasksOverdue = t.overdue;
         }
       }
     }
 
+    const weekStart = startOfWeek(new Date()).toISOString();
     const timeRows = await this.db
       .select({
         projectId: timeEntries.projectId,
         logged: sql<number>`coalesce(sum(${timeEntries.durationSeconds}), 0)::int`,
         billable: sql<number>`coalesce(sum(${timeEntries.durationSeconds}) filter (where ${timeEntries.billable}), 0)::int`,
+        week: sql<number>`coalesce(sum(${timeEntries.durationSeconds}) filter (where ${timeEntries.startedAt} >= ${weekStart}::timestamptz), 0)::int`,
       })
       .from(timeEntries)
       .where(
@@ -449,7 +465,35 @@ export class ProjectsService {
       if (s) {
         s.loggedSeconds = t.logged;
         s.billableSeconds = t.billable;
+        s.weekSeconds = t.week;
       }
+    }
+
+    // Row 99: next unreached milestone (earliest target, undated last) + the project channel.
+    const ids = rows.map((r) => r.id);
+    const ms = await this.db
+      .select({ id: milestones.id, projectId: milestones.projectId, name: milestones.name, targetDate: milestones.targetDate })
+      .from(milestones)
+      .where(and(inArray(milestones.projectId, ids), isNull(milestones.reachedAt)))
+      .orderBy(sql`${milestones.targetDate} asc nulls last`, milestones.createdAt);
+    for (const m of ms) {
+      const s = out.get(m.projectId);
+      if (s && !s.nextMilestone) {
+        s.nextMilestone = {
+          id: m.id,
+          name: m.name,
+          targetDate: m.targetDate ? m.targetDate.toISOString() : null,
+          overdue: Boolean(m.targetDate && m.targetDate.getTime() < Date.now()),
+        };
+      }
+    }
+    const chans = await this.db
+      .select({ id: channels.id, projectId: channels.projectId })
+      .from(channels)
+      .where(and(inArray(channels.projectId, ids), isNull(channels.archivedAt)));
+    for (const c of chans) {
+      const s = c.projectId ? out.get(c.projectId) : undefined;
+      if (s && !s.channelId) s.channelId = c.id;
     }
     return out;
   }

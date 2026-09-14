@@ -643,8 +643,14 @@ export type ProjectStatus = "active" | "on_hold" | "completed" | "archived";
 export interface ProjectStats {
   tasksTotal: number;
   tasksDone: number;
+  /** Row 99 */
+  tasksOpen: number;
+  tasksOverdue: number;
   loggedSeconds: number;
   billableSeconds: number;
+  weekSeconds: number;
+  nextMilestone: { id: string; name: string; targetDate: string | null; overdue: boolean } | null;
+  channelId: string | null;
 }
 
 export interface Project {
