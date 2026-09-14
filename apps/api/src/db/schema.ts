@@ -546,6 +546,8 @@ export type CustomField = typeof customFields.$inferSelect;
  * CHAT  (channels + direct messages, real-time via WS gateway)
  * ================================================================== */
 export const channelType = pgEnum("channel_type", ["channel", "dm"]);
+/** Row 45: per-member notification rule for a channel. */
+export const channelNotify = pgEnum("channel_notify", ["all", "mentions", "muted"]);
 
 export const channels = pgTable(
   "channels",
@@ -580,6 +582,8 @@ export const channelMembers = pgTable(
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
     lastReadAt: timestamp("last_read_at", { withTimezone: true }),
+    /** all = every message lands in my inbox; mentions = only @me/@channel/@here; muted = nothing, no badge. */
+    notify: channelNotify("notify").notNull().default("mentions"),
     joinedAt: timestamp("joined_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [

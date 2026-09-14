@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, type Attachment, type ChatChannel, type ChatMember, type ChatMessage, type ReactionGroup } from "../lib/api.js";
+import { api, type Attachment, type ChannelNotify, type ChatChannel, type ChatMember, type ChatMessage, type ReactionGroup } from "../lib/api.js";
 import { useAuth } from "../lib/auth.js";
 import { getSocket } from "../lib/socket.js";
 import { ChatActions, PeoplePicker } from "../components/ChatActions.js";
@@ -131,8 +131,9 @@ function ChannelRow({
           {group ? c.members.length - 1 : label[0]}
         </span>
       )}
-      <span className={cn("truncate", !active && c.unreadCount > 0 && "font-semibold text-slate-900")}>{label}</span>
-      {!active && c.unreadCount > 0 && (
+      <span className={cn("truncate", !active && c.unreadCount > 0 && c.notify !== "muted" && "font-semibold text-slate-900", c.notify === "muted" && "text-slate-400")}>{label}</span>
+      {c.notify === "muted" && <span className="ml-auto text-[10px] text-slate-400" title="Muted">🔕</span>}
+      {!active && c.unreadCount > 0 && c.notify !== "muted" && (
         <span className="ml-auto min-w-[18px] rounded-full bg-indigo-600 px-1.5 py-0.5 text-center text-[10px] font-semibold leading-none text-white" title={`${c.unreadCount} unread`}>
           {c.unreadCount > 99 ? "99+" : c.unreadCount}
         </span>
@@ -913,6 +914,7 @@ function ChannelHeader({ channel, title, filesOpen, onToggleFiles }: { channel?:
         )}
         {channel.isPrivate && !isProject && <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-slate-600">Private</span>}
         <div className="ml-auto flex items-center gap-2">
+          <NotifyControl channel={channel} />
           {onToggleFiles && (
             <button type="button" onClick={onToggleFiles} className={cn("rounded-md px-2 py-1 text-xs hover:bg-muted", filesOpen ? "bg-indigo-50 text-indigo-700" : "text-slate-600")} title="Files shared in this channel">
               📎 Files
@@ -971,4 +973,58 @@ function applyReactions(qc: ReturnType<typeof useQueryClient>, channelId: string
   const patch = (m: ChatMessage) => (m.id === p.messageId ? { ...m, reactions } : m);
   qc.setQueryData<ChatMessage[]>(["messages", channelId], (old = []) => old.map(patch));
   qc.setQueriesData<ThreadData>({ queryKey: ["thread", channelId] }, (old) => (old ? { root: patch(old.root), replies: old.replies.map(patch) } : old));
+}
+
+const NOTIFY_LABEL: Record<ChannelNotify, { icon: string; label: string; hint: string }> = {
+  all: { icon: "🔔", label: "All messages", hint: "Every message here lands in your inbox" },
+  mentions: { icon: "@", label: "Mentions only", hint: "Only @you, @channel and @here" },
+  muted: { icon: "🔕", label: "Muted", hint: "No notifications, no unread badge" },
+};
+
+/** Row 45: the bell in the channel header — all / mentions / muted for this channel, just for me. */
+function NotifyControl({ channel }: { channel: ChatChannel }) {
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const set = useMutation({
+    mutationFn: (notify: ChannelNotify) => api.setChannelNotify(channel.id, notify),
+    onSuccess: ({ notify }) => {
+      qc.setQueryData<ChatChannel[]>(["channels"], (old = []) => old.map((c) => (c.id === channel.id ? { ...c, notify } : c)));
+      setOpen(false);
+    },
+  });
+  const current = NOTIFY_LABEL[channel.notify ?? "mentions"];
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className={cn("rounded-md px-2 py-1 text-xs hover:bg-muted", channel.notify === "muted" ? "text-slate-400" : "text-slate-600")}
+        title={`Notifications: ${current.label}`}
+      >
+        {current.icon} {channel.notify === "muted" ? "Muted" : channel.notify === "all" ? "All" : "Mentions"}
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 top-full z-30 mt-1 w-60 rounded-md border border-border bg-white py-1 shadow-lg">
+            <p className="px-3 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Notify me about</p>
+            {(Object.keys(NOTIFY_LABEL) as ChannelNotify[]).map((k) => (
+              <button
+                key={k}
+                type="button"
+                onClick={() => set.mutate(k)}
+                className={cn("flex w-full items-start gap-2 px-3 py-1.5 text-left text-xs hover:bg-muted", channel.notify === k && "bg-indigo-50 text-indigo-700")}
+              >
+                <span className="w-4 text-center">{NOTIFY_LABEL[k].icon}</span>
+                <span>
+                  <span className="block font-medium">{NOTIFY_LABEL[k].label}</span>
+                  <span className="block text-[10px] text-muted-foreground">{NOTIFY_LABEL[k].hint}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
 }

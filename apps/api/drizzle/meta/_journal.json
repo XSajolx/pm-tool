@@ -127,6 +127,13 @@
       "when": 1789344117953,
       "tag": "0017_chat_files",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1789344559893,
+      "tag": "0018_channel_notify",
+      "breakpoints": true
     }
   ]
 }

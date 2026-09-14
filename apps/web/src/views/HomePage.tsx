@@ -19,6 +19,7 @@ const VERB_LABEL: Record<string, string> = {
   assigned: "assigned this to you",
   comment_assigned: "assigned you a comment",
   mentioned: "mentioned you",
+  posted: "posted",
   commented: "commented",
   status_changed: "changed the status",
   completed: "marked this complete",

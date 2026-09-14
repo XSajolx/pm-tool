@@ -838,6 +838,9 @@ export const api = {
   addChannelMembers: (id: string, userIds: string[]) =>
     request<ChatMember[]>(`/chat/channels/${id}/members`, { method: "POST", body: JSON.stringify({ userIds }) }),
   leaveChannel: (id: string) => request<{ id: string; left: boolean }>(`/chat/channels/${id}/leave`, { method: "POST" }),
+  /** Row 45: per-channel notification rule. */
+  setChannelNotify: (id: string, notify: ChannelNotify) =>
+    request<{ channelId: string; notify: ChannelNotify }>(`/chat/channels/${id}/notify`, { method: "PATCH", body: JSON.stringify({ notify }) }),
   /** Row 44: toggle an emoji on a message. */
   reactToMessage: (channelId: string, messageId: string, emoji: string) =>
     request<{ messageId: string; parentMessageId: string | null; reactions: ReactionGroup[] }>(`/chat/channels/${channelId}/messages/${messageId}/reactions`, {
@@ -1270,6 +1273,8 @@ export interface ChatMember {
   name: string;
   avatarUrl: string | null;
 }
+export type ChannelNotify = "all" | "mentions" | "muted";
+
 export interface ChatChannel {
   id: string;
   type: "channel" | "dm";
@@ -1278,6 +1283,8 @@ export interface ChatChannel {
   /** Row 42: other people's messages since my last-read mark. */
   unreadCount: number;
   lastReadAt: string | null;
+  /** Row 45: my notification rule for this channel. */
+  notify: ChannelNotify;
   /** Invite-only (row 39). Project channels are always private. */
   isPrivate: boolean;
   projectId: string | null;

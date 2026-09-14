@@ -20,7 +20,7 @@ export function Sidebar() {
   const unread = unreadData?.count ?? 0;
   // Row 42: total unread chat messages across my channels.
   const { data: channels = [] } = useQuery({ queryKey: ["channels"], queryFn: api.getChannels });
-  const chatUnread = channels.reduce((n, c) => n + (c.unreadCount ?? 0), 0);
+  const chatUnread = channels.reduce((n, c) => n + (c.notify !== "muted" ? (c.unreadCount ?? 0) : 0), 0);
 
   // The server pushes notification:new into this user's personal room, so the
   // badge updates without polling. Refetching (rather than incrementing) keeps

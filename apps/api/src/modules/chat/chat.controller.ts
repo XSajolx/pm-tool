@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Param, Patch, Post } from "@nestjs/common";
 import { ChatService } from "./chat.service.js";
 import { ChatGateway } from "./chat.gateway.js";
 import { Auth, Roles } from "../auth/auth.decorators.js";
@@ -53,6 +53,16 @@ export class ChatController {
   async react(@Auth() auth: AuthContext, @Param("id") id: string, @Param("messageId") messageId: string, @Body() body: { emoji: string }) {
     const res = await this.chat.react(auth.orgId, id, messageId, auth.userId, body.emoji);
     this.gateway.emitToChannel(id, "message:reaction", res);
+    return res;
+  }
+
+  /** Row 45: all messages / mentions only / muted — per person, per channel. */
+  @Patch("channels/:id/notify")
+  async notify(@Auth() auth: AuthContext, @Param("id") id: string, @Body() body: { notify: "all" | "mentions" | "muted" }) {
+    if (!["all", "mentions", "muted"].includes(body.notify)) throw new BadRequestException("notify must be all, mentions or muted");
+    const res = await this.chat.setNotify(auth.orgId, id, auth.userId, body.notify);
+    // Other devices refetch their channel list (same hook the read mark uses).
+    this.gateway.emitToUser(auth.userId, "chat:read", { channelId: id });
     return res;
   }
 

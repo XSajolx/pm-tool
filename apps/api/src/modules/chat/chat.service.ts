@@ -55,6 +55,7 @@ export class ChatService {
       .groupBy(messages.channelId);
     const unreadBy = new Map(unread.map((u) => [u.channelId, Number(u.n)]));
     const lastReadBy = new Map(mine.map((m) => [m.channelId, m.lastReadAt]));
+    const notifyBy = new Map(mine.map((m) => [m.channelId, m.notify]));
 
     return rows.map((c) => ({
       id: c.id,
@@ -63,6 +64,7 @@ export class ChatService {
       topic: c.topic,
       unreadCount: unreadBy.get(c.id) ?? 0,
       lastReadAt: lastReadBy.get(c.id) ?? null,
+      notify: notifyBy.get(c.id) ?? "mentions",
       isPrivate: c.isPrivate,
       projectId: c.projectId,
       project: c.project ? { id: c.project.id, name: c.project.name, color: c.project.color, archived: Boolean(c.project.archivedAt) } : null,
@@ -118,6 +120,17 @@ export class ChatService {
       .returning({ channelId: channelMembers.channelId });
     if (!row) throw new ForbiddenException("Not a member of this channel");
     return { channelId, lastReadAt };
+  }
+
+  /** Row 45: how loudly this channel should reach me. */
+  async setNotify(orgId: string, channelId: string, userId: string, notify: "all" | "mentions" | "muted") {
+    const [row] = await this.db
+      .update(channelMembers)
+      .set({ notify })
+      .where(and(eq(channelMembers.channelId, channelId), eq(channelMembers.userId, userId), eq(channelMembers.organizationId, orgId)))
+      .returning({ channelId: channelMembers.channelId, notify: channelMembers.notify });
+    if (!row) throw new ForbiddenException("Not a member of this channel");
+    return row;
   }
 
   async memberIds(channelId: string) {
@@ -294,7 +307,7 @@ export class ChatService {
       where: eq(channelMembers.channelId, channelId),
       with: { user: { columns: { id: true, name: true } } },
     });
-    const members = rows.map((m) => ({ id: m.user.id, name: m.user.name }));
+    const members = rows.map((m) => ({ id: m.user.id, name: m.user.name, notify: m.notify }));
     const memberIds = new Set(members.map((m) => m.id));
     const everyone = /(^|\s)@channel(?![\w-])/i.test(body);
     const here = /(^|\s)@here(?![\w-])/i.test(body);
@@ -326,10 +339,13 @@ export class ChatService {
   ) {
     const ch = await this.channel(orgId, channelId);
     const { members, direct, everyone, here } = await this.resolveMentions(channelId, msg.body, explicitIds, actorId);
-    const receivers = new Map<string, "you" | "channel" | "here">();
+    const receivers = new Map<string, "you" | "channel" | "here" | "all">();
     if (everyone) for (const m of members) receivers.set(m.id, "channel");
     if (here) for (const m of members) if (online.has(m.id)) receivers.set(m.id, "here");
     for (const id of direct) receivers.set(id, "you");
+    // Row 45: "All messages" people hear about every post; muted people hear nothing.
+    for (const m of members) if (m.notify === "all" && !receivers.has(m.id)) receivers.set(m.id, "all");
+    for (const m of members) if (m.notify === "muted") receivers.delete(m.id);
     receivers.delete(actorId);
     if (!receivers.size) return [];
 
@@ -344,19 +360,21 @@ export class ChatService {
     const excerpt = msg.body.length > 140 ? `${msg.body.slice(0, 137)}…` : msg.body;
 
     const values = ids
-      .filter((id) => !muted.has(id))
+      // The global "mention" preference gates mentions; "all messages" is an explicit per-channel opt-in.
+      .filter((id) => receivers.get(id) === "all" || !muted.has(id))
       .map((receiverId) => {
         const how = receivers.get(receiverId)!;
+        const name = actor?.name ?? "Someone";
         return {
           organizationId: orgId,
           receiverId,
           triggeredById: actorId,
           entityType: "message",
           entityId: msg.id,
-          verb: "mentioned",
-          category: "primary",
-          title: how === "you" ? `${actor?.name ?? "Someone"} mentioned you in ${where}` : `${actor?.name ?? "Someone"} mentioned @${how} in ${where}`,
-          body: `${how === "you" ? "" : `@${how} `}in ${where}: ${excerpt}`,
+          verb: how === "all" ? "posted" : "mentioned",
+          category: how === "all" ? "other" : "primary",
+          title: how === "you" ? `${name} mentioned you in ${where}` : how === "all" ? `${name} posted in ${where}` : `${name} mentioned @${how} in ${where}`,
+          body: `${how === "you" || how === "all" ? "" : `@${how} `}in ${where}: ${excerpt}`,
           data: { channelId, messageId: msg.id, parentMessageId: msg.parentMessageId, channelName: ch.name, how },
         };
       });
