@@ -76,7 +76,15 @@ export function TimeTrackingPage() {
                       {e.task?.reference && (
                         <span className="ml-1.5 text-xs text-muted-foreground">{e.task.reference}</span>
                       )}
+                      {e.description && e.task && (
+                        <span className="ml-1.5 text-xs text-muted-foreground">· {e.task.title}</span>
+                      )}
                     </span>
+                    {e.stage && (
+                      <span className="rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700" title="Stage">
+                        {e.stage.name}
+                      </span>
+                    )}
                     {!e.billable && (
                       <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-500">
                         non-billable
@@ -116,6 +124,11 @@ function ManualEntryForm() {
   const qc = useQueryClient();
   const { data: projects = [] } = useQuery({ queryKey: ["projects"], queryFn: () => api.getProjects() });
   const [projectId, setProjectId] = useState("");
+  // Row 87: optional stage + task on the entry.
+  const [stageId, setStageId] = useState("");
+  const [taskId, setTaskId] = useState("");
+  const { data: stages = [] } = useQuery({ queryKey: ["stages", projectId], queryFn: () => api.getStages(projectId), enabled: Boolean(projectId) });
+  const { data: pickable = [] } = useQuery({ queryKey: ["pickable-tasks", projectId], queryFn: () => api.getPickableTasks(projectId), enabled: Boolean(projectId) });
   const [description, setDescription] = useState("");
   const [date, setDate] = useState(isoDay(new Date()));
   const [hours, setHours] = useState("1");
@@ -125,6 +138,8 @@ function ManualEntryForm() {
     mutationFn: () =>
       api.createTimeEntry({
         projectId,
+        stageId: stageId || undefined,
+        taskId: taskId || undefined,
         description: description.trim() || undefined,
         billable,
         startedAt: new Date(`${date}T09:00:00.000Z`).toISOString(),
@@ -132,6 +147,7 @@ function ManualEntryForm() {
       }),
     onSuccess: () => {
       setDescription("");
+      setTaskId("");
       qc.invalidateQueries({ queryKey: ["time-entries"] });
       qc.invalidateQueries({ queryKey: ["timesheet"] });
       qc.invalidateQueries({ queryKey: ["projects"] });
@@ -145,12 +161,42 @@ function ManualEntryForm() {
 
   return (
     <form onSubmit={submit} className="flex flex-wrap items-center gap-2 border-b border-border bg-[#fbfbfa] px-6 py-2.5">
-      <select value={projectId} onChange={(e) => setProjectId(e.target.value)} className={input + " w-44"} required>
+      <select
+        value={projectId}
+        onChange={(e) => {
+          setProjectId(e.target.value);
+          setStageId("");
+          setTaskId("");
+        }}
+        className={input + " w-44"}
+        required
+      >
         <option value="">Project…</option>
         {projects.filter((p) => p.status === "active").map((p) => (
           <option key={p.id} value={p.id}>{p.name}</option>
         ))}
       </select>
+      {projectId && stages.length > 0 && (
+        <select value={stageId} onChange={(e) => setStageId(e.target.value)} className={input + " w-36"} title="Stage (optional)">
+          <option value="">Any stage</option>
+          {stages.map((st) => (
+            <option key={st.id} value={st.id}>
+              {st.name}
+            </option>
+          ))}
+        </select>
+      )}
+      {projectId && pickable.length > 0 && (
+        <select value={taskId} onChange={(e) => setTaskId(e.target.value)} className={input + " w-48"} title="Task (optional)">
+          <option value="">No task</option>
+          {pickable.map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.reference ? `${t.reference} ` : ""}
+              {t.title}
+            </option>
+          ))}
+        </select>
+      )}
       <input
         value={description}
         onChange={(e) => setDescription(e.target.value)}

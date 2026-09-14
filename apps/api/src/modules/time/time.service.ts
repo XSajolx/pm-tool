@@ -8,7 +8,7 @@ import {
 import { and, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
 import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
-import { lists, memberships, projects, tasks, timeEntries, timesheetSubmissions, users } from "../../db/schema.js";
+import { lists, memberships, projects, projectStages, tasks, timeEntries, timesheetSubmissions, users } from "../../db/schema.js";
 import { NotificationsService, pendingApproval } from "../notifications/notifications.service.js";
 import type { Role } from "../auth/auth.types.js";
 
@@ -20,6 +20,8 @@ export interface Actor {
 export interface StartDto {
   projectId: string;
   taskId?: string;
+  /** Row 87: optional stage of the project. */
+  stageId?: string;
   description?: string;
   billable?: boolean;
 }
@@ -146,7 +148,7 @@ export class TimeService {
         eq(timeEntries.userId, userId),
         isNull(timeEntries.endedAt),
       ),
-      with: { project: true, task: true },
+      with: { project: true, task: true, stage: { columns: { id: true, name: true } } },
     });
     return row ? this.shape(row) : null;
   }
@@ -156,7 +158,7 @@ export class TimeService {
    * rather than refusing — the user's intent is "I'm on this now", not "error".
    */
   async start(orgId: string, userId: string, dto: StartDto) {
-    await this.assertProjectAndTask(orgId, dto.projectId, dto.taskId);
+    await this.assertProjectAndTask(orgId, dto.projectId, dto.taskId, dto.stageId);
     await this.stop(orgId, userId);
 
     const [row] = await this.db
@@ -166,6 +168,7 @@ export class TimeService {
         userId,
         projectId: dto.projectId,
         taskId: dto.taskId ?? null,
+        stageId: dto.stageId ?? null,
         description: dto.description ?? null,
         billable: dto.billable ?? true,
         startedAt: new Date(),
@@ -202,7 +205,7 @@ export class TimeService {
    * ---------------------------------------------------------------- */
 
   async createManual(orgId: string, userId: string, dto: ManualEntryDto) {
-    await this.assertProjectAndTask(orgId, dto.projectId, dto.taskId);
+    await this.assertProjectAndTask(orgId, dto.projectId, dto.taskId, dto.stageId);
     const startedAt = new Date(dto.startedAt);
     const durationSeconds =
       dto.durationSeconds ??
@@ -220,6 +223,7 @@ export class TimeService {
         userId,
         projectId: dto.projectId,
         taskId: dto.taskId ?? null,
+        stageId: dto.stageId ?? null,
         description: dto.description ?? null,
         billable: dto.billable ?? true,
         startedAt,
@@ -236,6 +240,8 @@ export class TimeService {
     actor: Actor,
     id: string,
     patch: Partial<Pick<ManualEntryDto, "description" | "billable" | "durationSeconds" | "projectId">> & {
+      /** Row 87: null clears the stage. */
+      stageId?: string | null;
       /** null clears the task link; undefined leaves it alone. */
       taskId?: string | null;
     },
@@ -282,7 +288,7 @@ export class TimeService {
 
     const rows = await this.db.query.timeEntries.findMany({
       where: and(...where),
-      with: { project: true, task: true, user: true },
+      with: { project: true, task: true, user: true, stage: { columns: { id: true, name: true } } },
       orderBy: desc(timeEntries.startedAt),
       limit: 500,
     });
@@ -475,7 +481,7 @@ export class TimeService {
   private async findOne(orgId: string, id: string) {
     const row = await this.db.query.timeEntries.findFirst({
       where: and(eq(timeEntries.id, id), eq(timeEntries.organizationId, orgId)),
-      with: { project: true, task: true, user: true },
+      with: { project: true, task: true, user: true, stage: { columns: { id: true, name: true } } },
     });
     if (!row) throw new NotFoundException("Time entry not found");
     return this.shape(row);
@@ -502,11 +508,16 @@ export class TimeService {
   }
 
   /** Project must be in this org; task (if given) must live in the project's space. */
-  private async assertProjectAndTask(orgId: string, projectId: string, taskId?: string) {
+  private async assertProjectAndTask(orgId: string, projectId: string, taskId?: string, stageId?: string) {
     const project = await this.db.query.projects.findFirst({
       where: and(eq(projects.id, projectId), eq(projects.organizationId, orgId)),
     });
     if (!project) throw new BadRequestException("Project not found in this organization");
+    // Row 87: a stage, when given, must be one of this project's stages.
+    if (stageId) {
+      const stage = await this.db.query.projectStages.findFirst({ where: and(eq(projectStages.id, stageId), eq(projectStages.projectId, projectId)), columns: { id: true } });
+      if (!stage) throw new BadRequestException("Stage does not belong to this project");
+    }
     if (!taskId) return project;
 
     const [row] = await this.db
@@ -534,6 +545,7 @@ export class TimeService {
     project: { id: string; name: string; color: string };
     task?: { id: string; title: string; reference: string | null } | null;
     user?: { id: string; name: string } | null;
+    stage?: { id: string; name: string } | null;
   }) {
     return {
       id: r.id,
@@ -552,7 +564,22 @@ export class TimeService {
       project: { id: r.project.id, name: r.project.name, color: r.project.color },
       task: r.task ? { id: r.task.id, title: r.task.title, reference: r.task.reference } : null,
       user: r.user ? { id: r.user.id, name: r.user.name } : null,
+      stage: r.stage ? { id: r.stage.id, name: r.stage.name } : null,
     };
+  }
+
+  /** Row 87: open tasks in a project's space, for the "log time against a task" picker. */
+  async pickableTasks(orgId: string, projectId: string) {
+    const project = await this.db.query.projects.findFirst({ where: and(eq(projects.id, projectId), eq(projects.organizationId, orgId)), columns: { spaceId: true } });
+    if (!project?.spaceId) return [];
+    const rows = await this.db
+      .select({ id: tasks.id, title: tasks.title, reference: tasks.reference })
+      .from(tasks)
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .where(and(eq(tasks.organizationId, orgId), eq(lists.spaceId, project.spaceId), isNull(tasks.completedAt), isNull(tasks.archivedAt), isNull(tasks.parentTaskId)))
+      .orderBy(desc(tasks.updatedAt))
+      .limit(200);
+    return rows;
   }
 }
 

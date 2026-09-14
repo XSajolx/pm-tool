@@ -701,6 +701,8 @@ export interface TimeEntry {
   project: { id: string; name: string; color: string };
   task: { id: string; title: string; reference: string | null } | null;
   user: { id: string; name: string } | null;
+  /** Row 87 */
+  stage?: { id: string; name: string } | null;
 }
 
 /** Row 75 */
@@ -1463,9 +1465,13 @@ export const api = {
     const qs = q.toString();
     return request<TimeEntry[]>(`/time/entries${qs ? "?" + qs : ""}`);
   },
+  /** Row 87 */
+  getPickableTasks: (projectId: string) =>
+    request<{ id: string; title: string; reference: string | null }[]>(`/time/pickable-tasks?projectId=${encodeURIComponent(projectId)}`),
   createTimeEntry: (body: {
     projectId: string;
     taskId?: string;
+    stageId?: string;
     description?: string;
     billable?: boolean;
     startedAt: string;

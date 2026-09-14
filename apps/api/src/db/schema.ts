@@ -1151,6 +1151,8 @@ export const timeEntries = pgTable(
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
     taskId: uuid("task_id").references(() => tasks.id, { onDelete: "set null" }),
+    /** Row 87: optional project stage the hours belong to. */
+    stageId: uuid("stage_id").references((): AnyPgColumn => projectStages.id, { onDelete: "set null" }),
     description: text("description"),
     startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
     endedAt: timestamp("ended_at", { withTimezone: true }),
@@ -1370,6 +1372,7 @@ export const timeEntriesRelations = relations(timeEntries, ({ one }) => ({
   user: one(users, { fields: [timeEntries.userId], references: [users.id] }),
   project: one(projects, { fields: [timeEntries.projectId], references: [projects.id] }),
   task: one(tasks, { fields: [timeEntries.taskId], references: [tasks.id] }),
+  stage: one(projectStages, { fields: [timeEntries.stageId], references: [projectStages.id] }),
 }));
 
 export const allocationsRelations = relations(allocations, ({ one }) => ({

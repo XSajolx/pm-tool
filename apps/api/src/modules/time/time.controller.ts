@@ -8,6 +8,8 @@ import type { AuthContext } from "../auth/auth.types.js";
 const startSchema = z.object({
   projectId: z.string().uuid(),
   taskId: z.string().uuid().optional(),
+  /** Row 87 */
+  stageId: z.string().uuid().optional(),
   description: z.string().max(2000).optional(),
   billable: z.boolean().optional(),
 });
@@ -24,6 +26,7 @@ const updateSchema = z.object({
   durationSeconds: z.number().int().positive().optional(),
   projectId: z.string().uuid().optional(),
   taskId: z.string().uuid().nullable().optional(),
+  stageId: z.string().uuid().nullable().optional(),
 });
 
 const cellSchema = z.object({
@@ -78,6 +81,12 @@ export class TimeController {
     @Query("to") to?: string,
   ) {
     return this.time.list(auth.orgId, this.actor(auth), { userId, projectId, from, to });
+  }
+
+  /** Row 87: tasks you can log time against in a project. */
+  @Get("pickable-tasks")
+  pickableTasks(@Auth() auth: AuthContext, @Query("projectId") projectId: string) {
+    return projectId ? this.time.pickableTasks(auth.orgId, projectId) : [];
   }
 
   @Post("entries")

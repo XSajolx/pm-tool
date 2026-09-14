@@ -344,6 +344,13 @@
       "when": 1789356116803,
       "tag": "0048_offboarding",
       "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1789356476113,
+      "tag": "0049_time_entry_stage",
+      "breakpoints": true
     }
   ]
 }
