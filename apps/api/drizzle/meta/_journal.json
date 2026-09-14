@@ -232,6 +232,13 @@
       "when": 1789348871981,
       "tag": "0032_branding",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1789349118444,
+      "tag": "0033_doc_templates",
+      "breakpoints": true
     }
   ]
 }

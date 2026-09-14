@@ -43,6 +43,14 @@ export function DocsTab({ entityType, entityId, projectId, compact }: { entityTy
   });
   const linked = new Set(docs.map((d) => d.id));
   const candidates = all.filter((d) => !linked.has(d.id));
+  // Row 68: scaffold the standard docs for a project that doesn't have them yet.
+  const kit = useMutation({
+    mutationFn: () => api.applyDocStarterKit(entityId),
+    onSuccess: (ids) => {
+      refresh();
+      if (!ids.length) window.alert("All starter-kit docs already exist on this project.");
+    },
+  });
 
   return (
     <div className={cn(compact ? "space-y-1.5" : "space-y-2")}>
@@ -101,6 +109,11 @@ export function DocsTab({ entityType, entityId, projectId, compact }: { entityTy
             <button type="button" onClick={() => create.mutate()} disabled={create.isPending} className="rounded-md border border-border px-2 py-1 text-xs text-slate-600 hover:bg-muted disabled:opacity-50">
               {create.isPending ? "Creating…" : "New doc"}
             </button>
+            {entityType === "project" && (
+              <button type="button" onClick={() => kit.mutate()} disabled={kit.isPending} title="Create the brief, kickoff notes, SOW and QA checklist from Settings › Doc starter kit" className="rounded-md border border-border px-2 py-1 text-xs text-slate-600 hover:bg-muted disabled:opacity-50">
+                {kit.isPending ? "Applying…" : "📚 Apply starter kit"}
+              </button>
+            )}
           </>
         )}
       </div>

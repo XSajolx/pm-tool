@@ -165,6 +165,17 @@ export interface DocSettings {
   width?: "narrow" | "wide";
 }
 
+/** Row 68: a doc template in the project starter kit. */
+export interface DocTemplate {
+  id: string;
+  title: string;
+  icon: string | null;
+  content: Record<string, unknown> | null;
+  body: string;
+  position: number;
+  inKit: boolean;
+}
+
 /** Row 66: reusable content, embedded by reference. */
 export interface Snippet {
   id: string;
@@ -1512,6 +1523,16 @@ export const api = {
     request<Doc>(`/documents/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   duplicateDocument: (id: string) => request<Doc>(`/documents/${id}/duplicate`, { method: "POST" }),
   deleteDocument: (id: string) => request<{ id: string }>(`/documents/${id}`, { method: "DELETE" }),
+  /** Row 68: doc starter kit. */
+  getDocTemplates: () => request<DocTemplate[]>(`/doc-templates`),
+  createDocTemplate: (body: { title: string; icon?: string | null; content?: Record<string, unknown> | null; inKit?: boolean }) =>
+    request<DocTemplate>(`/doc-templates`, { method: "POST", body: JSON.stringify(body) }),
+  updateDocTemplate: (id: string, body: Partial<{ title: string; icon: string | null; content: Record<string, unknown> | null; body: string; inKit: boolean }>) =>
+    request<DocTemplate>(`/doc-templates/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  reorderDocTemplates: (ids: string[]) => request<DocTemplate[]>(`/doc-templates/order`, { method: "PUT", body: JSON.stringify({ ids }) }),
+  deleteDocTemplate: (id: string) => request<{ id: string }>(`/doc-templates/${id}`, { method: "DELETE" }),
+  applyDocStarterKit: (projectId: string, templateIds?: string[]) =>
+    request<string[]>(`/doc-templates/apply/${projectId}`, { method: "POST", body: JSON.stringify({ templateIds }) }),
   /** Row 67: branding + PDF export. */
   getBranding: () => request<{ name: string; brandColor: string; brandLogoUrl: string | null; brandFooter: string | null }>(`/branding`),
   updateBranding: (body: Partial<{ brandColor: string; brandLogoUrl: string | null; brandFooter: string | null }>) =>

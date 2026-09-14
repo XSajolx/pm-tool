@@ -17,6 +17,7 @@ import {
 import { ActivityService } from "../activity/activity.service.js";
 import { StagesService } from "./stages.service.js";
 import { ChatService } from "../chat/chat.service.js";
+import { DocTemplatesService } from "../documents/doc-templates.service.js";
 
 export interface ProjectDto {
   name: string;
@@ -60,6 +61,7 @@ export class ProjectsService {
     private readonly activity: ActivityService,
     private readonly stages: StagesService,
     private readonly chat: ChatService,
+    private readonly docTemplates: DocTemplatesService,
   ) {}
 
   /* ---------------- Row 39: project team + project channel ---------------- */
@@ -298,6 +300,8 @@ export class ProjectsService {
         .values([userId, ...(project.leadId ? [project.leadId] : [])].map((id) => ({ projectId: project.id, userId: id, organizationId: orgId })))
         .onConflictDoNothing();
       await this.syncChannel(orgId, project.id);
+      // Row 68: every project starts with the same set of docs.
+      await this.docTemplates.applyKit(orgId, userId, project.id);
       return project;
     });
   }

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, type DealStageRow, type ProposalTemplate, type Snippet, type StageTemplate, type Status, type Tag, type TaskTemplate } from "../lib/api.js";
+import { api, type DealStageRow, type DocTemplate, type ProposalTemplate, type Snippet, type StageTemplate, type Status, type Tag, type TaskTemplate } from "../lib/api.js";
 import { ProposalSectionsEditor } from "../components/ProposalSections.js";
 import { DocEditor } from "../components/doc/DocEditor.js";
 import { useAuth } from "../lib/auth.js";
@@ -11,7 +11,7 @@ import type { Priority } from "../lib/api.js";
  * Workspace settings. Sections are added as the roadmap lands; each one is a
  * self-contained panel that owns its own queries.
  */
-type Section = "statuses" | "priorities" | "stages" | "tags" | "templates" | "dealstages" | "proposals" | "snippets" | "branding";
+type Section = "statuses" | "priorities" | "stages" | "tags" | "templates" | "dealstages" | "proposals" | "snippets" | "branding" | "dockit";
 
 const SECTIONS: { id: Section; label: string; hint: string }[] = [
   { id: "statuses", label: "Task statuses", hint: "Per space: names, colours, order, done state" },
@@ -23,6 +23,7 @@ const SECTIONS: { id: Section; label: string; hint: string }[] = [
   { id: "proposals", label: "Proposal templates", hint: "Fixed sections every proposal starts from" },
   { id: "snippets", label: "Snippets", hint: "Reusable doc content that stays in sync" },
   { id: "branding", label: "Branding", hint: "Colour, logo and footer on PDFs and client pages" },
+  { id: "dockit", label: "Doc starter kit", hint: "Docs every new project starts with" },
 ];
 
 export function SettingsPage() {
@@ -64,6 +65,7 @@ export function SettingsPage() {
           {section === "proposals" && <ProposalTemplateSettings canEdit={canEdit} />}
           {section === "snippets" && <SnippetSettings canEdit={canEdit} />}
           {section === "branding" && <BrandingSettings canEdit={canEdit} />}
+          {section === "dockit" && <DocKitSettings canEdit={canEdit} />}
         </div>
       </div>
     </div>
@@ -889,6 +891,80 @@ function BrandingSettings({ canEdit }: { canEdit: boolean }) {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * Doc starter kit (row 68)
+ * ------------------------------------------------------------------ */
+function DocKitSettings({ canEdit }: { canEdit: boolean }) {
+  const qc = useQueryClient();
+  const { data: templates = [] } = useQuery({ queryKey: ["doc-templates"], queryFn: api.getDocTemplates });
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [title, setTitle] = useState("");
+  const refresh = () => qc.invalidateQueries({ queryKey: ["doc-templates"] });
+  const create = useMutation({ mutationFn: () => api.createDocTemplate({ title }), onSuccess: (t) => { setTitle(""); setOpenId(t.id); refresh(); } });
+  const update = useMutation({ mutationFn: ({ id, body }: { id: string; body: Parameters<typeof api.updateDocTemplate>[1] }) => api.updateDocTemplate(id, body), onSuccess: refresh });
+  const reorder = useMutation({ mutationFn: (ids: string[]) => api.reorderDocTemplates(ids), onSuccess: refresh });
+  const remove = useMutation({ mutationFn: (id: string) => api.deleteDocTemplate(id), onSuccess: refresh });
+  function swap(i: number, j: number) {
+    if (j < 0 || j >= templates.length) return;
+    const ids = templates.map((t) => t.id);
+    [ids[i], ids[j]] = [ids[j]!, ids[i]!];
+    reorder.mutate(ids);
+  }
+  return (
+    <div>
+      <h1 className="text-lg font-semibold text-slate-900">Doc starter kit</h1>
+      <p className="mt-1 text-sm text-muted-foreground">
+        These docs are created under every new project (in this order) so each one starts with the same structure. Untick “in kit” to keep a template available on demand only.
+      </p>
+      <ul className="mt-5 space-y-2">
+        {templates.map((t, i) => (
+          <li key={t.id} className="rounded-lg border border-border bg-white">
+            <div className="flex items-center gap-3 px-3 py-2">
+              <div className="flex flex-col text-[10px] leading-none text-slate-400">
+                <button type="button" disabled={!canEdit || i === 0} onClick={() => swap(i, i - 1)} className="hover:text-slate-700 disabled:opacity-30">▲</button>
+                <button type="button" disabled={!canEdit || i === templates.length - 1} onClick={() => swap(i, i + 1)} className="hover:text-slate-700 disabled:opacity-30">▼</button>
+              </div>
+              <input defaultValue={t.icon ?? ""} disabled={!canEdit} maxLength={4} onBlur={(e) => e.target.value.trim() !== (t.icon ?? "") && update.mutate({ id: t.id, body: { icon: e.target.value.trim() || null } })} className="w-9 rounded-md border border-border px-1 py-0.5 text-center text-base" title="Icon" />
+              <InlineName value={t.title} disabled={!canEdit} onCommit={(v) => update.mutate({ id: t.id, body: { title: v } })} />
+              <label className="flex items-center gap-1 text-xs text-slate-600">
+                <input type="checkbox" checked={t.inKit} disabled={!canEdit} onChange={(e) => update.mutate({ id: t.id, body: { inKit: e.target.checked } })} className="accent-indigo-600" />
+                in kit
+              </label>
+              <button type="button" onClick={() => setOpenId(openId === t.id ? null : t.id)} className="text-xs text-indigo-600 hover:underline">
+                {openId === t.id ? "Hide content" : "Edit content"}
+              </button>
+              {canEdit && (
+                <button type="button" onClick={() => window.confirm(`Delete “${t.title}”?`) && remove.mutate(t.id)} className="ml-auto text-xs text-slate-400 hover:text-red-600">
+                  Delete
+                </button>
+              )}
+            </div>
+            {openId === t.id && (
+              <div className="border-t border-border bg-[#fbfbfa] px-4 py-3">
+                <DocEditor docId={`doc-template-${t.id}`} title={t.title} content={t.content} body={t.body} settings={{}} onSave={(patch) => update.mutate({ id: t.id, body: patch })} />
+              </div>
+            )}
+          </li>
+        ))}
+      </ul>
+      {canEdit && (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (title.trim()) create.mutate();
+          }}
+          className="mt-3 flex gap-2"
+        >
+          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="New template, e.g. Risk register" className="flex-1 rounded-md border border-border px-3 py-1.5 text-sm outline-none focus:border-indigo-500" />
+          <button type="submit" disabled={!title.trim() || create.isPending} className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50">
+            Add template
+          </button>
+        </form>
+      )}
     </div>
   );
 }

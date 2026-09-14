@@ -1881,6 +1881,26 @@ export const documentAccessRelations = relations(documentAccess, ({ one }) => ({
   user: one(users, { fields: [documentAccess.userId], references: [users.id] }),
 }));
 
+/** Row 68: the docs every new project starts with (brief, kickoff notes, SOW, QA checklist…). */
+export const docTemplates = pgTable(
+  "doc_templates",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    title: varchar("title", { length: 255 }).notNull(),
+    icon: varchar("icon", { length: 16 }),
+    content: jsonb("content").$type<Record<string, unknown>>(),
+    body: text("body").notNull().default(""),
+    position: doublePrecision("position").notNull().default(0),
+    /** Created automatically for every new project. Off = available on demand only. */
+    inKit: boolean("in_kit").notNull().default(true),
+    ...timestamps,
+  },
+  (t) => [index("doc_templates_org_idx").on(t.organizationId)],
+);
+
 /**
  * Row 66: reusable content. A doc embeds a snippet by id, so editing the
  * snippet updates every doc that uses it.
