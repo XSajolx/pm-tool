@@ -2,7 +2,7 @@ import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundEx
 import { and, asc, count, eq, gt, inArray, isNull, max, ne, or } from "drizzle-orm";
 import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
-import { channelBookmarks, channels, channelMembers, memberships, messages, notificationPreferences, notifications } from "../../db/schema.js";
+import { channelBookmarks, channels, channelMembers, memberships, messages, notificationPreferences, notifications, tasks } from "../../db/schema.js";
 import { FilesService } from "../files/files.service.js";
 import { ReactionsService } from "../reactions/reactions.service.js";
 
@@ -124,6 +124,19 @@ export class ChatService {
     return { channelId, lastReadAt };
   }
 
+  /** Row 47: tasks created from these messages, keyed by message id. */
+  private async tasksFor(orgId: string, messageIds: string[]) {
+    const out = new Map<string, { id: string; title: string; reference: string | null; status: { name: string; color: string; category: string } | null }>();
+    if (!messageIds.length) return out;
+    const rows = await this.db.query.tasks.findMany({
+      where: and(eq(tasks.organizationId, orgId), inArray(tasks.sourceMessageId, messageIds), isNull(tasks.archivedAt)),
+      columns: { id: true, title: true, reference: true, sourceMessageId: true },
+      with: { status: { columns: { name: true, color: true, category: true } } },
+    });
+    for (const t of rows) out.set(t.sourceMessageId!, { id: t.id, title: t.title, reference: t.reference, status: t.status ?? null });
+    return out;
+  }
+
   /* ---------------- Row 46: pins + bookmarks ---------------- */
 
   async togglePin(orgId: string, channelId: string, messageId: string, userId: string) {
@@ -218,10 +231,10 @@ export class ChatService {
           .groupBy(messages.parentMessageId)
       : [];
     const byParent = new Map(counts.map((c) => [c.parentMessageId!, c]));
-    const [files, reacts] = await Promise.all([this.files.forMessages(ids), this.reactions.forEntities(orgId, userId, "message", ids)]);
+    const [files, reacts, linked] = await Promise.all([this.files.forMessages(ids), this.reactions.forEntities(orgId, userId, "message", ids), this.tasksFor(orgId, ids)]);
     return rows.map((m) => {
       const c = byParent.get(m.id);
-      return { ...this.shape(m), replyCount: Number(c?.n ?? 0), lastReplyAt: c?.last ?? null, attachments: files.get(m.id) ?? [], reactions: reacts[m.id] ?? [] };
+      return { ...this.shape(m), replyCount: Number(c?.n ?? 0), lastReplyAt: c?.last ?? null, attachments: files.get(m.id) ?? [], reactions: reacts[m.id] ?? [], task: linked.get(m.id) ?? null };
     });
   }
 
@@ -239,10 +252,10 @@ export class ChatService {
       orderBy: (m) => [asc(m.createdAt)],
     });
     const allIds = [root.id, ...replies.map((r) => r.id)];
-    const [files, reacts] = await Promise.all([this.files.forMessages(allIds), this.reactions.forEntities(orgId, userId, "message", allIds)]);
+    const [files, reacts, linked] = await Promise.all([this.files.forMessages(allIds), this.reactions.forEntities(orgId, userId, "message", allIds), this.tasksFor(orgId, allIds)]);
     return {
-      root: { ...this.shape(root), replyCount: replies.length, lastReplyAt: replies.at(-1)?.createdAt ?? null, attachments: files.get(root.id) ?? [], reactions: reacts[root.id] ?? [] },
-      replies: replies.map((r) => ({ ...this.shape(r), attachments: files.get(r.id) ?? [], reactions: reacts[r.id] ?? [] })),
+      root: { ...this.shape(root), replyCount: replies.length, lastReplyAt: replies.at(-1)?.createdAt ?? null, attachments: files.get(root.id) ?? [], reactions: reacts[root.id] ?? [], task: linked.get(root.id) ?? null },
+      replies: replies.map((r) => ({ ...this.shape(r), attachments: files.get(r.id) ?? [], reactions: reacts[r.id] ?? [], task: linked.get(r.id) ?? null })),
     };
   }
 

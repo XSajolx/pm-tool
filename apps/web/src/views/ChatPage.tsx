@@ -5,6 +5,7 @@ import { api, type Attachment, type ChannelBookmark, type ChannelNotify, type Ch
 import { useAuth } from "../lib/auth.js";
 import { getSocket } from "../lib/socket.js";
 import { ChatActions, PeoplePicker } from "../components/ChatActions.js";
+import { QuickAdd } from "../components/QuickAdd.js";
 import { cn } from "../lib/utils.js";
 
 /**
@@ -147,6 +148,7 @@ function MessagePane({ channelId, channel }: { channelId: string; channel?: Chat
   const meId = useAuth().user!.id;
   const [threadId, setThreadId] = useState<string | null>(null);
   const [panel, setPanel] = useState<"files" | "pins" | null>(null);
+  const [taskFrom, setTaskFrom] = useState<ChatMessage | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const paneRef = useRef<HTMLDivElement>(null);
 
@@ -288,6 +290,7 @@ function MessagePane({ channelId, channel }: { channelId: string; channel?: Chat
                   onReply={() => setThreadId(m.id)}
                   onReact={(emoji) => react.mutate({ messageId: m.id, emoji })}
                   onPin={() => pin.mutate(m.id)}
+                  onMakeTask={() => setTaskFrom(m)}
                   threadOpen={threadId === m.id}
                 />
               </div>
@@ -308,6 +311,26 @@ function MessagePane({ channelId, channel }: { channelId: string; channel?: Chat
 
       {threadId && <ThreadPane channelId={channelId} messageId={threadId} meId={meId} members={members} onClose={() => setThreadId(null)} />}
       {panel === "files" && !threadId && <FilesPanel channelId={channelId} onClose={() => setPanel(null)} />}
+      {taskFrom && (
+        <QuickAdd
+          open
+          onClose={() => setTaskFrom(null)}
+          initialText={taskFrom.body.split("\n")[0]!.slice(0, 140)}
+          source={{
+            messageId: taskFrom.id,
+            channelId,
+            channelName: channel?.type === "dm" ? "a direct message" : `#${channel?.name ?? ""}`,
+            authorName: taskFrom.author.name,
+            body: taskFrom.body,
+          }}
+          onCreated={(t) => {
+            const task = { ...t, status: null };
+            const patch = (m: ChatMessage) => (m.id === taskFrom.id ? { ...m, task } : m);
+            qc.setQueryData<ChatMessage[]>(["messages", channelId], (old = []) => old.map(patch));
+            setTaskFrom(null);
+          }}
+        />
+      )}
       {panel === "pins" && !threadId && <PinsPanel channelId={channelId} meId={meId} members={members} onUnpin={(id) => pin.mutate(id)} onClose={() => setPanel(null)} />}
     </div>
   );
@@ -329,6 +352,7 @@ function MessageRow({
   onReply,
   onReact,
   onPin,
+  onMakeTask,
   threadOpen,
   compact,
 }: {
@@ -339,6 +363,7 @@ function MessageRow({
   onReply?: () => void;
   onReact?: (emoji: string) => void;
   onPin?: () => void;
+  onMakeTask?: () => void;
   threadOpen?: boolean;
   compact?: boolean;
 }) {
@@ -378,6 +403,22 @@ function MessageRow({
         )}
         {m.body && <MessageBody body={m.body} members={members} meId={meId} />}
         {m.attachments && m.attachments.length > 0 && <AttachmentList files={m.attachments} compact={compact} />}
+        {m.task && (
+          <Link
+            to="/t/$taskId"
+            params={{ taskId: m.task.id }}
+            className="mt-1 inline-flex max-w-full items-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs text-emerald-800 hover:bg-emerald-100"
+            title="Task created from this message"
+          >
+            ✓ {m.task.reference && <span className="font-medium">{m.task.reference}</span>}
+            <span className={cn("truncate", m.task.status?.category === "done" && "line-through opacity-70")}>{m.task.title}</span>
+            {m.task.status && (
+              <span className="shrink-0 rounded-full px-1.5 text-[10px]" style={{ background: `${m.task.status.color}22`, color: m.task.status.color }}>
+                {m.task.status.name}
+              </span>
+            )}
+          </Link>
+        )}
         {m.reactions && m.reactions.length > 0 && (
           <div className="mt-1 flex flex-wrap items-center gap-1">
             {m.reactions.map((g) => (
@@ -426,7 +467,7 @@ function MessageRow({
           </button>
         )}
       </div>
-      {(onReply || onReact || onPin) && (
+      {(onReply || onReact || onPin || onMakeTask) && (
         <div className="absolute right-2 top-0 hidden items-center gap-0.5 rounded-md border border-border bg-white p-0.5 text-[11px] text-slate-600 shadow-sm group-hover:flex">
           {onReact &&
             QUICK_EMOJI.slice(0, 3).map((e) => (
@@ -447,6 +488,11 @@ function MessageRow({
           {onPin && (
             <button type="button" onClick={onPin} className={cn("rounded px-1 hover:bg-muted", m.pinnedAt && "text-amber-700")} title={m.pinnedAt ? "Unpin" : "Pin to channel"}>
               📌
+            </button>
+          )}
+          {onMakeTask && !m.task && (
+            <button type="button" onClick={onMakeTask} className="rounded px-1.5 hover:bg-muted hover:text-emerald-700" title="Create a task from this message">
+              ✓ Task
             </button>
           )}
         </div>

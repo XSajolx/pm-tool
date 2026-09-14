@@ -13,7 +13,21 @@ const LAST_LIST_KEY = "pm:quickAddList";
  * "@name" and "#tag" are parsed out of the text and shown as chips before
  * you press Enter.
  */
-export function QuickAdd({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function QuickAdd({
+  open,
+  onClose,
+  initialText,
+  source,
+  onCreated,
+}: {
+  open: boolean;
+  onClose: () => void;
+  /** Row 47: pre-filled title, e.g. the chat message being turned into a task. */
+  initialText?: string;
+  /** Row 47: the chat message this task comes from — stored on the task and quoted in its description. */
+  source?: { messageId: string; channelId: string; channelName: string; authorName: string; body: string };
+  onCreated?: (task: { id: string; title: string; reference: string | null }) => void;
+}) {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const params = useParams({ strict: false }) as { listId?: string };
@@ -52,10 +66,12 @@ export function QuickAdd({ open, onClose }: { open: boolean; onClose: () => void
   useEffect(() => {
     if (open) {
       setDone(null);
+      if (initialText) setText(initialText);
       setTimeout(() => inputRef.current?.focus(), 0);
     } else {
       setText("");
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   const parsed = useMemo(() => parseQuickAdd(text), [text]);
@@ -76,6 +92,8 @@ export function QuickAdd({ open, onClose }: { open: boolean; onClose: () => void
         dueDate: parsed.dueDate,
         priority: parsed.priority,
         assigneeIds: matchedMembers.map((m) => m.id),
+        sourceMessageId: source?.messageId,
+        description: source ? `From ${source.channelName} — ${source.authorName} wrote:\n> ${source.body.replace(/\n/g, "\n> ")}` : undefined,
       });
       for (const name of parsed.tags) {
         const existing = tags.find((t) => t.name.toLowerCase() === name.toLowerCase()) ?? (await api.createTag({ name }));
@@ -95,6 +113,7 @@ export function QuickAdd({ open, onClose }: { open: boolean; onClose: () => void
       setDone({ id: task.id, title: task.title, listId, listName: target.name });
       setText("");
       inputRef.current?.focus();
+      onCreated?.({ id: task.id, title: task.title, reference: task.reference });
     },
   });
 
@@ -110,6 +129,15 @@ export function QuickAdd({ open, onClose }: { open: boolean; onClose: () => void
             if (canSubmit) create.mutate();
           }}
         >
+          {source && (
+            <div className="flex items-start gap-2 border-b border-border bg-[#fbfbfa] px-4 py-2 text-xs text-slate-600">
+              <span>💬</span>
+              <span className="min-w-0">
+                <span className="font-medium text-slate-800">{source.authorName}</span> in {source.channelName}:{" "}
+                <span className="line-clamp-2 text-muted-foreground">{source.body}</span>
+              </span>
+            </div>
+          )}
           <div className="flex items-center gap-2 border-b border-border px-4 py-3">
             <span className="text-lg">＋</span>
             <input

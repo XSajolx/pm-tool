@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { api, type Member, type Priority, type Status } from "../lib/api.js";
 import { Avatar, PRIORITY } from "./ui.js";
 import { TaskCollaboration } from "./TaskCollaboration.js";
@@ -73,6 +74,17 @@ export function TaskDetail({ taskId, listId, spaceId, statuses, members, onClose
           <span className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
             {task?.reference}
             {spaceId && <TrackTimeButton taskId={taskId} spaceId={spaceId} />}
+            {task?.sourceMessage && (
+              <Link
+                to="/chat/$channelId"
+                params={{ channelId: task.sourceMessage.channelId }}
+                onClick={onClose}
+                title={`${task.sourceMessage.author?.name ?? "Someone"}: ${task.sourceMessage.body}`}
+                className="rounded-full border border-border bg-[#fbfbfa] px-2 py-0.5 text-[11px] text-slate-600 hover:text-indigo-700"
+              >
+                💬 From {task.sourceMessage.channel?.type === "dm" ? "a direct message" : `#${task.sourceMessage.channel?.name ?? "chat"}`}
+              </Link>
+            )}
           </span>
           {canDelete && (
             <button

@@ -16,6 +16,8 @@ export const createTaskSchema = z.object({
   milestoneId: z.string().uuid().nullable().optional(),
   startDate: isoDate.nullable().optional(),
   dueDate: isoDate.nullable().optional(),
+  /** Row 47: chat message this task came from (create only). */
+  sourceMessageId: z.string().uuid().optional(),
   /** CRM links (row 38); null clears. A deal fills in its company/contact when those are left out. */
   companyId: z.string().uuid().nullable().optional(),
   contactId: z.string().uuid().nullable().optional(),

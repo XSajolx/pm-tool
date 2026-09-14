@@ -8,6 +8,7 @@ import {
   cycleTasks,
   deals,
   lists,
+  messages,
   milestones,
   projectStages,
   statuses,
@@ -100,6 +101,7 @@ export class TasksService {
         stage: { columns: { id: true, name: true, status: true } },
         milestone: { columns: { id: true, name: true, targetDate: true, reachedAt: true } },
         ...CRM_WITH,
+        sourceMessage: { columns: { id: true, channelId: true, body: true, createdAt: true }, with: { author: { columns: { id: true, name: true } }, channel: { columns: { id: true, name: true, type: true } } } },
         assignees: { with: { user: true } },
         subtasks: {
           with: { status: true, assignees: { with: { user: true } } },
@@ -257,6 +259,11 @@ export class TasksService {
     if (dto.stageId) await this.assertStageForList(orgId, dto.listId, dto.stageId);
     if (dto.milestoneId) await this.assertMilestoneForList(orgId, dto.listId, dto.milestoneId);
     const crm = await this.assertCrmLinks(orgId, dto);
+    // Row 47: the message must be one of ours; the link is informational only.
+    if (dto.sourceMessageId) {
+      const msg = await this.db.query.messages.findFirst({ where: and(eq(messages.id, dto.sourceMessageId), eq(messages.organizationId, orgId)), columns: { id: true } });
+      if (!msg) throw new BadRequestException("Unknown chat message");
+    }
     let statusId = dto.statusId;
     if (dto.parentTaskId) {
       // Subtasks are one level deep: a subtask cannot have its own subtasks.
@@ -295,6 +302,7 @@ export class TasksService {
         companyId: crm.companyId ?? undefined,
         contactId: crm.contactId ?? undefined,
         dealId: crm.dealId ?? undefined,
+        sourceMessageId: dto.sourceMessageId ?? undefined,
         startDate: dto.startDate ? new Date(dto.startDate) : undefined,
         dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
         timeEstimateMinutes: dto.timeEstimateMinutes ?? undefined,
@@ -352,8 +360,9 @@ export class TasksService {
     if (dto.milestoneId) await this.assertMilestoneForList(orgId, before.listId, dto.milestoneId);
     const crm = await this.assertCrmLinks(orgId, dto);
 
-    // `assigneeIds` is not a column; it is synced separately below.
-    const { assigneeIds, ...rest } = dto;
+    // `assigneeIds` is not a column; it is synced separately below. The source
+    // message is set once at creation and never rewritten.
+    const { assigneeIds, sourceMessageId: _source, ...rest } = dto;
     const fields = { ...rest, ...crm };
     const toDate = (v: string | null | undefined) => (v === undefined ? undefined : v ? new Date(v) : null);
     const patch: Record<string, unknown> = {

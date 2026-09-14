@@ -224,6 +224,8 @@ export const tasks = pgTable(
     recurrenceInterval: integer("recurrence_interval").notNull().default(1),
     /** The task this one was spawned from, so a series can be traced. */
     recurredFromId: uuid("recurred_from_id"),
+    /** Row 47: the chat message this task was created from. */
+    sourceMessageId: uuid("source_message_id").references((): AnyPgColumn => messages.id, { onDelete: "set null" }),
     /** CRM links (row 38): follow-ups show up on the client's page. */
     companyId: uuid("company_id").references((): AnyPgColumn => companies.id, { onDelete: "set null" }),
     contactId: uuid("contact_id").references((): AnyPgColumn => contacts.id, { onDelete: "set null" }),
@@ -249,6 +251,7 @@ export const tasks = pgTable(
     index("tasks_stage_idx").on(t.stageId),
     index("tasks_milestone_idx").on(t.milestoneId),
     index("tasks_company_idx").on(t.companyId),
+    index("tasks_source_message_idx").on(t.sourceMessageId),
     index("tasks_contact_idx").on(t.contactId),
     index("tasks_deal_idx").on(t.dealId),
     // Hot path: "give me this org's tasks" — org first, then list.
@@ -489,6 +492,7 @@ export const tasksRelations = relations(tasks, ({ one, many }) => ({
   company: one(companies, { fields: [tasks.companyId], references: [companies.id] }),
   contact: one(contacts, { fields: [tasks.contactId], references: [contacts.id] }),
   deal: one(deals, { fields: [tasks.dealId], references: [deals.id] }),
+  sourceMessage: one(messages, { fields: [tasks.sourceMessageId], references: [messages.id] }),
   parent: one(tasks, { fields: [tasks.parentTaskId], references: [tasks.id], relationName: "subtasks" }),
   subtasks: many(tasks, { relationName: "subtasks" }),
   assignees: many(taskAssignees),

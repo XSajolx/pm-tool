@@ -250,6 +250,8 @@ export interface Task {
   company?: { id: string; name: string } | null;
   contact?: { id: string; firstName: string; lastName: string | null } | null;
   deal?: { id: string; title: string; stage: DealStage } | null;
+  /** Row 47: where this task came from, when it was made from chat. */
+  sourceMessage?: { id: string; channelId: string; body: string; createdAt: string; author: { id: string; name: string } | null; channel: { id: string; name: string | null; type: "channel" | "dm" } | null } | null;
   parentTaskId?: string | null;
   subtasks: {
     id: string;
@@ -779,6 +781,7 @@ export const api = {
     companyId?: string | null;
     contactId?: string | null;
     dealId?: string | null;
+    sourceMessageId?: string;
   }) => request<Task>(`/tasks`, { method: "POST", body: JSON.stringify(body) }),
   /** Tasks attached to a company / contact / deal (row 38). */
   getCrmTasks: (link: { companyId?: string; contactId?: string; dealId?: string }) => {
@@ -1332,4 +1335,6 @@ export interface ChatMessage {
   reactions?: ReactionGroup[];
   /** Row 46: when it was pinned, or null. */
   pinnedAt?: string | null;
+  /** Row 47: the task created from this message. */
+  task?: { id: string; title: string; reference: string | null; status: { name: string; color: string; category: string } | null } | null;
 }
