@@ -326,6 +326,8 @@ export interface SpaceTree {
 export interface Task {
   id: string;
   title: string;
+  /** Row 95: time logged against the task, for estimate-vs-actual. */
+  loggedSeconds?: number;
   description: string | null;
   reference: string | null;
   priority: Priority | null;

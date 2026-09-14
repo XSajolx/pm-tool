@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import type { Member, Status, Task } from "../lib/api.js";
 import { StatusPill } from "../components/ui.js";
 import { TaskTimerButton } from "../components/TaskTimerButton.js";
+import { fmtDuration } from "../lib/format.js";
 import { AssigneeCell, DueCell, PriorityCell, StatusCell, type UpdateTask } from "../components/InlineEditors.js";
 import { groupTasks, sortTasks, type GroupBy, type SortDir, type SortKey } from "../components/taskViewUtils.js";
 
@@ -78,6 +79,15 @@ export function ListView({ tasks, statuses, members, groupBy, sort, sortDir, onO
                       {t.reference && <span className="text-[11px] text-muted-foreground">{t.reference}</span>}
                       <span className={`truncate ${t.status?.category === "done" ? "text-slate-400 line-through" : ""}`}>{t.title}</span>
                       <TaskTimerButton taskId={t.id} />
+                      {(t.loggedSeconds ?? 0) > 0 && (
+                        <span
+                          className={`shrink-0 rounded px-1 text-[10px] tabular-nums ${t.timeEstimateMinutes && (t.loggedSeconds ?? 0) > t.timeEstimateMinutes * 60 ? "bg-red-50 text-red-700" : "bg-muted text-muted-foreground"}`}
+                          title={t.timeEstimateMinutes ? `${fmtDuration(t.loggedSeconds ?? 0)} logged of ${fmtDuration(t.timeEstimateMinutes * 60)} estimated${(t.loggedSeconds ?? 0) > t.timeEstimateMinutes * 60 ? " - over estimate" : ""}` : `${fmtDuration(t.loggedSeconds ?? 0)} logged`}
+                        >
+                          ⏱ {fmtDuration(t.loggedSeconds ?? 0)}
+                          {t.timeEstimateMinutes ? ` / ${fmtDuration(t.timeEstimateMinutes * 60)}` : ""}
+                        </span>
+                      )}
                       {t.recurrence && (
                         <span className="shrink-0 text-[11px] text-indigo-500" title={`Repeats ${t.recurrence}`}>
                           ↻

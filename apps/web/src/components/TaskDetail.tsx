@@ -8,6 +8,7 @@ import { CrmLinkField, CycleField, MilestoneField, StageField, SubtasksSection, 
 import { DocsTab } from "./DocsTab.js";
 import { useEscape } from "../lib/useEscape.js";
 import { useAuth } from "../lib/auth.js";
+import { fmtDuration } from "../lib/format.js";
 
 interface Props {
   taskId: string;
@@ -173,10 +174,13 @@ export function TaskDetail({ taskId, listId, spaceId, statuses, members, onClose
               </Field>
 
               <Field label="Estimate">
-                <EstimateInput
-                  minutes={task.timeEstimateMinutes}
-                  onChange={(m) => save.mutate({ timeEstimateMinutes: m })}
-                />
+                <div className="flex flex-wrap items-center gap-2">
+                  <EstimateInput
+                    minutes={task.timeEstimateMinutes}
+                    onChange={(m) => save.mutate({ timeEstimateMinutes: m })}
+                  />
+                  <LoggedVsEstimate loggedSeconds={task.loggedSeconds ?? 0} estimateMinutes={task.timeEstimateMinutes} />
+                </div>
               </Field>
 
               <Field label="Assignees">
@@ -286,6 +290,31 @@ function DateInput({ value, onChange }: { value: string | null; onChange: (iso: 
         </button>
       )}
     </div>
+  );
+}
+
+/** Row 95: logged hours beside the estimate, with a bar that turns red when the task runs over. */
+export function LoggedVsEstimate({ loggedSeconds, estimateMinutes, compact }: { loggedSeconds: number; estimateMinutes: number | null; compact?: boolean }) {
+  if (!loggedSeconds && !estimateMinutes) return null;
+  const est = (estimateMinutes ?? 0) * 60;
+  const pct = est ? Math.round((loggedSeconds / est) * 100) : null;
+  const over = est > 0 && loggedSeconds > est;
+  const tone = over ? "text-red-700" : pct !== null && pct >= 80 ? "text-amber-700" : "text-slate-600";
+  const bar = over ? "bg-red-500" : pct !== null && pct >= 80 ? "bg-amber-500" : "bg-indigo-500";
+  return (
+    <span className={`inline-flex items-center gap-1.5 text-xs ${tone}`} title={est ? `${fmtDuration(loggedSeconds)} logged of ${fmtDuration(est)} estimated` : `${fmtDuration(loggedSeconds)} logged (no estimate)`}>
+      <span className="tabular-nums">
+        {compact ? "" : "Logged "}
+        {fmtDuration(loggedSeconds)}
+        {est ? ` · ${pct}%` : ""}
+        {over ? ` · over by ${fmtDuration(loggedSeconds - est)}` : ""}
+      </span>
+      {est > 0 && (
+        <span className="h-1.5 w-16 overflow-hidden rounded-full bg-slate-100">
+          <span className={`block h-full rounded-full ${bar}`} style={{ width: `${Math.min(100, pct ?? 0)}%` }} />
+        </span>
+      )}
+    </span>
   );
 }
 

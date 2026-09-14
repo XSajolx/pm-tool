@@ -1,8 +1,9 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, eq, inArray, isNull, or } from "drizzle-orm";
+import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
 import {
+  timeEntries,
   companies,
   contacts,
   cycleTasks,
@@ -91,8 +92,8 @@ export class TasksService {
       },
       orderBy: (t, { asc }) => [asc(t.position)],
     });
-    const tagMap = await this.tagsFor(rows.map((r) => r.id));
-    return rows.map((r) => ({ ...r, tags: tagMap.get(r.id) ?? [] }));
+    const [tagMap, logged] = await Promise.all([this.tagsFor(rows.map((r) => r.id)), this.loggedFor(rows.map((r) => r.id))]);
+    return rows.map((r) => ({ ...r, tags: tagMap.get(r.id) ?? [], loggedSeconds: logged.get(r.id) ?? 0 }));
   }
 
   async findOne(orgId: string, id: string) {
@@ -118,10 +119,24 @@ export class TasksService {
       this.tagsFor([task.id]),
       this.db.query.cycleTasks.findFirst({ where: eq(cycleTasks.taskId, task.id) }),
     ]);
-    return { ...task, tags: tagMap.get(task.id) ?? [], cycleId: cycle?.cycleId ?? null };
+    const logged = await this.loggedFor([task.id]);
+    return { ...task, tags: tagMap.get(task.id) ?? [], cycleId: cycle?.cycleId ?? null, loggedSeconds: logged.get(task.id) ?? 0 };
   }
 
   /** Tags for many tasks in one query, keyed by task id. */
+  /** Row 95: seconds logged against each task (timers, manual entries, timesheet cells). */
+  private async loggedFor(taskIds: string[]) {
+    const out = new Map<string, number>();
+    if (!taskIds.length) return out;
+    const rows = await this.db
+      .select({ taskId: timeEntries.taskId, seconds: sql<number>`coalesce(sum(case when ${timeEntries.endedAt} is null then extract(epoch from (now() - ${timeEntries.startedAt})) else ${timeEntries.durationSeconds} end), 0)::int` })
+      .from(timeEntries)
+      .where(and(inArray(timeEntries.taskId, taskIds), isNull(timeEntries.archivedAt)))
+      .groupBy(timeEntries.taskId);
+    for (const r of rows) if (r.taskId) out.set(r.taskId, r.seconds);
+    return out;
+  }
+
   private async tagsFor(taskIds: string[]) {
     const out = new Map<string, { id: string; name: string; color: string }[]>();
     if (!taskIds.length) return out;
