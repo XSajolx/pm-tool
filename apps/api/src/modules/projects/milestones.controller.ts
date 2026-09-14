@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UsePipes } fr
 import { z } from "zod";
 import { ZodValidationPipe } from "../../common/zod-validation.pipe.js";
 import { MilestonesService } from "./milestones.service.js";
+import { ProjectAccessService } from "../access/project-access.service.js";
 import { Auth, Roles } from "../auth/auth.decorators.js";
 import type { AuthContext } from "../auth/auth.types.js";
 
@@ -19,10 +20,14 @@ const signoffDecisionSchema = z.object({ approve: z.boolean(), note: z.string().
 
 @Controller()
 export class MilestonesController {
-  constructor(private readonly milestones: MilestonesService) {}
+  constructor(
+    private readonly milestones: MilestonesService,
+    private readonly access: ProjectAccessService,
+  ) {}
 
   @Get("projects/:projectId/milestones")
-  list(@Auth() auth: AuthContext, @Param("projectId") projectId: string) {
+  async list(@Auth() auth: AuthContext, @Param("projectId") projectId: string) {
+    await this.access.assertProject(auth.orgId, auth, projectId);
     return this.milestones.listForProject(auth.orgId, projectId);
   }
 

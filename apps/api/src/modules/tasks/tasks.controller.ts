@@ -12,6 +12,7 @@ import {
 import { z } from "zod";
 import { ZodValidationPipe } from "../../common/zod-validation.pipe.js";
 import { TasksService } from "./tasks.service.js";
+import { ProjectAccessService } from "../access/project-access.service.js";
 import { createTaskSchema, updateTaskSchema, type CreateTaskDto, type UpdateTaskDto, bulkUpdateSchema, type BulkUpdateDto } from "./tasks.dto.js";
 import { Auth, Roles } from "../auth/auth.decorators.js";
 import type { AuthContext } from "../auth/auth.types.js";
@@ -40,10 +41,13 @@ export class TasksController {
     private readonly tasks: TasksService,
     private readonly notifications: NotificationsService,
     private readonly comments: CommentsService,
+    private readonly access: ProjectAccessService,
   ) {}
 
   @Get()
-  list(@Auth() auth: AuthContext, @Query("listId") listId: string) {
+  async list(@Auth() auth: AuthContext, @Query("listId") listId: string) {
+    // Row 84: a list in a project you're not on is "not found".
+    await this.access.assertList(auth.orgId, auth, listId);
     return this.tasks.listByList(auth.orgId, listId);
   }
 
@@ -77,14 +81,16 @@ export class TasksController {
   }
 
   @Get(":id")
-  findOne(@Auth() auth: AuthContext, @Param("id") id: string) {
+  async findOne(@Auth() auth: AuthContext, @Param("id") id: string) {
+    await this.access.assertTask(auth.orgId, auth, id);
     return this.tasks.findOne(auth.orgId, id);
   }
 
   @Post()
   @Roles("owner", "admin", "member")
   @UsePipes(new ZodValidationPipe(createTaskSchema))
-  create(@Auth() auth: AuthContext, @Body() dto: CreateTaskDto) {
+  async create(@Auth() auth: AuthContext, @Body() dto: CreateTaskDto) {
+    await this.access.assertList(auth.orgId, auth, dto.listId);
     return this.tasks.create(auth.orgId, auth.userId, dto);
   }
 

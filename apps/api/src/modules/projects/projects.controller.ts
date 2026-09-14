@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UsePipes } fr
 import { z } from "zod";
 import { ZodValidationPipe } from "../../common/zod-validation.pipe.js";
 import { ProjectsService } from "./projects.service.js";
+import { ProjectAccessService } from "../access/project-access.service.js";
 import { Auth, Roles } from "../auth/auth.decorators.js";
 import type { AuthContext } from "../auth/auth.types.js";
 
@@ -26,15 +27,22 @@ const updateSchema = projectSchema.partial().omit({ spaceId: true });
 
 @Controller("projects")
 export class ProjectsController {
-  constructor(private readonly projects: ProjectsService) {}
+  constructor(
+    private readonly projects: ProjectsService,
+    private readonly access: ProjectAccessService,
+  ) {}
 
   @Get()
-  list(@Auth() auth: AuthContext, @Query("archived") archived?: string) {
-    return this.projects.list(auth.orgId, archived === "true");
+  async list(@Auth() auth: AuthContext, @Query("archived") archived?: string) {
+    // Row 84: team members and guests only see the projects they're on.
+    const rows = await this.projects.list(auth.orgId, archived === "true");
+    const visible = await this.access.visibleProjectIds(auth.orgId, auth);
+    return visible ? rows.filter((p) => visible.has(p.id)) : rows;
   }
 
   @Get(":id")
-  get(@Auth() auth: AuthContext, @Param("id") id: string) {
+  async get(@Auth() auth: AuthContext, @Param("id") id: string) {
+    await this.access.assertProject(auth.orgId, auth, id);
     return this.projects.get(auth.orgId, id);
   }
 
@@ -65,7 +73,8 @@ export class ProjectsController {
 
   /* Row 39: project team (mirrored into the project channel). */
   @Get(":id/members")
-  members(@Auth() auth: AuthContext, @Param("id") id: string) {
+  async members(@Auth() auth: AuthContext, @Param("id") id: string) {
+    await this.access.assertProject(auth.orgId, auth, id);
     return this.projects.members(auth.orgId, id);
   }
 

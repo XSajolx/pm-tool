@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, UsePipes
 import { z } from "zod";
 import { ZodValidationPipe } from "../../common/zod-validation.pipe.js";
 import { WorkspaceService } from "./workspace.service.js";
+import { ProjectAccessService } from "../access/project-access.service.js";
 import { Auth, Public, Roles } from "../auth/auth.decorators.js";
 import type { AuthContext, Role } from "../auth/auth.types.js";
 
@@ -31,11 +32,17 @@ const roleSchema = z.object({ role: z.enum(["admin", "member", "guest"]) });
 
 @Controller()
 export class WorkspaceController {
-  constructor(private readonly workspace: WorkspaceService) {}
+  constructor(
+    private readonly workspace: WorkspaceService,
+    private readonly access: ProjectAccessService,
+  ) {}
 
   @Get("spaces")
-  spaces(@Auth() auth: AuthContext) {
-    return this.workspace.spaceTree(auth.orgId);
+  async spaces(@Auth() auth: AuthContext) {
+    // Row 84: the sidebar only lists spaces whose project the viewer is on.
+    const tree = await this.workspace.spaceTree(auth.orgId);
+    const visible = await this.access.filterSpaceIds(auth.orgId, auth, tree.map((s) => s.id));
+    return tree.filter((s) => visible.has(s.id));
   }
 
   @Post("spaces")
@@ -56,7 +63,8 @@ export class WorkspaceController {
 
   /** Everything the space overview page renders, in one call. */
   @Get("spaces/:id/overview")
-  overview(@Auth() auth: AuthContext, @Param("id") spaceId: string) {
+  async overview(@Auth() auth: AuthContext, @Param("id") spaceId: string) {
+    await this.access.assertSpace(auth.orgId, auth, spaceId);
     return this.workspace.spaceOverview(auth.orgId, spaceId);
   }
 

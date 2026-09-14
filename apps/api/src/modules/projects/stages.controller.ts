@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, UsePipes
 import { z } from "zod";
 import { ZodValidationPipe } from "../../common/zod-validation.pipe.js";
 import { StagesService } from "./stages.service.js";
+import { ProjectAccessService } from "../access/project-access.service.js";
 import { Auth, Roles } from "../auth/auth.decorators.js";
 import type { AuthContext } from "../auth/auth.types.js";
 
@@ -22,10 +23,14 @@ const templateSchema = z.object({
 
 @Controller()
 export class StagesController {
-  constructor(private readonly stages: StagesService) {}
+  constructor(
+    private readonly stages: StagesService,
+    private readonly access: ProjectAccessService,
+  ) {}
 
   @Get("projects/:projectId/stages")
-  list(@Auth() auth: AuthContext, @Param("projectId") projectId: string) {
+  async list(@Auth() auth: AuthContext, @Param("projectId") projectId: string) {
+    await this.access.assertProject(auth.orgId, auth, projectId);
     return this.stages.listForProject(auth.orgId, projectId);
   }
 

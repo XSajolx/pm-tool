@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
 import { DrizzleModule } from "./db/drizzle.module.js";
 import { AuthModule } from "./modules/auth/auth.module.js";
+import { AccessModule } from "./modules/access/access.module.js";
 import { ActivityModule } from "./modules/activity/activity.module.js";
 import { NotificationsModule } from "./modules/notifications/notifications.module.js";
 import { HealthController } from "./health.controller.js";
@@ -26,6 +27,7 @@ import { InboundModule } from "./modules/inbound/inbound.module.js";
     ConfigModule.forRoot({ isGlobal: true }),
     DrizzleModule,
     AuthModule,
+    AccessModule,
     ActivityModule,
     NotificationsModule,
     TasksModule,
