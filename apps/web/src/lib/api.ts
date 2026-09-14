@@ -115,6 +115,18 @@ export interface AuthedUser {
   name: string;
 }
 
+/** Row 83 */
+export interface Invitation {
+  id: string;
+  email: string;
+  role: string;
+  userId: string;
+  invitedBy: { id: string; name: string } | null;
+  createdAt: string;
+  lastSentAt: string;
+  emailConfigured: boolean;
+}
+
 export interface MfaState {
   enrolled: boolean;
   verified: boolean;
@@ -1636,6 +1648,12 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ role }),
     }),
+  /** Row 83: invitations. */
+  getInvitations: () => request<Invitation[]>(`/invitations`),
+  resendInvitation: (id: string) => request<{ id: string; lastSentAt: string; sent: boolean }>(`/invitations/${id}/resend`, { method: "POST" }),
+  revokeInvitation: (id: string) => request<{ id: string; revoked: boolean }>(`/invitations/${id}`, { method: "DELETE" }),
+  getInvitation: (token: string) =>
+    publicRequest<{ email: string; role: string; organization: string; invitedBy: string | null; status: "pending" | "accepted" | "revoked" }>(`/public/invitations/${token}`),
   /** Row 82: hand the workspace to another member (owner only). */
   transferOwnership: (userId: string) =>
     request<{ ownerId: string }>(`/members/${userId}/transfer-ownership`, { method: "POST" }),

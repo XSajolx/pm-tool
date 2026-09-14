@@ -2,7 +2,7 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, UsePipes
 import { z } from "zod";
 import { ZodValidationPipe } from "../../common/zod-validation.pipe.js";
 import { WorkspaceService } from "./workspace.service.js";
-import { Auth, Roles } from "../auth/auth.decorators.js";
+import { Auth, Public, Roles } from "../auth/auth.decorators.js";
 import type { AuthContext, Role } from "../auth/auth.types.js";
 
 const spaceSchema = z.object({
@@ -167,7 +167,34 @@ export class WorkspaceController {
   @Roles("owner", "admin")
   @UsePipes(new ZodValidationPipe(inviteSchema))
   invite(@Auth() auth: AuthContext, @Body() dto: z.infer<typeof inviteSchema>) {
-    return this.workspace.invite(auth.orgId, { ...dto, role: dto.role as Role | undefined });
+    return this.workspace.invite(auth.orgId, { ...dto, role: dto.role as Role | undefined, invitedById: auth.userId });
+  }
+
+  /* ---- Row 83: invitations ---- */
+
+  @Get("invitations")
+  @Roles("owner", "admin")
+  invitations(@Auth() auth: AuthContext) {
+    return this.workspace.listInvitations(auth.orgId);
+  }
+
+  @Post("invitations/:id/resend")
+  @Roles("owner", "admin")
+  resendInvitation(@Auth() auth: AuthContext, @Param("id") id: string) {
+    return this.workspace.resendInvitation(auth.orgId, id);
+  }
+
+  @Delete("invitations/:id")
+  @Roles("owner", "admin")
+  revokeInvitation(@Auth() auth: AuthContext, @Param("id") id: string) {
+    return this.workspace.revokeInvitation(auth.orgId, id);
+  }
+
+  /** The invite link's landing data. Public by design - the token is the secret. */
+  @Public()
+  @Get("public/invitations/:token")
+  invitationByToken(@Param("token") token: string) {
+    return this.workspace.invitationByToken(token);
   }
 
   @Patch("members/:userId/role")

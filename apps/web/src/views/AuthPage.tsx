@@ -1,5 +1,7 @@
-import { useState, type FormEvent, type InputHTMLAttributes } from "react";
+import { useEffect, useState, type FormEvent, type InputHTMLAttributes } from "react";
 import { useAuth } from "../lib/auth.js";
+import { api } from "../lib/api.js";
+import { ROLE_LABELS, type WorkspaceRole } from "../lib/roles.js";
 import { supabaseConfigured } from "../lib/supabase.js";
 
 type Mode = "signin" | "signup" | "forgot";
@@ -24,6 +26,20 @@ export function AuthPage() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Row 83: an invite link (/?invite=TOKEN) prefills the address and explains where they're headed.
+  const [invite, setInvite] = useState<{ email: string; role: string; organization: string; invitedBy: string | null; status: string } | null>(null);
+  useEffect(() => {
+    const token = new URLSearchParams(window.location.search).get("invite");
+    if (!token) return;
+    api
+      .getInvitation(token)
+      .then((inv) => {
+        setInvite(inv);
+        setEmail(inv.email);
+        if (inv.status === "pending") setMode("signup");
+      })
+      .catch(() => setInvite({ email: "", role: "", organization: "", invitedBy: null, status: "invalid" }));
+  }, []);
 
   if (!supabaseConfigured) return <SetupNotice />;
 
@@ -102,6 +118,17 @@ export function AuthPage() {
       {/* Form panel */}
       <div className="flex flex-1 items-center justify-center px-6 py-12">
         <div className="w-full max-w-[380px]">
+          {invite && (
+            <div className={`mb-5 rounded-md border px-3 py-2 text-[13px] ${invite.status === "pending" ? "border-indigo-200 bg-indigo-50 text-indigo-900" : "border-amber-200 bg-amber-50 text-amber-900"}`}>
+              {invite.status === "pending"
+                ? `${invite.invitedBy ?? "Someone"} invited you to ${invite.organization} as ${ROLE_LABELS[invite.role as WorkspaceRole] ?? invite.role}. Create your account (or sign in) with ${invite.email} and you're in.`
+                : invite.status === "accepted"
+                  ? "This invitation was already used - just sign in."
+                  : invite.status === "revoked"
+                    ? "This invitation was revoked. Ask your project manager for a new one."
+                    : "That invite link isn't valid."}
+            </div>
+          )}
           <div className="mb-7">
             <h2 className="text-[22px] font-semibold tracking-tight text-slate-900">
               {mode === "signin" ? "Welcome back" : mode === "forgot" ? "Reset your password" : "Create your account"}

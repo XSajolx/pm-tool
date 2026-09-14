@@ -1,8 +1,11 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { randomBytes } from "node:crypto";
+import { MailerService } from "../notifications/mailer.service.js";
+import { and, asc, eq, inArray, isNull, sql, desc } from "drizzle-orm";
 import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
 import {
+  invitations,
   organizations,
   bookmarks,
   documents,
@@ -31,7 +34,10 @@ const DEFAULT_STATUSES = [
 
 @Injectable()
 export class WorkspaceService {
-  constructor(@Inject(DRIZZLE) private readonly db: DB) {}
+  constructor(
+    @Inject(DRIZZLE) private readonly db: DB,
+    private readonly mailer: MailerService,
+  ) {}
 
   /** The sidebar tree: spaces → (folders →) lists, all tenant-scoped. */
   async spaceTree(orgId: string) {
@@ -281,7 +287,7 @@ export class WorkspaceService {
    * row (it matches on email before creating a new user), so everything
    * assigned or shared with them in the meantime is already theirs.
    */
-  async invite(orgId: string, dto: { email: string; name?: string; role?: Role }) {
+  async invite(orgId: string, dto: { email: string; name?: string; role?: Role; invitedById?: string }) {
     const email = dto.email.trim().toLowerCase();
     if (!email.includes("@")) throw new BadRequestException("A valid email is required");
     const role: Role = dto.role ?? "member";
@@ -305,12 +311,85 @@ export class WorkspaceService {
       .values({ organizationId: orgId, userId: user.id, role })
       .onConflictDoNothing();
 
+    // Row 83: an invitation row with the e-mailed token; re-inviting refreshes it.
+    const pending = user.authSubject.startsWith("invite|");
+    const [inv] = await this.db
+      .insert(invitations)
+      .values({ organizationId: orgId, userId: user.id, email, role, token: randomBytes(24).toString("base64url"), invitedById: dto.invitedById ?? null, acceptedAt: pending ? null : new Date() })
+      .returning();
+    if (pending) await this.sendInviteEmail(orgId, inv!);
+
     return {
       id: user.id,
       name: user.name,
       email: user.email,
       role,
-      pending: user.authSubject.startsWith("invite|"),
+      pending,
+      invitationId: inv!.id,
+    };
+  }
+
+  /* ---------------- Row 83: invitations ---------------- */
+
+  private async sendInviteEmail(orgId: string, inv: typeof invitations.$inferSelect) {
+    const [org, inviter] = await Promise.all([
+      this.db.query.organizations.findFirst({ where: eq(organizations.id, orgId), columns: { name: true } }),
+      inv.invitedById ? this.db.query.users.findFirst({ where: eq(users.id, inv.invitedById), columns: { name: true } }) : Promise.resolve(null),
+    ]);
+    const roleWord = { owner: "owner", admin: "project manager", member: "team member", guest: "client guest" }[inv.role] ?? inv.role;
+    await this.mailer.send({
+      to: inv.email,
+      subject: `${inviter?.name ?? "Someone"} invited you to ${org?.name ?? "a workspace"} on 4S PM Tool`,
+      text: `${inviter?.name ?? "Someone"} added you to ${org?.name ?? "their workspace"} as a ${roleWord}.\n\nOpen the link below, sign in (or create your account) with this e-mail address, and you're in.`,
+      link: `/?invite=${inv.token}`,
+    });
+    return { sent: this.mailer.configured };
+  }
+
+  /** Pending invites: not accepted, not revoked. */
+  async listInvitations(orgId: string) {
+    const rows = await this.db.query.invitations.findMany({
+      where: and(eq(invitations.organizationId, orgId), isNull(invitations.acceptedAt), isNull(invitations.revokedAt)),
+      with: { invitedBy: { columns: { id: true, name: true } } },
+      orderBy: [desc(invitations.lastSentAt)],
+    });
+    return rows.map((i) => ({ id: i.id, email: i.email, role: i.role, userId: i.userId, invitedBy: i.invitedBy, createdAt: i.createdAt, lastSentAt: i.lastSentAt, emailConfigured: this.mailer.configured }));
+  }
+
+  async resendInvitation(orgId: string, id: string) {
+    const inv = await this.db.query.invitations.findFirst({ where: and(eq(invitations.id, id), eq(invitations.organizationId, orgId)) });
+    if (!inv) throw new NotFoundException("Invitation not found");
+    if (inv.acceptedAt) throw new BadRequestException("Already accepted");
+    if (inv.revokedAt) throw new BadRequestException("This invitation was revoked - invite them again instead");
+    const [fresh] = await this.db.update(invitations).set({ lastSentAt: new Date() }).where(eq(invitations.id, id)).returning();
+    const { sent } = await this.sendInviteEmail(orgId, fresh!);
+    return { id, lastSentAt: fresh!.lastSentAt, sent };
+  }
+
+  /** Revoke: the link stops working and, if they never signed in, the placeholder membership goes too. */
+  async revokeInvitation(orgId: string, id: string) {
+    const inv = await this.db.query.invitations.findFirst({ where: and(eq(invitations.id, id), eq(invitations.organizationId, orgId)), with: { user: { columns: { authSubject: true } } } });
+    if (!inv) throw new NotFoundException("Invitation not found");
+    await this.db.update(invitations).set({ revokedAt: new Date() }).where(eq(invitations.id, id));
+    if (inv.user.authSubject.startsWith("invite|")) {
+      await this.db.delete(memberships).where(and(eq(memberships.organizationId, orgId), eq(memberships.userId, inv.userId)));
+    }
+    return { id, revoked: true };
+  }
+
+  /** What the sign-in page shows when someone opens an invite link. Public; the token is the credential. */
+  async invitationByToken(token: string) {
+    const inv = await this.db.query.invitations.findFirst({
+      where: eq(invitations.token, token),
+      with: { organization: { columns: { name: true } }, invitedBy: { columns: { name: true } } },
+    });
+    if (!inv) throw new NotFoundException("Invitation not found");
+    return {
+      email: inv.email,
+      role: inv.role,
+      organization: inv.organization.name,
+      invitedBy: inv.invitedBy?.name ?? null,
+      status: inv.revokedAt ? "revoked" : inv.acceptedAt ? "accepted" : "pending",
     };
   }
 

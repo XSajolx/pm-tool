@@ -2218,3 +2218,39 @@ export const mfaBackupSessions = pgTable("mfa_backup_sessions", {
     .references(() => users.id, { onDelete: "cascade" }),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
 });
+
+/* ------------------------------------------------------------------ *
+ * Invitations (row 83) - one row per invite e-mail. The placeholder user +
+ * membership are created at invite time (so assignments can already point
+ * at the person); this row carries the token in the e-mailed link, who sent
+ * it, when it was last (re)sent, and whether it was accepted or revoked.
+ * ------------------------------------------------------------------ */
+export const invitations = pgTable(
+  "invitations",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    email: varchar("email", { length: 320 }).notNull(),
+    role: membershipRole("role").notNull().default("member"),
+    token: varchar("token", { length: 64 }).notNull(),
+    invitedById: uuid("invited_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    lastSentAt: timestamp("last_sent_at", { withTimezone: true }).defaultNow().notNull(),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (t) => [uniqueIndex("invitations_token_uq").on(t.token), index("invitations_org_idx").on(t.organizationId)],
+);
+
+export type Invitation = typeof invitations.$inferSelect;
+
+export const invitationsRelations = relations(invitations, ({ one }) => ({
+  organization: one(organizations, { fields: [invitations.organizationId], references: [organizations.id] }),
+  user: one(users, { fields: [invitations.userId], references: [users.id], relationName: "invitation_user" }),
+  invitedBy: one(users, { fields: [invitations.invitedById], references: [users.id], relationName: "invitation_inviter" }),
+}));

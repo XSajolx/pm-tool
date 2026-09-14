@@ -1,9 +1,9 @@
 import { ConflictException, Inject, Injectable, Logger } from "@nestjs/common";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import type { JWTPayload } from "jose";
 import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
-import { memberships, organizations, users } from "../../db/schema.js";
+import { invitations, memberships, organizations, users } from "../../db/schema.js";
 import type { AuthContext, Role } from "./auth.types.js";
 
 /** Shape of the Supabase claims we actually read. */
@@ -53,6 +53,8 @@ export class AuthService {
         .where(eq(users.id, byEmail.id))
         .returning();
       this.logger.log(`linked existing user ${email} to subject ${claims.sub}`);
+      // Row 83: the invite is accepted the moment the invitee signs in with that address.
+      await this.db.update(invitations).set({ acceptedAt: new Date() }).where(and(eq(invitations.userId, byEmail.id), isNull(invitations.acceptedAt), isNull(invitations.revokedAt)));
       return claimed!;
     }
 

@@ -905,6 +905,98 @@ function BrandingSettings({ canEdit }: { canEdit: boolean }) {
 }
 
 /* ------------------------------------------------------------------ *
+ * Invitations (row 83): invite by e-mail with the role pre-selected, see
+ * who hasn't accepted yet, resend or revoke.
+ * ------------------------------------------------------------------ */
+function InviteForm() {
+  const qc = useQueryClient();
+  const [email, setEmail] = useState("");
+  const [name, setName] = useState("");
+  const [role, setRole] = useState<"admin" | "member" | "guest">("member");
+  const [done, setDone] = useState<string | null>(null);
+  const invite = useMutation({
+    mutationFn: () => api.inviteMember({ email: email.trim(), name: name.trim() || undefined, role }),
+    onSuccess: (m) => {
+      qc.invalidateQueries({ queryKey: ["members"] });
+      qc.invalidateQueries({ queryKey: ["invitations"] });
+      setDone(m.email);
+      setEmail("");
+      setName("");
+    },
+  });
+  const input = "rounded-md border border-border bg-white px-2.5 py-1.5 text-sm outline-none focus:border-indigo-500";
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (email.trim()) invite.mutate();
+      }}
+      className="mt-6 rounded-lg border border-border bg-white p-4"
+    >
+      <h2 className="text-sm font-semibold text-slate-800">Invite by e-mail</h2>
+      <p className="mt-0.5 text-xs text-muted-foreground">They get a link; signing in with that address drops them straight into this workspace with the role you pick.</p>
+      <div className="mt-3 grid gap-2 sm:grid-cols-[1.4fr_1fr_160px_auto]">
+        <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@company.com" required className={input} />
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name (optional)" className={input} />
+        <select value={role} onChange={(e) => setRole(e.target.value as typeof role)} className={input}>
+          {ASSIGNABLE_ROLES.map((r) => (
+            <option key={r} value={r}>
+              {ROLE_LABELS[r]}
+            </option>
+          ))}
+        </select>
+        <button type="submit" disabled={!email.trim() || invite.isPending} className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50">
+          {invite.isPending ? "Sending…" : "Send invite"}
+        </button>
+      </div>
+      {done && <p className="mt-2 text-xs text-emerald-700">Invited {done}.</p>}
+      {invite.isError && <p className="mt-2 text-xs text-red-600">{(invite.error as Error).message}</p>}
+    </form>
+  );
+}
+
+function PendingInvitations() {
+  const qc = useQueryClient();
+  const { data: invites = [] } = useQuery({ queryKey: ["invitations"], queryFn: api.getInvitations });
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ["invitations"] });
+    qc.invalidateQueries({ queryKey: ["members"] });
+  };
+  const resend = useMutation({ mutationFn: api.resendInvitation, onSuccess: refresh });
+  const revoke = useMutation({ mutationFn: api.revokeInvitation, onSuccess: refresh });
+  if (!invites.length) return null;
+  const emailOff = invites.some((i) => !i.emailConfigured);
+  return (
+    <div className="mt-4 rounded-lg border border-border bg-white">
+      <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
+        <h2 className="text-sm font-semibold text-slate-800">Pending invitations · {invites.length}</h2>
+        {emailOff && <span className="text-[11px] text-amber-700">E-mail isn't connected yet (RESEND_API_KEY) - share the invite link by hand for now.</span>}
+      </div>
+      <ul className="divide-y divide-border">
+        {invites.map((i) => (
+          <li key={i.id} className="flex flex-wrap items-center gap-3 px-4 py-2 text-sm">
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-slate-800">{i.email}</p>
+              <p className="text-xs text-muted-foreground">
+                {ROLE_LABELS[i.role as WorkspaceRole] ?? i.role} · invited {i.invitedBy ? `by ${i.invitedBy.name} ` : ""}
+                {new Date(i.createdAt).toLocaleDateString()} · last sent {new Date(i.lastSentAt).toLocaleString()}
+              </p>
+            </div>
+            <button type="button" onClick={() => resend.mutate(i.id)} disabled={resend.isPending} className="rounded-md border border-border px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-muted disabled:opacity-50">
+              Resend
+            </button>
+            <button type="button" onClick={() => revoke.mutate(i.id)} disabled={revoke.isPending} className="rounded-md px-2.5 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50">
+              Revoke
+            </button>
+          </li>
+        ))}
+      </ul>
+      {(resend.isError || revoke.isError) && <p className="px-4 pb-2 text-xs text-red-600">{((resend.error ?? revoke.error) as Error).message}</p>}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ *
  * People & roles (row 82)
  * ------------------------------------------------------------------ */
 function PeopleSettings({ canEdit }: { canEdit: boolean }) {
@@ -939,6 +1031,9 @@ function PeopleSettings({ canEdit }: { canEdit: boolean }) {
           </div>
         ))}
       </div>
+
+      {canEdit && <InviteForm />}
+      {canEdit && <PendingInvitations />}
 
       <div className="mt-6 overflow-hidden rounded-lg border border-border bg-white">
         <table className="w-full text-sm">
