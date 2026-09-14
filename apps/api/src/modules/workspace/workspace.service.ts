@@ -1,10 +1,14 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { randomBytes } from "node:crypto";
 import { MailerService } from "../notifications/mailer.service.js";
+import { NotificationsService } from "../notifications/notifications.service.js";
+import { accessEnded } from "../auth/auth.service.js";
 import { and, asc, eq, inArray, isNull, sql, desc } from "drizzle-orm";
 import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
 import {
+  timeEntries,
+  taskAssignees,
   invitations,
   organizations,
   bookmarks,
@@ -37,6 +41,7 @@ export class WorkspaceService {
   constructor(
     @Inject(DRIZZLE) private readonly db: DB,
     private readonly mailer: MailerService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   /** The sidebar tree: spaces → (folders →) lists, all tenant-scoped. */
@@ -264,20 +269,106 @@ export class WorkspaceService {
     return { id, retired: true };
   }
 
-  async members(orgId: string) {
+  async members(orgId: string, includeDeactivated = false) {
     const rows = await this.db.query.memberships.findMany({
       where: eq(memberships.organizationId, orgId),
       with: { user: true },
     });
-    return rows.map((m) => ({
-      id: m.user.id,
-      name: m.user.name,
-      email: m.user.email,
-      avatarUrl: m.user.avatarUrl,
-      role: m.role,
-      /** True until they have signed in — the row was created by an invite. */
-      pending: m.user.authSubject.startsWith("invite|"),
-    }));
+    return rows
+      .map((m) => ({
+        id: m.user.id,
+        name: m.user.name,
+        email: m.user.email,
+        avatarUrl: m.user.avatarUrl,
+        role: m.role,
+        /** True until they have signed in — the row was created by an invite. */
+        pending: m.user.authSubject.startsWith("invite|"),
+        /** Row 86 */
+        deactivatedAt: m.deactivatedAt,
+        endDate: m.endDate,
+        accessEnded: accessEnded(m),
+      }))
+      // Pickers (assignees, mentions, approvers) shouldn't offer people who've left.
+      .filter((m) => includeDeactivated || !m.accessEnded);
+  }
+
+  /* ---------------- Row 86: offboarding ---------------- */
+
+  /** What's still on this person's plate - shown before deactivating so it can be handed over. */
+  async openWork(orgId: string, userId: string) {
+    const [openTasks, leading, running] = await Promise.all([
+      this.db
+        .select({ id: tasks.id, title: tasks.title, dueDate: tasks.dueDate, listId: tasks.listId })
+        .from(tasks)
+        .innerJoin(taskAssignees, eq(taskAssignees.taskId, tasks.id))
+        .where(and(eq(tasks.organizationId, orgId), eq(taskAssignees.userId, userId), isNull(tasks.completedAt), isNull(tasks.archivedAt)))
+        .limit(200),
+      this.db.query.projects.findMany({ where: and(eq(projects.organizationId, orgId), eq(projects.leadId, userId), isNull(projects.archivedAt)), columns: { id: true, name: true } }),
+      this.db.query.timeEntries.findFirst({ where: and(eq(timeEntries.organizationId, orgId), eq(timeEntries.userId, userId), isNull(timeEntries.endedAt)), columns: { id: true } }),
+    ]);
+    return { openTasks, leadOf: leading, timerRunning: Boolean(running) };
+  }
+
+  /**
+   * Deactivate: block sign-in to this workspace (immediately, or from `endDate`),
+   * stop any running timer, optionally hand open tasks to someone else. Their
+   * messages, docs, time and history stay exactly where they are.
+   */
+  async deactivateMember(orgId: string, actorId: string, userId: string, opts: { endDate?: string | null; reassignToUserId?: string | null }) {
+    const m = await this.db.query.memberships.findFirst({ where: and(eq(memberships.organizationId, orgId), eq(memberships.userId, userId)) });
+    if (!m) throw new NotFoundException("Member not found");
+    if (m.role === "owner") throw new BadRequestException("Transfer ownership before deactivating the owner");
+    if (userId === actorId) throw new BadRequestException("You can't deactivate yourself");
+    const endDate = opts.endDate ? new Date(opts.endDate) : null;
+    const now = new Date();
+    await this.db
+      .update(memberships)
+      .set({ endDate, deactivatedAt: endDate && endDate > now ? null : now, deactivatedById: actorId, updatedAt: now })
+      .where(eq(memberships.id, m.id));
+    // A running timer would otherwise tick forever.
+    await this.db
+      .update(timeEntries)
+      .set({ endedAt: now, durationSeconds: sql`greatest(0, extract(epoch from (now() - ${timeEntries.startedAt})))::int`, updatedAt: now })
+      .where(and(eq(timeEntries.organizationId, orgId), eq(timeEntries.userId, userId), isNull(timeEntries.endedAt)));
+    let reassigned = 0;
+    if (opts.reassignToUserId) reassigned = await this.reassignOpenTasks(orgId, actorId, userId, opts.reassignToUserId);
+    return { userId, endDate, deactivatedAt: endDate && endDate > now ? null : now, reassigned };
+  }
+
+  async reactivateMember(orgId: string, userId: string) {
+    const [row] = await this.db
+      .update(memberships)
+      .set({ endDate: null, deactivatedAt: null, deactivatedById: null, updatedAt: new Date() })
+      .where(and(eq(memberships.organizationId, orgId), eq(memberships.userId, userId)))
+      .returning();
+    if (!row) throw new NotFoundException("Member not found");
+    return { userId, reactivated: true };
+  }
+
+  /** Move every open task from one person to another (the new assignee is told). */
+  async reassignOpenTasks(orgId: string, actorId: string, fromUserId: string, toUserId: string) {
+    if (fromUserId === toUserId) throw new BadRequestException("Pick someone else");
+    const [ok] = await this.db.select({ id: memberships.id }).from(memberships).where(and(eq(memberships.organizationId, orgId), eq(memberships.userId, toUserId)));
+    if (!ok) throw new NotFoundException("That person isn't in this workspace");
+    const { openTasks } = await this.openWork(orgId, fromUserId);
+    for (const t of openTasks) {
+      await this.db.delete(taskAssignees).where(and(eq(taskAssignees.taskId, t.id), eq(taskAssignees.userId, fromUserId)));
+      await this.db.insert(taskAssignees).values({ taskId: t.id, userId: toUserId, organizationId: orgId }).onConflictDoNothing();
+    }
+    if (openTasks.length) {
+      await this.notifications.notifyDirect({
+        orgId,
+        receiverId: toUserId,
+        actorId,
+        entityType: "task",
+        entityId: openTasks[0]!.id,
+        verb: "assigned",
+        title: `${openTasks.length} task${openTasks.length === 1 ? "" : "s"} handed over to you`,
+        body: openTasks.slice(0, 5).map((t) => t.title).join(", ") + (openTasks.length > 5 ? "…" : ""),
+        data: { taskIds: openTasks.map((t) => t.id) },
+      });
+    }
+    return openTasks.length;
   }
 
   /**

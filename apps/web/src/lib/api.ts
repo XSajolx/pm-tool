@@ -137,6 +137,9 @@ export interface Membership {
   role: "owner" | "admin" | "member" | "guest";
   /** Row 81 */
   mfaRequired?: boolean;
+  /** Row 86 */
+  accessEnded?: boolean;
+  endDate?: string | null;
   organization: { id: string; name: string; slug: string };
 }
 
@@ -148,6 +151,10 @@ export interface Member {
   email: string;
   avatarUrl: string | null;
   role: string;
+  /** Row 86 */
+  deactivatedAt?: string | null;
+  endDate?: string | null;
+  accessEnded?: boolean;
   /** Invited by email and has not signed in yet. */
   pending?: boolean;
 }
@@ -1076,6 +1083,15 @@ export const api = {
   getSpaces: () => request<SpaceTree[]>(`/spaces`),
   getStatuses: (spaceId: string) => request<Status[]>(`/spaces/${spaceId}/statuses`),
   getMembers: () => request<Member[]>(`/members`),
+  /** Row 86: everyone, including people who've left. */
+  getAllMembers: () => request<Member[]>(`/members?includeDeactivated=true`),
+  getOpenWork: (userId: string) =>
+    request<{ openTasks: { id: string; title: string; dueDate: string | null }[]; leadOf: { id: string; name: string }[]; timerRunning: boolean }>(`/members/${userId}/open-work`),
+  deactivateMember: (userId: string, body: { endDate?: string | null; reassignToUserId?: string | null }) =>
+    request<{ userId: string; reassigned: number }>(`/members/${userId}/deactivate`, { method: "POST", body: JSON.stringify(body) }),
+  reactivateMember: (userId: string) => request<{ userId: string }>(`/members/${userId}/reactivate`, { method: "POST" }),
+  reassignOpenTasks: (userId: string, toUserId: string) =>
+    request<{ reassigned: number }>(`/members/${userId}/reassign`, { method: "POST", body: JSON.stringify({ toUserId }) }),
   listTasks: (listId: string) =>
     request<Task[]>(`/tasks?listId=${encodeURIComponent(listId)}`),
   getTask: (id: string) => request<Task>(`/tasks/${id}`),

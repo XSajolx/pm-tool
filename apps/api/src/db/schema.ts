@@ -124,6 +124,10 @@ export const memberships = pgTable(
     role: membershipRole("role").notNull().default("member"),
     /** Hours per week this person is available for resourcing. */
     weeklyCapacityHours: integer("weekly_capacity_hours").notNull().default(40),
+    /** Row 86: offboarding. Access ends at `endDate` (or immediately when `deactivatedAt` is set with no end date). */
+    endDate: timestamp("end_date", { withTimezone: true }),
+    deactivatedAt: timestamp("deactivated_at", { withTimezone: true }),
+    deactivatedById: uuid("deactivated_by_id").references(() => users.id, { onDelete: "set null" }),
     ...timestamps,
   },
   (t) => [

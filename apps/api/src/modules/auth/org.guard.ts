@@ -7,7 +7,7 @@ import {
 } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
 import type { Request } from "express";
-import { AuthService } from "./auth.service.js";
+import { AuthService, accessEnded } from "./auth.service.js";
 import { IS_PUBLIC, SKIP_ORG } from "./auth.decorators.js";
 
 /**
@@ -48,6 +48,12 @@ export class OrgGuard implements CanActivate {
       // Same response whether the org doesn't exist or they're just not in it —
       // don't leak which org ids are real.
       throw new ForbiddenException("Not a member of this organization");
+    }
+
+    // Row 86: a deactivated member is signed out of this workspace everywhere, at once -
+    // every token they hold stops working here the moment the switch is flipped.
+    if (accessEnded(membership)) {
+      throw new ForbiddenException({ code: "access_ended", message: "Your access to this workspace has ended" });
     }
 
     req.auth.orgId = membership.organizationId;

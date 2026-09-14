@@ -29,6 +29,9 @@ const inviteSchema = z.object({
   role: z.enum(["admin", "member", "guest"]).optional(),
 });
 const roleSchema = z.object({ role: z.enum(["admin", "member", "guest"]) });
+/** Row 86 */
+const deactivateSchema = z.object({ endDate: z.string().datetime().nullable().optional(), reassignToUserId: z.string().uuid().nullable().optional() });
+const reassignSchema = z.object({ toUserId: z.string().uuid() });
 
 @Controller()
 export class WorkspaceController {
@@ -167,8 +170,36 @@ export class WorkspaceController {
   }
 
   @Get("members")
-  members(@Auth() auth: AuthContext) {
-    return this.workspace.members(auth.orgId);
+  members(@Auth() auth: AuthContext, @Query("includeDeactivated") includeDeactivated?: string) {
+    return this.workspace.members(auth.orgId, includeDeactivated === "true");
+  }
+
+  /* ---- Row 86: offboarding ---- */
+
+  @Get("members/:userId/open-work")
+  @Roles("owner", "admin")
+  openWork(@Auth() auth: AuthContext, @Param("userId") userId: string) {
+    return this.workspace.openWork(auth.orgId, userId);
+  }
+
+  @Post("members/:userId/deactivate")
+  @Roles("owner", "admin")
+  @UsePipes(new ZodValidationPipe(deactivateSchema))
+  deactivate(@Auth() auth: AuthContext, @Param("userId") userId: string, @Body() dto: z.infer<typeof deactivateSchema>) {
+    return this.workspace.deactivateMember(auth.orgId, auth.userId, userId, dto);
+  }
+
+  @Post("members/:userId/reactivate")
+  @Roles("owner", "admin")
+  reactivate(@Auth() auth: AuthContext, @Param("userId") userId: string) {
+    return this.workspace.reactivateMember(auth.orgId, userId);
+  }
+
+  @Post("members/:userId/reassign")
+  @Roles("owner", "admin")
+  @UsePipes(new ZodValidationPipe(reassignSchema))
+  async reassign(@Auth() auth: AuthContext, @Param("userId") userId: string, @Body() dto: z.infer<typeof reassignSchema>) {
+    return { reassigned: await this.workspace.reassignOpenTasks(auth.orgId, auth.userId, userId, dto.toUserId) };
   }
 
   @Post("members/invite")

@@ -997,14 +997,80 @@ function PendingInvitations() {
 }
 
 /* ------------------------------------------------------------------ *
+ * Offboarding (row 86): one step - end date, block sign-in (everywhere,
+ * instantly), stop timers, hand open tasks to someone. Nothing is deleted.
+ * ------------------------------------------------------------------ */
+function OffboardPanel({ member, candidates, onClose, onDone }: { member: { id: string; name: string }; candidates: { id: string; name: string }[]; onClose: () => void; onDone: () => void }) {
+  const { data: work } = useQuery({ queryKey: ["open-work", member.id], queryFn: () => api.getOpenWork(member.id) });
+  const [endDate, setEndDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [reassignTo, setReassignTo] = useState("");
+  const go = useMutation({
+    mutationFn: () => api.deactivateMember(member.id, { endDate: endDate ? new Date(`${endDate}T23:59:59`).toISOString() : null, reassignToUserId: reassignTo || null }),
+    onSuccess: onDone,
+  });
+  const today = new Date().toISOString().slice(0, 10);
+  return (
+    <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm">
+      <p className="font-medium text-amber-900">Deactivate {member.name}</p>
+      <p className="mt-0.5 text-xs text-amber-800">They're signed out of this workspace everywhere and can't sign back in. Their messages, docs, time entries and history stay put.</p>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        <label className="block text-xs font-medium text-slate-700">
+          Last day
+          <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="mt-1 w-full rounded-md border border-border bg-white px-2 py-1.5 text-sm" />
+          <span className="mt-0.5 block text-[11px] font-normal text-muted-foreground">{endDate > today ? "Access ends at the end of that day." : "Access ends right now."}</span>
+        </label>
+        <label className="block text-xs font-medium text-slate-700">
+          Hand open tasks to
+          <select value={reassignTo} onChange={(e) => setReassignTo(e.target.value)} className="mt-1 w-full rounded-md border border-border bg-white px-2 py-1.5 text-sm">
+            <option value="">— leave unassigned —</option>
+            {candidates.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <div className="mt-3 text-xs text-slate-700">
+        {!work ? (
+          "Checking their open work…"
+        ) : (
+          <>
+            <span className="font-medium">{work.openTasks.length}</span> open task{work.openTasks.length === 1 ? "" : "s"}
+            {work.leadOf.length > 0 && (
+              <>
+                {" · "}leads <span className="font-medium">{work.leadOf.map((p) => p.name).join(", ")}</span> (pick a new lead on those projects)
+              </>
+            )}
+            {work.timerRunning && " · a running timer will be stopped"}
+          </>
+        )}
+      </div>
+      <div className="mt-3 flex items-center gap-2">
+        <button type="button" onClick={() => go.mutate()} disabled={go.isPending} className="rounded-md bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700 disabled:opacity-50">
+          {go.isPending ? "Working…" : "Deactivate"}
+        </button>
+        <button type="button" onClick={onClose} className="text-xs text-slate-600 hover:underline">
+          Cancel
+        </button>
+        {go.isError && <span className="text-xs text-red-600">{(go.error as Error).message}</span>}
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ *
  * People & roles (row 82)
  * ------------------------------------------------------------------ */
 function PeopleSettings({ canEdit }: { canEdit: boolean }) {
   const qc = useQueryClient();
   const { role: myRole, user, refreshMe } = useAuth();
-  const { data: members = [] } = useQuery({ queryKey: ["members"], queryFn: api.getMembers });
+  const { data: members = [] } = useQuery({ queryKey: ["members", "all"], queryFn: api.getAllMembers });
   const refresh = () => qc.invalidateQueries({ queryKey: ["members"] });
   const setRole = useMutation({ mutationFn: ({ userId, role }: { userId: string; role: "admin" | "member" | "guest" }) => api.setMemberRole(userId, role), onSuccess: refresh });
+  // Row 86: offboarding.
+  const [offboarding, setOffboarding] = useState<string | null>(null);
+  const reactivate = useMutation({ mutationFn: api.reactivateMember, onSuccess: refresh });
   const remove = useMutation({ mutationFn: api.removeMember, onSuccess: refresh });
   const transfer = useMutation({
     mutationFn: api.transferOwnership,
@@ -1014,7 +1080,7 @@ function PeopleSettings({ canEdit }: { canEdit: boolean }) {
     },
   });
   const [confirmTransfer, setConfirmTransfer] = useState<string | null>(null);
-  const err = (setRole.error ?? remove.error ?? transfer.error) as Error | null;
+  const err = (setRole.error ?? remove.error ?? transfer.error ?? reactivate.error) as Error | null;
   const sorted = [...members].sort((a, b) => ["owner", "admin", "member", "guest"].indexOf(a.role) - ["owner", "admin", "member", "guest"].indexOf(b.role) || a.name.localeCompare(b.name));
 
   return (
@@ -1046,7 +1112,7 @@ function PeopleSettings({ canEdit }: { canEdit: boolean }) {
           </thead>
           <tbody className="divide-y divide-border">
             {sorted.map((m) => (
-              <tr key={m.id}>
+              <tr key={m.id} className={m.accessEnded ? "opacity-60" : undefined}>
                 <td className="px-3 py-2">
                   <div className="flex items-center gap-2.5">
                     <span className="flex h-7 w-7 items-center justify-center rounded-full bg-indigo-100 text-[10px] font-semibold text-indigo-700">
@@ -1057,6 +1123,8 @@ function PeopleSettings({ canEdit }: { canEdit: boolean }) {
                         {m.name}
                         {m.id === user?.id && <span className="ml-1.5 text-[11px] text-muted-foreground">(you)</span>}
                         {m.pending && <span className="ml-2 rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">Invited</span>}
+                        {m.accessEnded && <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">Deactivated{m.deactivatedAt ? ` ${new Date(m.deactivatedAt).toLocaleDateString()}` : ""}</span>}
+                        {!m.accessEnded && m.endDate && <span className="ml-2 rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">Leaves {new Date(m.endDate).toLocaleDateString()}</span>}
                       </p>
                       <p className="truncate text-xs text-muted-foreground">{m.email}</p>
                     </div>
@@ -1093,8 +1161,18 @@ function PeopleSettings({ canEdit }: { canEdit: boolean }) {
                       </button>
                     )
                   )}
-                  {canEdit && m.role !== "owner" && m.id !== user?.id && (
-                    <button type="button" onClick={() => remove.mutate(m.id)} className="text-slate-400 hover:text-red-600" title="Remove from workspace">
+                  {canEdit && m.role !== "owner" && m.id !== user?.id && !m.accessEnded && !m.endDate && (
+                    <button type="button" onClick={() => setOffboarding(offboarding === m.id ? null : m.id)} className="mr-3 text-slate-500 hover:text-amber-700 hover:underline" title="Block sign-in, hand over open tasks; history stays">
+                      Deactivate
+                    </button>
+                  )}
+                  {canEdit && (m.accessEnded || m.endDate) && (
+                    <button type="button" onClick={() => reactivate.mutate(m.id)} className="mr-3 text-slate-500 hover:text-green-700 hover:underline">
+                      Reactivate
+                    </button>
+                  )}
+                  {canEdit && m.role !== "owner" && m.id !== user?.id && m.pending && (
+                    <button type="button" onClick={() => remove.mutate(m.id)} className="text-slate-400 hover:text-red-600" title="Remove the invitation">
                       Remove
                     </button>
                   )}
@@ -1105,6 +1183,17 @@ function PeopleSettings({ canEdit }: { canEdit: boolean }) {
         </table>
       </div>
       {err && <p className="mt-2 text-xs text-red-600">{err.message}</p>}
+      {offboarding && (
+        <OffboardPanel
+          member={members.find((m) => m.id === offboarding)!}
+          candidates={members.filter((m) => m.id !== offboarding && !m.accessEnded && !m.pending)}
+          onClose={() => setOffboarding(null)}
+          onDone={() => {
+            setOffboarding(null);
+            void refresh();
+          }}
+        />
+      )}
 
       <h2 className="mt-8 text-sm font-semibold text-slate-800">What each role can do</h2>
       <div className="mt-2 overflow-x-auto rounded-lg border border-border bg-white">

@@ -66,6 +66,9 @@ function Protected() {
   // Row 81: enrolled users prove the second factor every session; required roles must enrol.
   if (mfa && mfa.enrolled && !mfa.verified) return <MfaVerifyPage />;
   if (mfa && !mfa.enrolled && memberships.find((m) => m.organizationId === activeOrgId)?.mfaRequired) return <MfaEnrollPage />;
+  // Row 86: deactivated in the active workspace - say so instead of a wall of 403s.
+  const active = memberships.find((m) => m.organizationId === activeOrgId);
+  if (active?.accessEnded) return <AccessEnded orgName={active.organization.name} />;
   if (!memberships.length && API_CONFIGURED) return <CreateOrgPage />;
 
   return (
@@ -79,6 +82,30 @@ function Protected() {
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <Sidebar />
         <Outlet />
+      </div>
+    </div>
+  );
+}
+
+function AccessEnded({ orgName }: { orgName: string }) {
+  const { signOut, memberships, switchOrg } = useAuth();
+  const others = memberships.filter((m) => !m.accessEnded);
+  return (
+    <div className="flex h-screen w-full items-center justify-center px-6">
+      <div className="max-w-md rounded-lg border border-border bg-white p-6 text-center shadow-sm">
+        <p className="text-2xl">👋</p>
+        <h1 className="mt-2 text-lg font-semibold text-slate-900">Your access to {orgName} has ended</h1>
+        <p className="mt-1 text-sm text-muted-foreground">An admin deactivated your membership. Your work and messages stay with the team.</p>
+        <div className="mt-4 flex flex-wrap justify-center gap-2">
+          {others.map((m) => (
+            <button key={m.organizationId} type="button" onClick={() => switchOrg(m.organizationId)} className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-muted">
+              Open {m.organization.name}
+            </button>
+          ))}
+          <button type="button" onClick={() => void signOut()} className="rounded-md bg-slate-900 px-3 py-1.5 text-sm text-white hover:bg-slate-800">
+            Sign out
+          </button>
+        </div>
       </div>
     </div>
   );

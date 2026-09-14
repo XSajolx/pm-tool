@@ -82,6 +82,9 @@ export class AuthService {
       role: m.role,
       /** Row 81: this workspace insists on 2FA for my role. */
       mfaRequired: (m.organization.mfaRequiredRoles ?? []).includes(m.role),
+      /** Row 86: deactivated (or past the end date) - the API refuses every call for this workspace. */
+      accessEnded: accessEnded(m),
+      endDate: m.endDate,
       organization: {
         id: m.organization.id,
         name: m.organization.name,
@@ -185,4 +188,12 @@ export class AuthService {
       role: org?.role ?? "guest",
     };
   }
+}
+
+/** Row 86: is this membership switched off? Immediately when deactivated, or once the end date passes. */
+export function accessEnded(m: { deactivatedAt: Date | null; endDate: Date | null }) {
+  const now = Date.now();
+  if (m.deactivatedAt && m.deactivatedAt.getTime() <= now) return true;
+  if (m.endDate && m.endDate.getTime() <= now) return true;
+  return false;
 }
