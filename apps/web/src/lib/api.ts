@@ -838,6 +838,14 @@ export const api = {
   addChannelMembers: (id: string, userIds: string[]) =>
     request<ChatMember[]>(`/chat/channels/${id}/members`, { method: "POST", body: JSON.stringify({ userIds }) }),
   leaveChannel: (id: string) => request<{ id: string; left: boolean }>(`/chat/channels/${id}/leave`, { method: "POST" }),
+  /** Row 46: pins + bookmarks. */
+  togglePin: (channelId: string, messageId: string) =>
+    request<{ messageId: string; pinnedAt: string | null }>(`/chat/channels/${channelId}/messages/${messageId}/pin`, { method: "POST" }),
+  getPinnedMessages: (channelId: string) => request<ChatMessage[]>(`/chat/channels/${channelId}/pins`),
+  addChannelBookmark: (channelId: string, body: { label: string; url: string }) =>
+    request<ChannelBookmark>(`/chat/channels/${channelId}/bookmarks`, { method: "POST", body: JSON.stringify(body) }),
+  removeChannelBookmark: (channelId: string, bookmarkId: string) =>
+    request<{ id: string; removed: boolean }>(`/chat/channels/${channelId}/bookmarks/${bookmarkId}`, { method: "DELETE" }),
   /** Row 45: per-channel notification rule. */
   setChannelNotify: (id: string, notify: ChannelNotify) =>
     request<{ channelId: string; notify: ChannelNotify }>(`/chat/channels/${id}/notify`, { method: "PATCH", body: JSON.stringify({ notify }) }),
@@ -1274,6 +1282,11 @@ export interface ChatMember {
   avatarUrl: string | null;
 }
 export type ChannelNotify = "all" | "mentions" | "muted";
+export interface ChannelBookmark {
+  id: string;
+  label: string;
+  url: string;
+}
 
 export interface ChatChannel {
   id: string;
@@ -1285,6 +1298,8 @@ export interface ChatChannel {
   lastReadAt: string | null;
   /** Row 45: my notification rule for this channel. */
   notify: ChannelNotify;
+  /** Row 46: header links. */
+  bookmarks: ChannelBookmark[];
   /** Invite-only (row 39). Project channels are always private. */
   isPrivate: boolean;
   projectId: string | null;
@@ -1315,4 +1330,6 @@ export interface ChatMessage {
   attachments?: Attachment[];
   /** Row 44: grouped emoji reactions. */
   reactions?: ReactionGroup[];
+  /** Row 46: when it was pinned, or null. */
+  pinnedAt?: string | null;
 }

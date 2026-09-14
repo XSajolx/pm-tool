@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Param, Patch, Post } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post } from "@nestjs/common";
 import { ChatService } from "./chat.service.js";
 import { ChatGateway } from "./chat.gateway.js";
 import { Auth, Roles } from "../auth/auth.decorators.js";
@@ -53,6 +53,36 @@ export class ChatController {
   async react(@Auth() auth: AuthContext, @Param("id") id: string, @Param("messageId") messageId: string, @Body() body: { emoji: string }) {
     const res = await this.chat.react(auth.orgId, id, messageId, auth.userId, body.emoji);
     this.gateway.emitToChannel(id, "message:reaction", res);
+    return res;
+  }
+
+  /* Row 46: pins + bookmarks */
+  @Post("channels/:id/messages/:messageId/pin")
+  @Roles("owner", "admin", "member")
+  async pin(@Auth() auth: AuthContext, @Param("id") id: string, @Param("messageId") messageId: string) {
+    const res = await this.chat.togglePin(auth.orgId, id, messageId, auth.userId);
+    this.gateway.emitToChannel(id, "message:pin", res);
+    return res;
+  }
+
+  @Get("channels/:id/pins")
+  pins(@Auth() auth: AuthContext, @Param("id") id: string) {
+    return this.chat.pins(auth.orgId, id, auth.userId);
+  }
+
+  @Post("channels/:id/bookmarks")
+  @Roles("owner", "admin", "member")
+  async addBookmark(@Auth() auth: AuthContext, @Param("id") id: string, @Body() body: { label: string; url: string }) {
+    const res = await this.chat.addBookmark(auth.orgId, id, auth.userId, body);
+    this.gateway.emitToChannel(id, "channel:bookmarks", { channelId: id });
+    return res;
+  }
+
+  @Delete("channels/:id/bookmarks/:bookmarkId")
+  @Roles("owner", "admin", "member")
+  async removeBookmark(@Auth() auth: AuthContext, @Param("id") id: string, @Param("bookmarkId") bookmarkId: string) {
+    const res = await this.chat.removeBookmark(auth.orgId, id, auth.userId, bookmarkId);
+    this.gateway.emitToChannel(id, "channel:bookmarks", { channelId: id });
     return res;
   }
 

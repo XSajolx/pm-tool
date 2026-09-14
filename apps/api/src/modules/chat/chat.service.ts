@@ -2,7 +2,7 @@ import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundEx
 import { and, asc, count, eq, gt, inArray, isNull, max, ne, or } from "drizzle-orm";
 import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
-import { channels, channelMembers, memberships, messages, notificationPreferences, notifications } from "../../db/schema.js";
+import { channelBookmarks, channels, channelMembers, memberships, messages, notificationPreferences, notifications } from "../../db/schema.js";
 import { FilesService } from "../files/files.service.js";
 import { ReactionsService } from "../reactions/reactions.service.js";
 
@@ -42,6 +42,7 @@ export class ChatService {
       with: {
         members: { with: { user: true } },
         project: { columns: { id: true, name: true, color: true, archivedAt: true } },
+        bookmarks: { orderBy: (b, { asc: a }) => [a(b.position), a(b.createdAt)] },
       },
       orderBy: (c) => [asc(c.createdAt)],
     });
@@ -65,6 +66,7 @@ export class ChatService {
       unreadCount: unreadBy.get(c.id) ?? 0,
       lastReadAt: lastReadBy.get(c.id) ?? null,
       notify: notifyBy.get(c.id) ?? "mentions",
+      bookmarks: c.bookmarks.map((b) => ({ id: b.id, label: b.label, url: b.url })),
       isPrivate: c.isPrivate,
       projectId: c.projectId,
       project: c.project ? { id: c.project.id, name: c.project.name, color: c.project.color, archived: Boolean(c.project.archivedAt) } : null,
@@ -120,6 +122,55 @@ export class ChatService {
       .returning({ channelId: channelMembers.channelId });
     if (!row) throw new ForbiddenException("Not a member of this channel");
     return { channelId, lastReadAt };
+  }
+
+  /* ---------------- Row 46: pins + bookmarks ---------------- */
+
+  async togglePin(orgId: string, channelId: string, messageId: string, userId: string) {
+    await this.assertMember(channelId, userId);
+    const msg = await this.db.query.messages.findFirst({
+      where: and(eq(messages.id, messageId), eq(messages.channelId, channelId), eq(messages.organizationId, orgId)),
+      columns: { id: true, pinnedAt: true },
+    });
+    if (!msg) throw new NotFoundException("Message not found");
+    const pinnedAt = msg.pinnedAt ? null : new Date();
+    await this.db.update(messages).set({ pinnedAt, pinnedById: pinnedAt ? userId : null }).where(eq(messages.id, messageId));
+    return { messageId, pinnedAt };
+  }
+
+  /** Pinned messages, newest pin first. */
+  async pins(orgId: string, channelId: string, userId: string) {
+    await this.assertMember(channelId, userId);
+    const rows = await this.db.query.messages.findMany({
+      where: and(eq(messages.organizationId, orgId), eq(messages.channelId, channelId)),
+      with: { author: true },
+      orderBy: (m, { desc: d }) => [d(m.pinnedAt)],
+    });
+    const pinned = rows.filter((m) => m.pinnedAt);
+    const [files, reacts] = await Promise.all([
+      this.files.forMessages(pinned.map((m) => m.id)),
+      this.reactions.forEntities(orgId, userId, "message", pinned.map((m) => m.id)),
+    ]);
+    return pinned.map((m) => ({ ...this.shape(m), attachments: files.get(m.id) ?? [], reactions: reacts[m.id] ?? [] }));
+  }
+
+  async addBookmark(orgId: string, channelId: string, userId: string, input: { label: string; url: string }) {
+    await this.assertMember(channelId, userId);
+    const label = (input.label ?? "").trim().slice(0, 120);
+    let url = (input.url ?? "").trim();
+    if (url && !/^[a-z][a-z0-9+.-]*:/i.test(url)) url = `https://${url}`;
+    if (!label || !url) throw new BadRequestException("Both a label and a link are needed");
+    const [row] = await this.db
+      .insert(channelBookmarks)
+      .values({ organizationId: orgId, channelId, label, url, position: Date.now(), createdById: userId })
+      .returning();
+    return { id: row!.id, label: row!.label, url: row!.url };
+  }
+
+  async removeBookmark(orgId: string, channelId: string, userId: string, bookmarkId: string) {
+    await this.assertMember(channelId, userId);
+    await this.db.delete(channelBookmarks).where(and(eq(channelBookmarks.id, bookmarkId), eq(channelBookmarks.channelId, channelId), eq(channelBookmarks.organizationId, orgId)));
+    return { id: bookmarkId, removed: true };
   }
 
   /** Row 45: how loudly this channel should reach me. */
@@ -480,6 +531,7 @@ export class ChatService {
     body: string;
     createdAt: Date;
     parentMessageId: string | null;
+    pinnedAt?: Date | null;
     author: { id: string; name: string; avatarUrl: string | null };
   }) {
     return {
@@ -488,6 +540,7 @@ export class ChatService {
       body: m.body,
       createdAt: m.createdAt,
       parentMessageId: m.parentMessageId,
+      pinnedAt: m.pinnedAt ?? null,
       author: { id: m.author.id, name: m.author.name, avatarUrl: m.author.avatarUrl },
     };
   }

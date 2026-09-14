@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, type Attachment, type ChannelNotify, type ChatChannel, type ChatMember, type ChatMessage, type ReactionGroup } from "../lib/api.js";
+import { api, type Attachment, type ChannelBookmark, type ChannelNotify, type ChatChannel, type ChatMember, type ChatMessage, type ReactionGroup } from "../lib/api.js";
 import { useAuth } from "../lib/auth.js";
 import { getSocket } from "../lib/socket.js";
 import { ChatActions, PeoplePicker } from "../components/ChatActions.js";
@@ -146,7 +146,7 @@ function MessagePane({ channelId, channel }: { channelId: string; channel?: Chat
   const qc = useQueryClient();
   const meId = useAuth().user!.id;
   const [threadId, setThreadId] = useState<string | null>(null);
-  const [filesOpen, setFilesOpen] = useState(false);
+  const [panel, setPanel] = useState<"files" | "pins" | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const paneRef = useRef<HTMLDivElement>(null);
 
@@ -210,6 +210,11 @@ function MessagePane({ channelId, channel }: { channelId: string; channel?: Chat
     const onReaction = (p: { messageId: string; parentMessageId: string | null; reactions: ReactionGroup[] }) =>
       applyReactions(qc, channelId, meId, p);
     socket.on("message:reaction", onReaction);
+    // Row 46: pins and bookmarks changed by anyone.
+    const onPin = (p: { messageId: string; pinnedAt: string | null }) => applyPin(qc, channelId, p);
+    const onBookmarks = () => qc.invalidateQueries({ queryKey: ["channels"] });
+    socket.on("message:pin", onPin);
+    socket.on("channel:bookmarks", onBookmarks);
     // After a reconnect (API restart, flaky network) the server has forgotten
     // our room, so join again or live messages silently stop.
     const rejoin = () => socket.emit("join", channelId);
@@ -218,6 +223,8 @@ function MessagePane({ channelId, channel }: { channelId: string; channel?: Chat
       socket.emit("leave", channelId);
       socket.off("message:new", onNew);
       socket.off("message:reaction", onReaction);
+      socket.off("message:pin", onPin);
+      socket.off("channel:bookmarks", onBookmarks);
       socket.off("connect", rejoin);
     };
   }, [channelId, qc, meId]);
@@ -225,6 +232,10 @@ function MessagePane({ channelId, channel }: { channelId: string; channel?: Chat
   const react = useMutation({
     mutationFn: ({ messageId, emoji }: { messageId: string; emoji: string }) => api.reactToMessage(channelId, messageId, emoji),
     onSuccess: (p) => applyReactions(qc, channelId, meId, p),
+  });
+  const pin = useMutation({
+    mutationFn: (messageId: string) => api.togglePin(channelId, messageId),
+    onSuccess: (p) => applyPin(qc, channelId, p),
   });
 
   useEffect(() => {
@@ -249,7 +260,7 @@ function MessagePane({ channelId, channel }: { channelId: string; channel?: Chat
   return (
     <div className="flex flex-1 overflow-hidden bg-white">
       <div ref={paneRef} className="relative flex min-w-0 flex-1 flex-col">
-        <ChannelHeader channel={channel} title={title} filesOpen={filesOpen} onToggleFiles={() => setFilesOpen((v) => !v)} />
+        <ChannelHeader channel={channel} title={title} panel={panel} onTogglePanel={(p) => setPanel((cur) => (cur === p ? null : p))} />
 
         <div className="flex-1 space-y-3 overflow-y-auto px-5 py-4">
           {messages.length === 0 && (
@@ -276,6 +287,7 @@ function MessagePane({ channelId, channel }: { channelId: string; channel?: Chat
                   grouped={Boolean(prev && prev.author.id === m.author.id && !prev.replyCount && !isFirstUnread)}
                   onReply={() => setThreadId(m.id)}
                   onReact={(emoji) => react.mutate({ messageId: m.id, emoji })}
+                  onPin={() => pin.mutate(m.id)}
                   threadOpen={threadId === m.id}
                 />
               </div>
@@ -295,7 +307,8 @@ function MessagePane({ channelId, channel }: { channelId: string; channel?: Chat
       </div>
 
       {threadId && <ThreadPane channelId={channelId} messageId={threadId} meId={meId} members={members} onClose={() => setThreadId(null)} />}
-      {filesOpen && !threadId && <FilesPanel channelId={channelId} onClose={() => setFilesOpen(false)} />}
+      {panel === "files" && !threadId && <FilesPanel channelId={channelId} onClose={() => setPanel(null)} />}
+      {panel === "pins" && !threadId && <PinsPanel channelId={channelId} meId={meId} members={members} onUnpin={(id) => pin.mutate(id)} onClose={() => setPanel(null)} />}
     </div>
   );
 }
@@ -315,6 +328,7 @@ function MessageRow({
   grouped,
   onReply,
   onReact,
+  onPin,
   threadOpen,
   compact,
 }: {
@@ -324,6 +338,7 @@ function MessageRow({
   grouped?: boolean;
   onReply?: () => void;
   onReact?: (emoji: string) => void;
+  onPin?: () => void;
   threadOpen?: boolean;
   compact?: boolean;
 }) {
@@ -350,7 +365,12 @@ function MessageRow({
         )}
       </div>
       <div className="min-w-0 flex-1">
-        {!grouped && (
+        {m.pinnedAt && (
+          <div className="mb-0.5 flex items-center gap-1 text-[10px] font-medium text-amber-700">
+            📌 Pinned
+          </div>
+        )}
+        {(!grouped || m.pinnedAt) && (
           <div className="flex items-baseline gap-2">
             <span className="text-sm font-semibold text-slate-800">{m.author.name}</span>
             <span className="text-[11px] text-muted-foreground">{fmtTime(m.createdAt)}</span>
@@ -406,7 +426,7 @@ function MessageRow({
           </button>
         )}
       </div>
-      {(onReply || onReact) && (
+      {(onReply || onReact || onPin) && (
         <div className="absolute right-2 top-0 hidden items-center gap-0.5 rounded-md border border-border bg-white p-0.5 text-[11px] text-slate-600 shadow-sm group-hover:flex">
           {onReact &&
             QUICK_EMOJI.slice(0, 3).map((e) => (
@@ -422,6 +442,11 @@ function MessageRow({
           {onReply && (
             <button type="button" onClick={onReply} className="rounded px-1.5 hover:bg-muted hover:text-indigo-700" title="Reply in thread">
               💬 Reply
+            </button>
+          )}
+          {onPin && (
+            <button type="button" onClick={onPin} className={cn("rounded px-1 hover:bg-muted", m.pinnedAt && "text-amber-700")} title={m.pinnedAt ? "Unpin" : "Pin to channel"}>
+              📌
             </button>
           )}
         </div>
@@ -868,7 +893,7 @@ function MessageBody({ body, members, meId }: { body: string; members: ChatMembe
  * sense for this kind of channel — invite/leave for named channels, a link to
  * the project team for project channels, nothing for DMs.
  */
-function ChannelHeader({ channel, title, filesOpen, onToggleFiles }: { channel?: ChatChannel; title: string; filesOpen?: boolean; onToggleFiles?: () => void }) {
+function ChannelHeader({ channel, title, panel, onTogglePanel }: { channel?: ChatChannel; title: string; panel?: "files" | "pins" | null; onTogglePanel?: (p: "files" | "pins") => void }) {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [showMembers, setShowMembers] = useState(false);
@@ -915,8 +940,13 @@ function ChannelHeader({ channel, title, filesOpen, onToggleFiles }: { channel?:
         {channel.isPrivate && !isProject && <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-slate-600">Private</span>}
         <div className="ml-auto flex items-center gap-2">
           <NotifyControl channel={channel} />
-          {onToggleFiles && (
-            <button type="button" onClick={onToggleFiles} className={cn("rounded-md px-2 py-1 text-xs hover:bg-muted", filesOpen ? "bg-indigo-50 text-indigo-700" : "text-slate-600")} title="Files shared in this channel">
+          {onTogglePanel && (
+            <button type="button" onClick={() => onTogglePanel("pins")} className={cn("rounded-md px-2 py-1 text-xs hover:bg-muted", panel === "pins" ? "bg-indigo-50 text-indigo-700" : "text-slate-600")} title="Pinned messages">
+              📌 Pins
+            </button>
+          )}
+          {onTogglePanel && (
+            <button type="button" onClick={() => onTogglePanel("files")} className={cn("rounded-md px-2 py-1 text-xs hover:bg-muted", panel === "files" ? "bg-indigo-50 text-indigo-700" : "text-slate-600")} title="Files shared in this channel">
               📎 Files
             </button>
           )}
@@ -935,6 +965,7 @@ function ChannelHeader({ channel, title, filesOpen, onToggleFiles }: { channel?:
           )}
         </div>
       </div>
+      <BookmarksBar channel={channel} />
       {showMembers && (
         <div className="border-t border-border bg-[#fbfbfa] px-5 py-2 text-xs">
           <div className="flex flex-wrap gap-1.5">
@@ -1026,5 +1057,105 @@ function NotifyControl({ channel }: { channel: ChatChannel }) {
         </>
       )}
     </div>
+  );
+}
+
+/** Row 46: keep a message's pin state in sync in the channel and thread caches. */
+function applyPin(qc: ReturnType<typeof useQueryClient>, channelId: string, p: { messageId: string; pinnedAt: string | null }) {
+  const patch = (m: ChatMessage) => (m.id === p.messageId ? { ...m, pinnedAt: p.pinnedAt } : m);
+  qc.setQueryData<ChatMessage[]>(["messages", channelId], (old = []) => old.map(patch));
+  qc.setQueriesData<ThreadData>({ queryKey: ["thread", channelId] }, (old) => (old ? { root: patch(old.root), replies: old.replies.map(patch) } : old));
+  qc.invalidateQueries({ queryKey: ["pins", channelId] });
+}
+
+/** Row 46: the links under the channel name — brief, Figma, staging — plus an inline "add" form. */
+function BookmarksBar({ channel }: { channel: ChatChannel }) {
+  const qc = useQueryClient();
+  const [adding, setAdding] = useState(false);
+  const [label, setLabel] = useState("");
+  const [url, setUrl] = useState("");
+  const refresh = () => qc.invalidateQueries({ queryKey: ["channels"] });
+  const add = useMutation({
+    mutationFn: () => api.addChannelBookmark(channel.id, { label, url }),
+    onSuccess: () => {
+      setLabel("");
+      setUrl("");
+      setAdding(false);
+      refresh();
+    },
+  });
+  const remove = useMutation({ mutationFn: (id: string) => api.removeChannelBookmark(channel.id, id), onSuccess: refresh });
+  const bookmarks: ChannelBookmark[] = channel.bookmarks ?? [];
+  if (!bookmarks.length && !adding && channel.type === "dm") return null;
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 border-t border-border bg-[#fbfbfa] px-5 py-1.5 text-xs">
+      {bookmarks.map((b) => (
+        <span key={b.id} className="group/bm inline-flex items-center gap-1 rounded-full border border-border bg-white pl-2 pr-1 py-0.5 text-slate-700">
+          <a href={b.url} target="_blank" rel="noreferrer" className="hover:text-indigo-700" title={b.url}>
+            🔖 {b.label}
+          </a>
+          <button type="button" onClick={() => remove.mutate(b.id)} className="invisible rounded px-0.5 text-slate-400 hover:text-red-600 group-hover/bm:visible" title="Remove bookmark">
+            ×
+          </button>
+        </span>
+      ))}
+      {adding ? (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (label.trim() && url.trim() && !add.isPending) add.mutate();
+          }}
+          className="flex items-center gap-1"
+        >
+          <input autoFocus value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Label (e.g. Figma)" className="w-32 rounded-md border border-border px-2 py-0.5 text-xs outline-none focus:border-indigo-500" />
+          <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…" className="w-56 rounded-md border border-border px-2 py-0.5 text-xs outline-none focus:border-indigo-500" />
+          <button type="submit" disabled={!label.trim() || !url.trim() || add.isPending} className="rounded-md bg-indigo-600 px-2 py-0.5 text-xs font-medium text-white disabled:opacity-40">
+            Add
+          </button>
+          <button type="button" onClick={() => setAdding(false)} className="px-1 text-slate-400 hover:text-slate-700">
+            ✕
+          </button>
+        </form>
+      ) : (
+        <button type="button" onClick={() => setAdding(true)} className="rounded-full border border-dashed border-border px-2 py-0.5 text-slate-500 hover:bg-muted">
+          + Bookmark
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** Row 46: pinned messages, newest pin first. */
+function PinsPanel({ channelId, meId, members, onUnpin, onClose }: { channelId: string; meId: string; members: ChatMember[]; onUnpin: (id: string) => void; onClose: () => void }) {
+  const { data: pins = [], isLoading } = useQuery({ queryKey: ["pins", channelId], queryFn: () => api.getPinnedMessages(channelId) });
+  return (
+    <aside className="flex w-80 shrink-0 flex-col border-l border-border bg-[#fbfbfa]">
+      <header className="flex items-center justify-between border-b border-border px-4 py-3">
+        <span className="text-sm font-semibold">
+          Pinned <span className="text-xs font-normal text-muted-foreground">{pins.length}</span>
+        </span>
+        <button onClick={onClose} className="rounded p-1 text-slate-400 hover:bg-muted" aria-label="Close pins">
+          ✕
+        </button>
+      </header>
+      <div className="flex-1 space-y-2 overflow-y-auto px-3 py-3">
+        {isLoading ? (
+          <p className="text-sm text-muted-foreground">Loading…</p>
+        ) : pins.length === 0 ? (
+          <p className="pt-6 text-center text-sm text-muted-foreground">Nothing pinned yet. Hover a message and hit 📌 to keep it here.</p>
+        ) : (
+          pins.map((m) => (
+            <div key={m.id} className="rounded-md border border-border bg-white px-2 py-1.5">
+              <MessageRow m={{ ...m, pinnedAt: null }} meId={meId} members={members} compact />
+              <div className="mt-1 flex justify-end">
+                <button type="button" onClick={() => onUnpin(m.id)} className="text-[11px] text-slate-400 hover:text-red-600">
+                  Unpin
+                </button>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </aside>
   );
 }

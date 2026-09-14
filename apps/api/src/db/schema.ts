@@ -608,13 +608,41 @@ export const messages = pgTable(
     body: text("body").notNull(),
     /** Threaded replies (optional). */
     parentMessageId: uuid("parent_message_id"),
+    /** Row 46: pinned to the channel header's Pins panel. */
+    pinnedAt: timestamp("pinned_at", { withTimezone: true }),
+    pinnedById: uuid("pinned_by_id").references(() => users.id, { onDelete: "set null" }),
     editedAt: timestamp("edited_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [index("messages_channel_created_idx").on(t.channelId, t.createdAt)],
 );
 
+/** Row 46: links that live in a channel's header — brief, Figma, staging URL. */
+export const channelBookmarks = pgTable(
+  "channel_bookmarks",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    channelId: uuid("channel_id")
+      .notNull()
+      .references(() => channels.id, { onDelete: "cascade" }),
+    label: varchar("label", { length: 120 }).notNull(),
+    url: text("url").notNull(),
+    position: doublePrecision("position").notNull().default(0),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("channel_bookmarks_channel_idx").on(t.channelId)],
+);
+
+export const channelBookmarksRelations = relations(channelBookmarks, ({ one }) => ({
+  channel: one(channels, { fields: [channelBookmarks.channelId], references: [channels.id] }),
+}));
+
 export const channelsRelations = relations(channels, ({ many, one }) => ({
+  bookmarks: many(channelBookmarks),
   organization: one(organizations, {
     fields: [channels.organizationId],
     references: [organizations.id],
