@@ -17,13 +17,17 @@ import { cn } from "../lib/utils.js";
 export function ProjectPage() {
   const { projectId } = useParams({ from: "/projects/$projectId" });
   const qc = useQueryClient();
-  const { role } = useAuth();
-  const canManage = role === "owner" || role === "admin";
+  const { role, user } = useAuth();
+  const isAdmin = role === "owner" || role === "admin";
 
   const { data: project, isError } = useQuery({
     queryKey: ["project", projectId],
     queryFn: () => api.getProject(projectId),
   });
+  // Row 85: the project's lead (or anyone with the lead role on it) manages it like an admin.
+  const { data: team = [] } = useQuery({ queryKey: ["project-members", project?.id ?? ""], queryFn: () => api.getProjectMembers(project!.id), enabled: Boolean(project?.id) });
+  const leadCanManage = Boolean(user && (project?.leadId === user.id || team.some((m) => m.id === user.id && m.role === "lead")));
+  const canManage = isAdmin || leadCanManage;
   const { data: summary } = useQuery({
     queryKey: ["project-time", projectId],
     queryFn: () => api.getProjectTimeSummary(projectId),

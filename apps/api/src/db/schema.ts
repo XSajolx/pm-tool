@@ -1207,6 +1207,8 @@ export const projectMembers = pgTable(
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
+    /** Row 85: lead | contributor | viewer - what this person may do on this project. */
+    role: varchar("role", { length: 16 }).notNull().default("contributor"),
     addedAt: timestamp("added_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [uniqueIndex("project_members_pk").on(t.projectId, t.userId), index("project_members_user_idx").on(t.userId)],

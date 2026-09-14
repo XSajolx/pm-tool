@@ -24,6 +24,8 @@ const projectSchema = z.object({
 });
 
 const updateSchema = projectSchema.partial().omit({ spaceId: true });
+/** Row 85 */
+const memberRoleSchema = z.object({ role: z.enum(["lead", "contributor", "viewer"]) });
 
 @Controller("projects")
 export class ProjectsController {
@@ -54,14 +56,16 @@ export class ProjectsController {
     return this.projects.create(auth.orgId, auth.userId, dto);
   }
 
+  /** Row 85: admins and the project's leads can edit the project. */
   @Patch(":id")
-  @Roles("owner", "admin")
+  @Roles("owner", "admin", "member")
   @UsePipes(new ZodValidationPipe(updateSchema))
-  update(
+  async update(
     @Auth() auth: AuthContext,
     @Param("id") id: string,
     @Body() dto: z.infer<typeof updateSchema>,
   ) {
+    await this.access.assertCanManage(auth.orgId, auth, id);
     return this.projects.update(auth.orgId, auth.userId, id, dto);
   }
 
@@ -80,13 +84,24 @@ export class ProjectsController {
 
   @Post(":id/members")
   @Roles("owner", "admin", "member")
-  addMembers(@Auth() auth: AuthContext, @Param("id") id: string, @Body() body: { userIds: string[] }) {
+  async addMembers(@Auth() auth: AuthContext, @Param("id") id: string, @Body() body: { userIds: string[] }) {
+    await this.access.assertCanManage(auth.orgId, auth, id);
     return this.projects.addMembers(auth.orgId, auth.userId, id, body.userIds ?? []);
   }
 
+  /** Row 85: lead / contributor / viewer on this project. */
+  @Patch(":id/members/:userId/role")
+  @Roles("owner", "admin", "member")
+  @UsePipes(new ZodValidationPipe(memberRoleSchema))
+  async setMemberRole(@Auth() auth: AuthContext, @Param("id") id: string, @Param("userId") userId: string, @Body() dto: z.infer<typeof memberRoleSchema>) {
+    await this.access.assertCanManage(auth.orgId, auth, id);
+    return this.projects.setMemberRole(auth.orgId, auth.userId, id, userId, dto.role);
+  }
+
   @Delete(":id/members/:userId")
-  @Roles("owner", "admin")
-  removeMember(@Auth() auth: AuthContext, @Param("id") id: string, @Param("userId") userId: string) {
+  @Roles("owner", "admin", "member")
+  async removeMember(@Auth() auth: AuthContext, @Param("id") id: string, @Param("userId") userId: string) {
+    await this.access.assertCanManage(auth.orgId, auth, id);
     return this.projects.removeMember(auth.orgId, auth.userId, id, userId);
   }
 }

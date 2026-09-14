@@ -1190,6 +1190,9 @@ export const api = {
   getProjectMembers: (projectId: string) => request<ProjectMember[]>(`/projects/${projectId}/members`),
   addProjectMembers: (projectId: string, userIds: string[]) =>
     request<ProjectMember[]>(`/projects/${projectId}/members`, { method: "POST", body: JSON.stringify({ userIds }) }),
+  /** Row 85 */
+  setProjectMemberRole: (projectId: string, userId: string, role: ProjectRole) =>
+    request<ProjectMember[]>(`/projects/${projectId}/members/${userId}/role`, { method: "PATCH", body: JSON.stringify({ role }) }),
   removeProjectMember: (projectId: string, userId: string) =>
     request<ProjectMember[]>(`/projects/${projectId}/members/${userId}`, { method: "DELETE" }),
 
@@ -1791,6 +1794,7 @@ export interface ChatChannel {
 }
 
 /** Row 39: someone on a project team. */
+export type ProjectRole = "lead" | "contributor" | "viewer";
 export interface ProjectMember {
   id: string;
   name: string;
@@ -1798,6 +1802,8 @@ export interface ProjectMember {
   avatarUrl: string | null;
   isLead: boolean;
   isCreator: boolean;
+  /** Row 85 */
+  role: ProjectRole;
 }
 export interface ChatMessage {
   id: string;

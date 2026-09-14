@@ -330,6 +330,13 @@
       "when": 1789355234155,
       "tag": "0046_invitations",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1789355839091,
+      "tag": "0047_project_member_roles",
+      "breakpoints": true
     }
   ]
 }

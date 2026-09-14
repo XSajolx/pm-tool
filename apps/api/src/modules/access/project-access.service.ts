@@ -1,4 +1,4 @@
-import { Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { and, eq, inArray, isNull, or } from "drizzle-orm";
 import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
@@ -78,6 +78,53 @@ export class ProjectAccessService {
     } catch {
       throw new NotFoundException("Task not found");
     }
+  }
+
+  /* ---------------- Row 85: project roles ---------------- */
+
+  /**
+   * "admin" for owners / project managers, "lead" for the project's lead,
+   * creator or anyone given the lead role, else the member row's role,
+   * else null (not on the project).
+   */
+  async roleInProject(orgId: string, viewer: Viewer, projectId: string): Promise<"admin" | "lead" | "contributor" | "viewer" | null> {
+    if (this.isAdmin(viewer)) return "admin";
+    const project = await this.db.query.projects.findFirst({ where: and(eq(projects.id, projectId), eq(projects.organizationId, orgId)), columns: { leadId: true, createdById: true } });
+    if (!project) return null;
+    if (project.leadId === viewer.userId || project.createdById === viewer.userId) return "lead";
+    const m = await this.db.query.projectMembers.findFirst({ where: and(eq(projectMembers.projectId, projectId), eq(projectMembers.userId, viewer.userId)), columns: { role: true } });
+    if (!m) return null;
+    return m.role === "lead" ? "lead" : m.role === "viewer" ? "viewer" : "contributor";
+  }
+
+  /** Lead-only actions: team, roles, stages, milestones, project details. */
+  async assertCanManage(orgId: string, viewer: Viewer, projectId: string) {
+    const role = await this.roleInProject(orgId, viewer, projectId);
+    if (!role) throw new NotFoundException("Project not found");
+    if (role !== "admin" && role !== "lead") throw new ForbiddenException("Only the project lead can do that");
+  }
+
+  /** Contributor-or-better actions: tasks, comments, time. Viewers are read-only. */
+  async assertCanContribute(orgId: string, viewer: Viewer, projectId: string) {
+    const role = await this.roleInProject(orgId, viewer, projectId);
+    if (!role) throw new NotFoundException("Project not found");
+    if (role === "viewer") throw new ForbiddenException("You're a viewer on this project - read-only");
+  }
+
+  /** Same, starting from a list (lists outside any project fall back to workspace roles). */
+  async assertCanContributeList(orgId: string, viewer: Viewer, listId: string) {
+    if (this.isAdmin(viewer)) return;
+    await this.assertList(orgId, viewer, listId);
+    const l = await this.db.query.lists.findFirst({ where: eq(lists.id, listId), columns: { spaceId: true } });
+    const projectId = l ? await this.projectIdForSpace(orgId, l.spaceId) : null;
+    if (projectId) await this.assertCanContribute(orgId, viewer, projectId);
+  }
+
+  async assertCanContributeTask(orgId: string, viewer: Viewer, taskId: string) {
+    if (this.isAdmin(viewer)) return;
+    const t = await this.db.query.tasks.findFirst({ where: and(eq(tasks.id, taskId), eq(tasks.organizationId, orgId)), columns: { listId: true } });
+    if (!t) throw new NotFoundException("Task not found");
+    await this.assertCanContributeList(orgId, viewer, t.listId);
   }
 
   /** Keep only the spaces the viewer may see (sidebar tree, overview lists). */

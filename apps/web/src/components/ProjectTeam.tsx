@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "../lib/api.js";
+import { api, type ProjectRole } from "../lib/api.js";
 import { Avatar } from "./ui.js";
 
 /**
@@ -23,6 +23,8 @@ export function ProjectTeam({ projectId, canManage }: { projectId: string; canMa
   };
   const add = useMutation({ mutationFn: (userId: string) => api.addProjectMembers(projectId, [userId]), onSuccess: () => { setAdding(""); refresh(); } });
   const remove = useMutation({ mutationFn: (userId: string) => api.removeProjectMember(projectId, userId), onSuccess: refresh });
+  // Row 85: lead / contributor / viewer per person on this project.
+  const setRole = useMutation({ mutationFn: ({ userId, role }: { userId: string; role: ProjectRole }) => api.setProjectMemberRole(projectId, userId, role), onSuccess: refresh });
 
   const inTeam = new Set(team.map((m) => m.id));
   const candidates = all.filter((m) => !inTeam.has(m.id));
@@ -43,7 +45,22 @@ export function ProjectTeam({ projectId, canManage }: { projectId: string; canMa
           <span key={m.id} className="inline-flex items-center gap-1.5 rounded-full border border-border bg-[#fbfbfa] py-0.5 pl-0.5 pr-2 text-xs text-slate-700">
             <Avatar user={{ id: m.id, name: m.name, avatarUrl: m.avatarUrl, email: m.email, role: "member" }} size={18} />
             {m.name}
-            {m.isLead && <span className="rounded bg-indigo-50 px-1 text-[10px] font-medium text-indigo-700">Lead</span>}
+            {m.isLead || m.isCreator || !canManage ? (
+              <span className={`rounded px-1 text-[10px] font-medium ${m.role === "lead" ? "bg-indigo-50 text-indigo-700" : m.role === "viewer" ? "bg-slate-100 text-slate-600" : "bg-emerald-50 text-emerald-700"}`}>
+                {m.role === "lead" ? "Lead" : m.role === "viewer" ? "Viewer" : "Contributor"}
+              </span>
+            ) : (
+              <select
+                value={m.role}
+                onChange={(e) => setRole.mutate({ userId: m.id, role: e.target.value as ProjectRole })}
+                title="Role on this project"
+                className="rounded border border-border bg-white px-1 py-0 text-[10px] text-slate-700"
+              >
+                <option value="lead">Lead</option>
+                <option value="contributor">Contributor</option>
+                <option value="viewer">Viewer</option>
+              </select>
+            )}
             {canManage && !m.isLead && !m.isCreator && (
               <button type="button" onClick={() => remove.mutate(m.id)} title="Remove from team" className="ml-0.5 text-slate-400 hover:text-red-600">
                 ×
@@ -70,7 +87,7 @@ export function ProjectTeam({ projectId, canManage }: { projectId: string; canMa
         )}
       </div>
       <p className="border-t border-border px-4 py-2 text-[11px] text-muted-foreground">
-        Team members are in the project channel automatically. Assigning someone a task in this project adds them to the team.
+        Leads run the project (team, stages, milestones); contributors work on tasks; viewers can only look. Assigning someone a task adds them as a contributor. Everyone on the team is in the project channel.
       </p>
     </section>
   );

@@ -39,7 +39,8 @@ export class MilestonesController {
   @Post("projects/:projectId/milestones")
   @Roles("owner", "admin", "member")
   @UsePipes(new ZodValidationPipe(milestoneSchema))
-  create(@Auth() auth: AuthContext, @Param("projectId") projectId: string, @Body() dto: z.infer<typeof milestoneSchema>) {
+  async create(@Auth() auth: AuthContext, @Param("projectId") projectId: string, @Body() dto: z.infer<typeof milestoneSchema>) {
+    await this.access.assertCanManage(auth.orgId, auth, projectId);
     return this.milestones.create(auth.orgId, auth.userId, projectId, dto);
   }
 

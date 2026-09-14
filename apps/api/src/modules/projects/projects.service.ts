@@ -75,23 +75,46 @@ export class ProjectsService {
       columns: { id: true, name: true, leadId: true, createdById: true },
     });
     if (!project) throw new NotFoundException("Project not found");
-    const rows = await this.db.query.projectMembers.findMany({ where: eq(projectMembers.projectId, projectId), columns: { userId: true } });
+    const rows = await this.db.query.projectMembers.findMany({ where: eq(projectMembers.projectId, projectId), columns: { userId: true, role: true } });
     const ids = new Set(rows.map((r) => r.userId));
     if (project.leadId) ids.add(project.leadId);
     if (project.createdById) ids.add(project.createdById);
-    return { project, ids: [...ids] };
+    const roles = new Map(rows.map((r) => [r.userId, r.role]));
+    return { project, ids: [...ids], roles };
   }
 
   async members(orgId: string, projectId: string) {
-    const { project, ids } = await this.teamIds(orgId, projectId);
+    const { project, ids, roles } = await this.teamIds(orgId, projectId);
     if (!ids.length) return [];
     const rows = await this.db.query.users.findMany({
       where: inArray(users.id, ids),
       columns: { id: true, name: true, email: true, avatarUrl: true },
     });
+    const order = { lead: 0, contributor: 1, viewer: 2 } as const;
     return rows
-      .map((u) => ({ ...u, isLead: u.id === project.leadId, isCreator: u.id === project.createdById }))
-      .sort((a, b) => Number(b.isLead) - Number(a.isLead) || a.name.localeCompare(b.name));
+      .map((u) => {
+        const isLead = u.id === project.leadId;
+        const isCreator = u.id === project.createdById;
+        // Row 85: the lead and creator are always leads; everyone else has the role on their row.
+        const role = (isLead || isCreator ? "lead" : (roles.get(u.id) as "lead" | "contributor" | "viewer" | undefined) ?? "contributor") as "lead" | "contributor" | "viewer";
+        return { ...u, isLead, isCreator, role };
+      })
+      .sort((a, b) => Number(b.isLead) - Number(a.isLead) || order[a.role] - order[b.role] || a.name.localeCompare(b.name));
+  }
+
+  /** Row 85: give someone on the project a role. The lead / creator are fixed as leads. */
+  async setMemberRole(orgId: string, actorId: string, projectId: string, userId: string, role: "lead" | "contributor" | "viewer") {
+    const { project } = await this.teamIds(orgId, projectId);
+    if ((userId === project.leadId || userId === project.createdById) && role !== "lead") throw new BadRequestException("The project lead and creator are always leads - change the project lead first");
+    const [ok] = await this.orgUserIds(orgId, [userId]);
+    if (!ok) throw new NotFoundException("That person isn't in this workspace");
+    await this.db
+      .insert(projectMembers)
+      .values({ projectId, userId, organizationId: orgId, role })
+      .onConflictDoUpdate({ target: [projectMembers.projectId, projectMembers.userId], set: { role } });
+    await this.activity.record({ orgId, actorId, entityType: "list", entityId: projectId, action: "project_updated", changes: [{ field: "memberRole", from: userId, to: role }] });
+    await this.syncChannel(orgId, projectId);
+    return this.members(orgId, projectId);
   }
 
   private async orgUserIds(orgId: string, userIds: string[]) {

@@ -70,13 +70,15 @@ export class TasksController {
 
   @Post(":id/complete")
   @Roles("owner", "admin", "member")
-  complete(@Auth() auth: AuthContext, @Param("id") id: string) {
+  async complete(@Auth() auth: AuthContext, @Param("id") id: string) {
+    await this.access.assertCanContributeTask(auth.orgId, auth, id);
     return this.tasks.complete(auth.orgId, auth.userId, id);
   }
 
   @Post(":id/reopen")
   @Roles("owner", "admin", "member")
-  reopen(@Auth() auth: AuthContext, @Param("id") id: string) {
+  async reopen(@Auth() auth: AuthContext, @Param("id") id: string) {
+    await this.access.assertCanContributeTask(auth.orgId, auth, id);
     return this.tasks.reopen(auth.orgId, auth.userId, id);
   }
 
@@ -90,7 +92,7 @@ export class TasksController {
   @Roles("owner", "admin", "member")
   @UsePipes(new ZodValidationPipe(createTaskSchema))
   async create(@Auth() auth: AuthContext, @Body() dto: CreateTaskDto) {
-    await this.access.assertList(auth.orgId, auth, dto.listId);
+    await this.access.assertCanContributeList(auth.orgId, auth, dto.listId);
     return this.tasks.create(auth.orgId, auth.userId, dto);
   }
 
@@ -105,11 +107,13 @@ export class TasksController {
   @Patch(":id")
   @Roles("owner", "admin", "member")
   @UsePipes(new ZodValidationPipe(updateTaskSchema))
-  update(
+  async update(
     @Auth() auth: AuthContext,
     @Param("id") id: string,
     @Body() dto: UpdateTaskDto,
   ) {
+    // Row 85: viewers on the project can't change tasks.
+    await this.access.assertCanContributeTask(auth.orgId, auth, id);
     return this.tasks.update(auth.orgId, auth.userId, id, dto);
   }
 
@@ -150,11 +154,12 @@ export class TasksController {
   @Post(":id/comments")
   @Roles("owner", "admin", "member")
   @UsePipes(new ZodValidationPipe(commentSchema))
-  comment(
+  async comment(
     @Auth() auth: AuthContext,
     @Param("id") id: string,
     @Body() dto: z.infer<typeof commentSchema>,
   ) {
+    await this.access.assertCanContributeTask(auth.orgId, auth, id);
     return this.comments.create(auth.orgId, auth.userId, id, dto);
   }
 

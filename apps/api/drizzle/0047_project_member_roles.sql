@@ -1,0 +1,1 @@
+ALTER TABLE "project_members" ADD COLUMN "role" varchar(16) DEFAULT 'contributor' NOT NULL;
