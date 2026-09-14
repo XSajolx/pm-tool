@@ -6,6 +6,7 @@ import { DocEditor } from "../components/doc/DocEditor.js";
 import { useAuth } from "../lib/auth.js";
 import { MfaEnroll } from "./MfaPages.js";
 import { ASSIGNABLE_ROLES, PERMISSION_MATRIX, ROLE_DESCRIPTIONS, ROLE_LABELS, type WorkspaceRole } from "../lib/roles.js";
+import type { ReminderSlot } from "../lib/api.js";
 import { supabase } from "../lib/supabase.js";
 import { PRIORITY } from "../components/ui.js";
 import type { Priority } from "../lib/api.js";
@@ -19,7 +20,7 @@ type Section = "people" | "timecodes" | "statuses" | "priorities" | "stages" | "
 const SECTIONS: { id: Section; label: string; hint: string }[] = [
   { id: "people", label: "People & roles", hint: "Who's in the workspace and what each role can do" },
   { id: "statuses", label: "Task statuses", hint: "Per space: names, colours, order, done state" },
-  { id: "timecodes", label: "Time codes", hint: "Internal codes people log time to without a project" },
+  { id: "timecodes", label: "Time codes & reminders", hint: "Internal codes, and when to nudge unfinished timesheets" },
   { id: "priorities", label: "Priorities", hint: "The four priority levels" },
   { id: "stages", label: "Stage templates", hint: "Default stage sequences for new projects" },
   { id: "tags", label: "Tags", hint: "Workspace tags: rename, recolour, merge, retire" },
@@ -1043,6 +1044,97 @@ function TimeCodeSettings({ canEdit }: { canEdit: boolean }) {
         </form>
       )}
       {(create.isError || update.isError) && <p className="mt-2 text-xs text-red-600">{((create.error ?? update.error) as Error).message}</p>}
+      <TimesheetReminderSettings canEdit={canEdit} />
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * Missing-timesheet reminders (row 94): a schedule of nudges that only
+ * reach people whose week is short of hours or not submitted.
+ * ------------------------------------------------------------------ */
+const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+function TimesheetReminderSettings({ canEdit }: { canEdit: boolean }) {
+  const qc = useQueryClient();
+  const { data: slots = [] } = useQuery({ queryKey: ["timesheet-reminders"], queryFn: api.getTimesheetReminders });
+  const { data: members = [] } = useQuery({ queryKey: ["members"], queryFn: api.getMembers });
+  const [previewWeek, setPreviewWeek] = useState<"current" | "previous">("current");
+  const { data: preview } = useQuery({ queryKey: ["timesheet-reminder-preview", previewWeek], queryFn: () => api.previewTimesheetReminder(previewWeek), enabled: canEdit });
+  const save = useMutation({ mutationFn: (next: ReminderSlot[]) => api.setTimesheetReminders(next), onSuccess: (next) => qc.setQueryData(["timesheet-reminders"], next) });
+  const sendNow = useMutation({ mutationFn: (slot: ReminderSlot) => api.sendTimesheetReminderNow(slot), onSuccess: () => qc.invalidateQueries({ queryKey: ["notifications"] }) });
+  const sel = "rounded-md border border-border bg-white px-2 py-1 text-xs text-slate-700 disabled:opacity-60";
+  const update = (i: number, patch: Partial<ReminderSlot>) => save.mutate(slots.map((s, j) => (j === i ? { ...s, ...patch } : s)));
+  const nameOf = (id: string) => members.find((m) => m.id === id)?.name ?? "Someone";
+  return (
+    <div className="mt-8 max-w-xl">
+      <h2 className="text-sm font-semibold text-slate-800">Missing-timesheet reminders</h2>
+      <p className="mt-1 text-xs text-muted-foreground">Sent only to people whose week has fewer hours than their capacity or isn't submitted. Nobody who's done gets nagged.</p>
+      <ul className="mt-3 space-y-2">
+        {slots.map((s, i) => (
+          <li key={i} className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-white px-3 py-2 text-xs text-slate-700">
+            <select value={s.weekday} disabled={!canEdit} onChange={(e) => update(i, { weekday: Number(e.target.value) })} className={sel}>
+              {DAY_NAMES.map((d, di) => (
+                <option key={d} value={di}>
+                  {d}
+                </option>
+              ))}
+            </select>
+            <select value={s.hour} disabled={!canEdit} onChange={(e) => update(i, { hour: Number(e.target.value) })} className={sel}>
+              {Array.from({ length: 24 }, (_, h) => (
+                <option key={h} value={h}>
+                  {h === 0 ? "12am" : h < 12 ? `${h}am` : h === 12 ? "12pm" : `${h - 12}pm`}
+                </option>
+              ))}
+            </select>
+            <span>about</span>
+            <select value={s.week} disabled={!canEdit} onChange={(e) => update(i, { week: e.target.value as ReminderSlot["week"] })} className={sel}>
+              <option value="current">this week</option>
+              <option value="previous">last week</option>
+            </select>
+            {canEdit && (
+              <>
+                <button type="button" onClick={() => sendNow.mutate(s)} disabled={sendNow.isPending} className="ml-auto text-indigo-600 hover:underline disabled:opacity-50" title="Send this reminder now to whoever is behind">
+                  Send now
+                </button>
+                <button type="button" onClick={() => save.mutate(slots.filter((_, j) => j !== i))} className="text-slate-400 hover:text-red-600">
+                  ✕
+                </button>
+              </>
+            )}
+          </li>
+        ))}
+      </ul>
+      {canEdit && (
+        <button type="button" onClick={() => save.mutate([...slots, { weekday: 5, hour: 16, week: "current" }])} className="mt-2 text-xs text-indigo-600 hover:underline">
+          + Add a reminder
+        </button>
+      )}
+      {sendNow.isSuccess && <p className="mt-1 text-xs text-green-700">Sent to {sendNow.data.sent} {sendNow.data.sent === 1 ? "person" : "people"}.</p>}
+      {canEdit && (
+        <div className="mt-4 rounded-md border border-border bg-[#fbfbfa] p-3 text-xs">
+          <div className="flex items-center gap-2">
+            <span className="font-medium text-slate-700">Who's behind right now</span>
+            <select value={previewWeek} onChange={(e) => setPreviewWeek(e.target.value as "current" | "previous")} className={sel}>
+              <option value="current">this week</option>
+              <option value="previous">last week</option>
+            </select>
+          </div>
+          {!preview ? (
+            <p className="mt-1 text-muted-foreground">Checking…</p>
+          ) : preview.people.length === 0 ? (
+            <p className="mt-1 text-green-700">Everyone's week is complete.</p>
+          ) : (
+            <ul className="mt-1 space-y-0.5 text-slate-700">
+              {preview.people.map((p) => (
+                <li key={p.userId}>
+                  {nameOf(p.userId)} · {p.hours}h / {p.expected}h{p.submitted ? "" : " · not submitted"}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
     </div>
   );
 }

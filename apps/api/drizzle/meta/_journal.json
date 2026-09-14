@@ -365,6 +365,13 @@
       "when": 1789357689586,
       "tag": "0051_timesheet_events",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1789357897350,
+      "tag": "0052_timesheet_reminders",
+      "breakpoints": true
     }
   ]
 }

@@ -707,6 +707,13 @@ export interface TimeEntry {
   stage?: { id: string; name: string } | null;
 }
 
+/** Row 94 */
+export interface ReminderSlot {
+  weekday: number;
+  hour: number;
+  week: "current" | "previous";
+}
+
 /** Row 91 */
 export interface TimeCode {
   id: string;
@@ -1513,6 +1520,12 @@ export const api = {
   /** Row 75 */
   submitTimesheet: (week: string, approverId?: string) =>
     request<TimesheetSubmission>(`/time/timesheet/submit`, { method: "POST", body: JSON.stringify({ week, approverId }) }),
+  /** Row 94 */
+  getTimesheetReminders: () => request<ReminderSlot[]>(`/time/timesheet/reminders`),
+  setTimesheetReminders: (slots: ReminderSlot[]) => request<ReminderSlot[]>(`/time/timesheet/reminders`, { method: "PUT", body: JSON.stringify({ slots }) }),
+  previewTimesheetReminder: (week: "current" | "previous") =>
+    request<{ weekStart: string; people: { userId: string; hours: number; expected: number; submitted: boolean }[] }>(`/time/timesheet/reminders/preview?week=${week}`),
+  sendTimesheetReminderNow: (slot: ReminderSlot) => request<{ sent: number }>(`/time/timesheet/reminders/send`, { method: "POST", body: JSON.stringify(slot) }),
   /** Row 93 */
   reopenTimesheet: (id: string, reason: string) =>
     request<TimesheetSubmission>(`/time/timesheet/submissions/${id}/reopen`, { method: "POST", body: JSON.stringify({ reason }) }),

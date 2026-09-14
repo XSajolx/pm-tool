@@ -97,6 +97,7 @@ const TYPE_FOR_VERB: Record<string, NotifType> = {
   due_soon: "reminders",
   overdue: "reminders",
   follow_up: "reminders",
+  timesheet_reminder: "reminders",
   posted: "chat",
   project_activity: "following",
   doc_edited: "following",

@@ -105,6 +105,8 @@ export const organizations = pgTable(
     ssoDomain: varchar("sso_domain", { length: 255 }),
     /** Row 81: roles that must have 2FA enrolled before they can use the workspace. */
     mfaRequiredRoles: jsonb("mfa_required_roles").$type<string[]>().notNull().default([]),
+    /** Row 94: when to nudge people whose week is incomplete. Weekday 0-6 (Sun-Sat), local hour. Null = defaults (Fri 16:00, Mon 09:00). */
+    timesheetReminders: jsonb("timesheet_reminders").$type<{ weekday: number; hour: number; week: "current" | "previous" }[]>(),
     ...timestamps,
   },
   (t) => [uniqueIndex("organizations_slug_uq").on(t.slug)],

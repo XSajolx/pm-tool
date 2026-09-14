@@ -3,6 +3,7 @@ import { z } from "zod";
 import { ZodValidationPipe } from "../../common/zod-validation.pipe.js";
 import { TimeService } from "./time.service.js";
 import { TimeCodesService } from "./time-codes.service.js";
+import { TimesheetRemindersService, type ReminderSlot } from "./timesheet-reminders.service.js";
 import { Auth, Roles } from "../auth/auth.decorators.js";
 import type { AuthContext } from "../auth/auth.types.js";
 
@@ -51,13 +52,45 @@ const submitSchema = z.object({ week: z.string().min(8), approverId: z.string().
 const decisionSchema = z.object({ approve: z.boolean(), note: z.string().max(2000).optional() });
 /** Row 93 */
 const reopenSchema = z.object({ reason: z.string().min(1).max(2000) });
+/** Row 94 */
+const reminderSlotSchema = z.object({ weekday: z.number().int().min(0).max(6), hour: z.number().int().min(0).max(23), week: z.enum(["current", "previous"]) });
+const reminderScheduleSchema = z.object({ slots: z.array(reminderSlotSchema).max(7) });
 
 @Controller("time")
 export class TimeController {
   constructor(
     private readonly time: TimeService,
     private readonly codes: TimeCodesService,
+    private readonly reminders: TimesheetRemindersService,
   ) {}
+
+  /* ---- Row 94: missing-timesheet reminders ---- */
+
+  @Get("timesheet/reminders")
+  reminderSchedule(@Auth() auth: AuthContext) {
+    return this.reminders.schedule(auth.orgId);
+  }
+
+  @Put("timesheet/reminders")
+  @Roles("owner", "admin")
+  @UsePipes(new ZodValidationPipe(reminderScheduleSchema))
+  setReminderSchedule(@Auth() auth: AuthContext, @Body() dto: z.infer<typeof reminderScheduleSchema>) {
+    return this.reminders.setSchedule(auth.orgId, dto.slots as ReminderSlot[]);
+  }
+
+  /** Who would be nudged by a slot right now (admins). */
+  @Get("timesheet/reminders/preview")
+  reminderPreview(@Auth() auth: AuthContext, @Query("week") week?: string) {
+    return this.reminders.incomplete(auth.orgId, { weekday: 0, hour: 0, week: week === "previous" ? "previous" : "current" });
+  }
+
+  /** Send a slot now, ignoring the clock (admins) - for testing the wording. */
+  @Post("timesheet/reminders/send")
+  @Roles("owner", "admin")
+  @UsePipes(new ZodValidationPipe(reminderSlotSchema))
+  sendReminderNow(@Auth() auth: AuthContext, @Body() dto: z.infer<typeof reminderSlotSchema>) {
+    return this.reminders.sweep({ orgId: auth.orgId, slot: dto as ReminderSlot });
+  }
 
   /* ---- Row 91: internal time codes ---- */
 

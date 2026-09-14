@@ -1,0 +1,1 @@
+ALTER TABLE "organizations" ADD COLUMN "timesheet_reminders" jsonb;

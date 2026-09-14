@@ -44,6 +44,7 @@ const VERB_LABEL: Record<string, string> = {
   timesheet_approved: "approved your timesheet",
   timesheet_rejected: "sent back your timesheet",
   timesheet_reopened: "unlocked your timesheet for correction",
+  timesheet_reminder: "— timesheet reminder",
   doc_approved: "approved",
   doc_rejected: "sent back",
   proposal_viewed: "— proposal viewed",
