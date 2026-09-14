@@ -52,7 +52,7 @@ export class ChatService {
       .select({ channelId: messages.channelId, n: count() })
       .from(messages)
       .innerJoin(channelMembers, and(eq(channelMembers.channelId, messages.channelId), eq(channelMembers.userId, userId)))
-      .where(and(inArray(messages.channelId, ids), ne(messages.authorId, userId), or(isNull(channelMembers.lastReadAt), gt(messages.createdAt, channelMembers.lastReadAt))))
+      .where(and(inArray(messages.channelId, ids), ne(messages.authorId, userId), ne(messages.kind, "system"), or(isNull(channelMembers.lastReadAt), gt(messages.createdAt, channelMembers.lastReadAt))))
       .groupBy(messages.channelId);
     const unreadBy = new Map(unread.map((u) => [u.channelId, Number(u.n)]));
     const lastReadBy = new Map(mine.map((m) => [m.channelId, m.lastReadAt]));
@@ -66,6 +66,7 @@ export class ChatService {
       unreadCount: unreadBy.get(c.id) ?? 0,
       lastReadAt: lastReadBy.get(c.id) ?? null,
       notify: notifyBy.get(c.id) ?? "mentions",
+      activityFeed: c.activityFeed,
       bookmarks: c.bookmarks.map((b) => ({ id: b.id, label: b.label, url: b.url })),
       isPrivate: c.isPrivate,
       projectId: c.projectId,
@@ -178,6 +179,32 @@ export class ChatService {
       channel: { id: m.channel.id, name: m.channel.name, type: m.channel.type },
       attachments: files.get(m.id) ?? [],
     }));
+  }
+
+  /* ---------------- Row 50: project activity feed ---------------- */
+
+  /** A compact system line in a channel; the actor is the author so the line can say who did it. */
+  async postSystem(orgId: string, channelId: string, actorId: string, event: { type: string; text: string; link?: string; entityId?: string }) {
+    const [row] = await this.db
+      .insert(messages)
+      .values({ organizationId: orgId, channelId, authorId: actorId, body: event.text, kind: "system", meta: { type: event.type, link: event.link, entityId: event.entityId } })
+      .returning();
+    const withAuthor = await this.db.query.messages.findFirst({ where: eq(messages.id, row!.id), with: { author: true } });
+    return { ...this.shape(withAuthor!), replyCount: 0, lastReplyAt: null, attachments: [], reactions: [], task: null };
+  }
+
+  /** The project channel for a project, if it exists. */
+  async projectChannel(orgId: string, projectId: string) {
+    return this.db.query.channels.findFirst({ where: and(eq(channels.organizationId, orgId), eq(channels.projectId, projectId)) });
+  }
+
+  /** Row 50: switch the activity feed on/off for a project channel (any member). */
+  async setActivityFeed(orgId: string, channelId: string, userId: string, enabled: boolean) {
+    await this.assertMember(channelId, userId);
+    const ch = await this.channel(orgId, channelId);
+    if (!ch.projectId) throw new BadRequestException("Only project channels have an activity feed");
+    await this.db.update(channels).set({ activityFeed: enabled, updatedAt: new Date() }).where(eq(channels.id, channelId));
+    return { channelId, activityFeed: enabled };
   }
 
   /* ---------------- Row 46: pins + bookmarks ---------------- */
@@ -588,6 +615,8 @@ export class ChatService {
     createdAt: Date;
     parentMessageId: string | null;
     pinnedAt?: Date | null;
+    kind?: "user" | "system";
+    meta?: { type: string; link?: string; entityId?: string } | null;
     author: { id: string; name: string; avatarUrl: string | null };
   }) {
     return {
@@ -597,6 +626,8 @@ export class ChatService {
       createdAt: m.createdAt,
       parentMessageId: m.parentMessageId,
       pinnedAt: m.pinnedAt ?? null,
+      kind: m.kind ?? "user",
+      meta: m.meta ?? null,
       author: { id: m.author.id, name: m.author.name, avatarUrl: m.author.avatarUrl },
     };
   }

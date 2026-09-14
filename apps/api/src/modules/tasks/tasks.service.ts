@@ -22,6 +22,7 @@ import type { BulkUpdateDto, CreateTaskDto, UpdateTaskDto } from "./tasks.dto.js
 import { ActivityService, type FieldChange } from "../activity/activity.service.js";
 import { NotificationsService } from "../notifications/notifications.service.js";
 import { ProjectsService } from "../projects/projects.service.js";
+import { ChatEventsService } from "../chat/chat-events.service.js";
 
 /** Fields worth recording a diff for. Anything else changes silently. */
 const TRACKED_FIELDS = [
@@ -64,6 +65,7 @@ export class TasksService {
     private readonly activity: ActivityService,
     private readonly notifications: NotificationsService,
     private readonly projects: ProjectsService,
+    private readonly chatEvents: ChatEventsService,
   ) {}
 
   /**
@@ -428,6 +430,15 @@ export class TasksService {
         body: describeChanges(changes),
         changes,
       });
+      // Row 50: a completed task shows up as a line in the project channel.
+      if (completed && !task!.parentTaskId) {
+        await this.chatEvents.postForList(orgId, task!.listId, userId, {
+          type: "task_completed",
+          text: `completed ${task!.reference ? `${task!.reference} ` : ""}${task!.title}`,
+          link: `/t/${id}`,
+          entityId: id,
+        });
+      }
     }
 
     return task;

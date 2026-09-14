@@ -552,6 +552,8 @@ export type CustomField = typeof customFields.$inferSelect;
 export const channelType = pgEnum("channel_type", ["channel", "dm"]);
 /** Row 45: per-member notification rule for a channel. */
 export const channelNotify = pgEnum("channel_notify", ["all", "mentions", "muted"]);
+/** Row 50: a person wrote it, or the system posted a project event. */
+export const messageKind = pgEnum("message_kind", ["user", "system"]);
 
 export const channels = pgTable(
   "channels",
@@ -567,6 +569,8 @@ export const channels = pgTable(
     isPrivate: boolean("is_private").notNull().default(false),
     /** Row 39: the project this channel belongs to. Membership mirrors the project team. */
     projectId: uuid("project_id").references((): AnyPgColumn => projects.id, { onDelete: "cascade" }),
+    /** Row 50: post project events (task done, stage, milestone, doc) as system messages. */
+    activityFeed: boolean("activity_feed").notNull().default(true),
     createdById: uuid("created_by_id").references(() => users.id),
     ...timestamps,
   },
@@ -610,6 +614,9 @@ export const messages = pgTable(
       .notNull()
       .references(() => users.id),
     body: text("body").notNull(),
+    /** Row 50: system lines carry the actor as author plus event details in `meta`. */
+    kind: messageKind("kind").notNull().default("user"),
+    meta: jsonb("meta").$type<{ type: string; link?: string; entityId?: string }>(),
     /** Threaded replies (optional). */
     parentMessageId: uuid("parent_message_id"),
     /** Row 46: pinned to the channel header's Pins panel. */

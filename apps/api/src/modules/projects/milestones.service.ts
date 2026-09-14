@@ -4,6 +4,7 @@ import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
 import { milestones, projects, statuses, tasks } from "../../db/schema.js";
 import { ActivityService } from "../activity/activity.service.js";
+import { ChatEventsService } from "../chat/chat-events.service.js";
 
 export interface MilestoneWrite {
   name?: string;
@@ -24,6 +25,7 @@ export class MilestonesService {
   constructor(
     @Inject(DRIZZLE) private readonly db: DB,
     private readonly activity: ActivityService,
+    private readonly chatEvents: ChatEventsService,
   ) {}
 
   async listForProject(orgId: string, projectId: string) {
@@ -87,6 +89,15 @@ export class MilestonesService {
         action: dto.reachedAt ? "reached" : "unreached",
         changes: [{ field: "reachedAt", from: before.reachedAt?.toISOString() ?? null, to: dto.reachedAt ?? null }],
       });
+      // Row 50: reaching a milestone is announced in the project channel.
+      if (dto.reachedAt) {
+        await this.chatEvents.postProjectEvent(orgId, before.projectId, userId, {
+          type: "milestone_reached",
+          text: `reached the “${row!.name}” milestone 🎯`,
+          link: `/projects/${before.projectId}`,
+          entityId: id,
+        });
+      }
     }
     const changes = this.activity.diff(
       before as unknown as Record<string, unknown>,

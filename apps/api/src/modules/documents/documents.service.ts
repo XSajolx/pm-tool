@@ -4,6 +4,7 @@ import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
 import { documents, type DocumentSettings } from "../../db/schema.js";
 import type { Role } from "../auth/auth.types.js";
+import { ChatEventsService } from "../chat/chat-events.service.js";
 
 export interface DocumentWrite {
   title?: string;
@@ -19,7 +20,10 @@ export interface DocumentWrite {
 
 @Injectable()
 export class DocumentsService {
-  constructor(@Inject(DRIZZLE) private readonly db: DB) {}
+  constructor(
+    @Inject(DRIZZLE) private readonly db: DB,
+    private readonly chatEvents: ChatEventsService,
+  ) {}
 
   /**
    * Every live doc in the org (the client builds the page tree from `parentId`).
@@ -92,6 +96,15 @@ export class DocumentsService {
         updatedById: userId,
       })
       .returning();
+    // Row 50: a doc filed under a project is shared with its channel.
+    if (row!.projectId) {
+      await this.chatEvents.postProjectEvent(orgId, row!.projectId, userId, {
+        type: "doc_shared",
+        text: `shared the doc “${row!.title || "Untitled"}”`,
+        link: `/docs/${row!.id}`,
+        entityId: row!.id,
+      });
+    }
     return this.get(orgId, row!.id);
   }
 

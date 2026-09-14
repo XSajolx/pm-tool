@@ -4,6 +4,7 @@ import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
 import { projectStages, projects, stageTemplates, statuses, tasks } from "../../db/schema.js";
 import { ActivityService } from "../activity/activity.service.js";
+import { ChatEventsService } from "../chat/chat-events.service.js";
 
 export type StageStatus = "not_started" | "active" | "completed";
 
@@ -15,6 +16,7 @@ export class StagesService {
   constructor(
     @Inject(DRIZZLE) private readonly db: DB,
     private readonly activity: ActivityService,
+    private readonly chatEvents: ChatEventsService,
   ) {}
 
   /* ---------------- stages on a project ---------------- */
@@ -146,6 +148,15 @@ export class StagesService {
         action,
         changes: dto.note?.trim() ? [{ field: "note", from: null, to: dto.note.trim() }] : undefined,
       });
+      // Row 50: stage moves are worth a line in the project channel.
+      if (action !== "reset") {
+        await this.chatEvents.postProjectEvent(orgId, stage.projectId, userId, {
+          type: "stage_changed",
+          text: `${action} the “${row!.name}” stage${dto.note?.trim() ? ` — ${dto.note.trim()}` : ""}`,
+          link: `/projects/${stage.projectId}`,
+          entityId: id,
+        });
+      }
     }
     const progress = await this.progressFor([id]);
     return { ...row!, progress: progress.get(id) ?? { total: 0, done: 0 } };

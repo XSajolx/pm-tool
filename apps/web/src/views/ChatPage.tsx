@@ -207,7 +207,7 @@ function MessagePane({ channelId, channel }: { channelId: string; channel?: Chat
 
   const firstUnreadIdx =
     marker && marker.channelId === channelId
-      ? messages.findIndex((m) => m.author.id !== meId && (!marker.at || new Date(m.createdAt) > new Date(marker.at)))
+      ? messages.findIndex((m) => m.kind !== "system" && m.author.id !== meId && (!marker.at || new Date(m.createdAt) > new Date(marker.at)))
       : -1;
 
   // Join the channel room and listen for live messages. Replies (row 40) go
@@ -299,6 +299,14 @@ function MessagePane({ channelId, channel }: { channelId: string; channel?: Chat
           {messages.map((m, i) => {
             const prev = messages[i - 1];
             const isFirstUnread = i === firstUnreadIdx;
+            if (m.kind === "system") {
+              return (
+                <div key={m.id}>
+                  {isFirstUnread && <div className="mb-3 h-px bg-red-300" />}
+                  <SystemLine m={m} />
+                </div>
+              );
+            }
             return (
               <div key={m.id}>
                 {isFirstUnread && (
@@ -312,7 +320,7 @@ function MessagePane({ channelId, channel }: { channelId: string; channel?: Chat
                   m={m}
                   meId={meId}
                   members={members}
-                  grouped={Boolean(prev && prev.author.id === m.author.id && !prev.replyCount && !isFirstUnread)}
+                  grouped={Boolean(prev && prev.kind !== "system" && prev.author.id === m.author.id && !prev.replyCount && !isFirstUnread)}
                   onReply={() => setThreadId(m.id)}
                   onReact={(emoji) => react.mutate({ messageId: m.id, emoji })}
                   onPin={() => pin.mutate(m.id)}
@@ -1065,6 +1073,7 @@ function ChannelHeader({ channel, title, panel, onTogglePanel }: { channel?: Cha
               Members are managed from the project team — assigning someone a task in this project adds them here automatically.
             </p>
           )}
+          {isProject && <ActivityFeedToggle channel={channel} />}
           {inviting && (
             <div className="mt-2 w-64 rounded-md border border-border bg-white py-1">
               <PeoplePicker selected={people} onChange={setPeople} exclude={channel.members.map((m) => m.id)} />
@@ -1428,5 +1437,57 @@ function Highlight({ text, q }: { text: string; q: string }) {
     <>
       {text.split(re).map((part, i) => (part.toLowerCase() === q.trim().toLowerCase() ? <mark key={i} className="rounded bg-yellow-100 px-0.5">{part}</mark> : <span key={i}>{part}</span>))}
     </>
+  );
+}
+
+/* ---------------- Row 50: project activity lines ---------------- */
+
+const EVENT_ICON: Record<string, string> = {
+  task_completed: "✅",
+  stage_changed: "🚩",
+  milestone_reached: "🎯",
+  doc_shared: "📄",
+};
+
+/** A compact grey line: "✅ Arfin completed PM-12 Fix login · 10:42". Links to the thing. */
+function SystemLine({ m }: { m: ChatMessage }) {
+  const icon = EVENT_ICON[m.meta?.type ?? ""] ?? "⚡";
+  const link = m.meta?.link;
+  const inner = (
+    <>
+      <span className="font-medium text-slate-700">{m.author.name.split(" ")[0]}</span> {m.body}
+    </>
+  );
+  return (
+    <div className="flex items-center gap-2 py-0.5 pl-1 text-xs text-muted-foreground">
+      <span className="w-9 shrink-0 text-center">{icon}</span>
+      <span className="min-w-0 truncate">
+        {link ? (
+          <Link to={link} className="hover:text-indigo-700 hover:underline">
+            {inner}
+          </Link>
+        ) : (
+          inner
+        )}
+      </span>
+      <span className="shrink-0 text-[10px]">{fmtTime(m.createdAt)}</span>
+    </div>
+  );
+}
+
+/** Switch the project's activity feed on or off for everyone in the channel. */
+function ActivityFeedToggle({ channel }: { channel: ChatChannel }) {
+  const qc = useQueryClient();
+  const set = useMutation({
+    mutationFn: (enabled: boolean) => api.setActivityFeed(channel.id, enabled),
+    onSuccess: ({ activityFeed }) => qc.setQueryData<ChatChannel[]>(["channels"], (old = []) => old.map((c) => (c.id === channel.id ? { ...c, activityFeed } : c))),
+  });
+  const on = channel.activityFeed !== false;
+  return (
+    <label className="mt-2 flex w-fit cursor-pointer items-center gap-2 rounded-md border border-border bg-white px-2 py-1 text-[11px] text-slate-700">
+      <input type="checkbox" checked={on} onChange={(e) => set.mutate(e.target.checked)} className="h-3 w-3 accent-indigo-600" />
+      ⚡ Project activity feed {on ? "on" : "off"}
+      <span className="text-muted-foreground">— task done, stage, milestone, doc events</span>
+    </label>
   );
 }

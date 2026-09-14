@@ -86,6 +86,15 @@ export class ChatController {
     return res;
   }
 
+  /** Row 50: project channel activity feed on/off. */
+  @Patch("channels/:id/activity-feed")
+  @Roles("owner", "admin", "member")
+  async activityFeed(@Auth() auth: AuthContext, @Param("id") id: string, @Body() body: { enabled: boolean }) {
+    const res = await this.chat.setActivityFeed(auth.orgId, id, auth.userId, Boolean(body.enabled));
+    this.gateway.emitToChannel(id, "channel:bookmarks", { channelId: id }); // same "refetch channels" hook
+    return res;
+  }
+
   /** Row 45: all messages / mentions only / muted — per person, per channel. */
   @Patch("channels/:id/notify")
   async notify(@Auth() auth: AuthContext, @Param("id") id: string, @Body() body: { notify: "all" | "mentions" | "muted" }) {

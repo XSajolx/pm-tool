@@ -841,6 +841,9 @@ export const api = {
   addChannelMembers: (id: string, userIds: string[]) =>
     request<ChatMember[]>(`/chat/channels/${id}/members`, { method: "POST", body: JSON.stringify({ userIds }) }),
   leaveChannel: (id: string) => request<{ id: string; left: boolean }>(`/chat/channels/${id}/leave`, { method: "POST" }),
+  /** Row 50: project channel activity feed. */
+  setActivityFeed: (channelId: string, enabled: boolean) =>
+    request<{ channelId: string; activityFeed: boolean }>(`/chat/channels/${channelId}/activity-feed`, { method: "PATCH", body: JSON.stringify({ enabled }) }),
   /** Row 49: search across my channels. */
   searchMessages: (f: { q?: string; from?: string; in?: string; hasFile?: boolean; after?: string; before?: string }) => {
     const qs = new URLSearchParams();
@@ -1314,6 +1317,8 @@ export interface ChatChannel {
   notify: ChannelNotify;
   /** Row 46: header links. */
   bookmarks: ChannelBookmark[];
+  /** Row 50: project channels post task/stage/milestone/doc events. */
+  activityFeed: boolean;
   /** Invite-only (row 39). Project channels are always private. */
   isPrivate: boolean;
   projectId: string | null;
@@ -1346,6 +1351,9 @@ export interface ChatMessage {
   reactions?: ReactionGroup[];
   /** Row 46: when it was pinned, or null. */
   pinnedAt?: string | null;
+  /** Row 50: system lines carry the actor as author and an event in meta. */
+  kind?: "user" | "system";
+  meta?: { type: string; link?: string; entityId?: string } | null;
   /** Row 47: the task created from this message. */
   task?: { id: string; title: string; reference: string | null; status: { name: string; color: string; category: string } | null } | null;
 }
