@@ -407,6 +407,13 @@
       "when": 1789361964042,
       "tag": "0057_brand_favicon",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1789362418226,
+      "tag": "0058_work_calendar",
+      "breakpoints": true
     }
   ]
 }

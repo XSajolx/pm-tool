@@ -4,12 +4,13 @@ import { TimeService } from "./time.service.js";
 import { TimeCodesService } from "./time-codes.service.js";
 import { TimesheetRemindersService } from "./timesheet-reminders.service.js";
 import { LeaveService } from "./leave.service.js";
+import { WorkCalendarService } from "./work-calendar.service.js";
 import { NotificationsModule } from "../notifications/notifications.module.js";
 
 @Module({
   imports: [NotificationsModule],
   controllers: [TimeController],
-  providers: [TimeService, TimeCodesService, TimesheetRemindersService, LeaveService],
-  exports: [TimeService, TimeCodesService, TimesheetRemindersService, LeaveService],
+  providers: [TimeService, TimeCodesService, TimesheetRemindersService, LeaveService, WorkCalendarService],
+  exports: [TimeService, TimeCodesService, TimesheetRemindersService, LeaveService, WorkCalendarService],
 })
 export class TimeModule {}

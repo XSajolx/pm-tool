@@ -872,8 +872,19 @@ export interface Timesheet {
   rows: { projectId: string; projectName: string; color: string; internal?: boolean; taskId: string | null; taskTitle: string | null; taskReference: string | null; hours: number[]; total: number }[];
   totals: number[];
   grandTotal: number;
-  /** Row 88: the person's weekly capacity, for "29/40". */
+  /** Row 88: the person's weekly capacity, for "29/40". Row 110: after holidays on their working days. */
   expectedHours: number;
+  holidays?: { date: string; name: string; kind: string }[];
+  workingDays?: number[];
+}
+
+/** Row 110 */
+export type EmploymentType = "full_time" | "part_time" | "contractor";
+export interface WorkCalendar {
+  standardWeeklyHours: number;
+  workingDays: number[];
+  holidays: { id: string; date: string; name: string; kind: "holiday" | "closure" }[];
+  members: { userId: string; name: string; avatarUrl: string | null; role: string; weeklyCapacityHours: number; workingDays: number[] | null; employmentType: EmploymentType }[];
 }
 
 export interface ProjectTimeSummary {
@@ -1688,6 +1699,13 @@ export const api = {
     request<TimesheetSubmission>(`/time/timesheet/submissions/${id}/reopen`, { method: "POST", body: JSON.stringify({ reason }) }),
   getTimesheetEvents: (id: string) =>
     request<{ id: string; kind: string; note: string | null; createdAt: string; actor: { id: string; name: string } | null }[]>(`/time/timesheet/submissions/${id}/events`),
+  /** Row 110 */
+  getWorkCalendar: () => request<WorkCalendar>(`/time/calendar`),
+  updateWorkCalendar: (body: { standardWeeklyHours?: number; workingDays?: number[] }) => request<WorkCalendar>(`/time/calendar`, { method: "PATCH", body: JSON.stringify(body) }),
+  addHoliday: (body: { date: string; name: string; kind?: "holiday" | "closure" }) => request<WorkCalendar>(`/time/calendar/holidays`, { method: "POST", body: JSON.stringify(body) }),
+  removeHoliday: (id: string) => request<WorkCalendar>(`/time/calendar/holidays/${id}`, { method: "DELETE" }),
+  updateMemberCalendar: (userId: string, body: { weeklyCapacityHours?: number; workingDays?: number[] | null; employmentType?: EmploymentType }) =>
+    request<WorkCalendar>(`/time/calendar/members/${userId}`, { method: "PATCH", body: JSON.stringify(body) }),
   /** Row 104 */
   getPendingTimesheets: () => request<PendingTimesheet[]>(`/time/timesheet/pending`),
   decideTimesheet: (id: string, body: { approve: boolean; note?: string }) =>

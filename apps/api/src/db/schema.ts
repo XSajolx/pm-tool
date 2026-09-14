@@ -111,6 +111,9 @@ export const organizations = pgTable(
     timesheetReminders: jsonb("timesheet_reminders").$type<{ weekday: number; hour: number; week: "current" | "previous" }[]>(),
     /** Row 106: a milestone this many days out with open linked tasks is "at risk". */
     milestoneRiskDays: integer("milestone_risk_days").notNull().default(7),
+    /** Row 110: standard week for people without their own numbers. Working days are 0-6 (Sun-Sat). */
+    standardWeeklyHours: integer("standard_weekly_hours").notNull().default(40),
+    workingDays: jsonb("working_days").$type<number[]>().notNull().default([1, 2, 3, 4, 5]),
     /** Row 107: how the four priority levels are named and coloured in this workspace. */
     priorityLabels: jsonb("priority_labels").$type<Partial<Record<"urgent" | "high" | "normal" | "low", { label: string; color: string }>>>(),
     ...timestamps,
@@ -132,6 +135,9 @@ export const memberships = pgTable(
     role: membershipRole("role").notNull().default("member"),
     /** Hours per week this person is available for resourcing. */
     weeklyCapacityHours: integer("weekly_capacity_hours").notNull().default(40),
+    /** Row 110: part-timers and contractors - their own working days (0-6) and employment type. Null = workspace default. */
+    workingDays: jsonb("member_working_days").$type<number[]>(),
+    employmentType: varchar("employment_type", { length: 16 }).notNull().default("full_time"),
     /** Row 86: offboarding. Access ends at `endDate` (or immediately when `deactivatedAt` is set with no end date). */
     endDate: timestamp("end_date", { withTimezone: true }),
     deactivatedAt: timestamp("deactivated_at", { withTimezone: true }),
@@ -1285,6 +1291,24 @@ export const projectStagesRelations = relations(projectStages, ({ one, many }) =
   progressSetBy: one(users, { fields: [projectStages.progressSetById], references: [users.id] }),
   progressEvents: many(stageProgressEvents),
 }));
+
+/** Row 110: company holidays and closures. A day off on a working day lowers everyone's expected hours that week. */
+export const holidays = pgTable(
+  "holidays",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    /** Midnight UTC of the day. */
+    date: timestamp("date", { withTimezone: true }).notNull(),
+    name: varchar("name", { length: 120 }).notNull(),
+    /** "holiday" (public) or "closure" (company decision). */
+    kind: varchar("kind", { length: 16 }).notNull().default("holiday"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex("holidays_org_date_uq").on(t.organizationId, t.date)],
+);
 
 /** Row 105: every hand-set progress change, with who, when and why (a note is required when it goes down). */
 export const stageProgressEvents = pgTable(

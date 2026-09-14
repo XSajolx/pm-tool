@@ -11,6 +11,7 @@ import type { DB } from "../../db/index.js";
 import { lists, memberships, projects, projectStages, tasks, timeEntries, timesheetEvents, timesheetSubmissions, users } from "../../db/schema.js";
 import { NotificationsService, pendingApproval } from "../notifications/notifications.service.js";
 import { accessEnded } from "../auth/auth.service.js";
+import { WorkCalendarService } from "./work-calendar.service.js";
 import type { Role } from "../auth/auth.types.js";
 
 export interface Actor {
@@ -50,6 +51,7 @@ export class TimeService {
   constructor(
     @Inject(DRIZZLE) private readonly db: DB,
     private readonly notifications: NotificationsService,
+    private readonly calendar: WorkCalendarService,
   ) {}
 
   /** Row 75: inbox cards decide timesheet submissions through here. */
@@ -133,13 +135,14 @@ export class TimeService {
       columns: { userId: true, weeklyCapacityHours: true },
     });
     const capBy = new Map(caps.map((c) => [c.userId, c.weeklyCapacityHours]));
-    return subs.map((x) => ({
+    const exps = await Promise.all(subs.map((x) => this.calendar.expectedFor(orgId, x.weekStart, [x.userId])));
+    return subs.map((x, i) => ({
       id: x.id,
       userId: x.userId,
       user: x.user,
       weekStart: x.weekStart.toISOString(),
       totalSeconds: x.totalSeconds,
-      expectedHours: capBy.get(x.userId) ?? 0,
+      expectedHours: exps[i]?.get(x.userId)?.expected ?? capBy.get(x.userId) ?? 0,
       note: x.note,
       submittedAt: x.submittedAt.toISOString(),
       approverId: x.approverId,
@@ -356,6 +359,8 @@ export class TimeService {
     const weekStart = startOfWeek(new Date(weekOf));
     const weekEnd = new Date(weekStart.getTime() + 7 * DAY_MS);
 
+    // Row 110: expected hours after holidays, on the person's working days.
+    const exp = await this.calendar.expectedFor(orgId, weekStart, [userId]);
     const rows = await this.db.query.timeEntries.findMany({
       where: and(
         eq(timeEntries.organizationId, orgId),
@@ -422,7 +427,9 @@ export class TimeService {
       rows: rowsOut,
       totals,
       grandTotal: round2(totals.reduce((a, b) => a + b, 0)),
-      expectedHours: membership?.weeklyCapacityHours ?? 40,
+      expectedHours: exp.get(userId)?.expected ?? membership?.weeklyCapacityHours ?? 40,
+      holidays: exp.get(userId)?.holidays ?? [],
+      workingDays: exp.get(userId)?.workingDays ?? [1, 2, 3, 4, 5],
     };
   }
 
@@ -588,6 +595,7 @@ export class TimeService {
     const active = members.filter((m) => !accessEnded(m) && m.role !== "guest");
     const ids = active.map((m) => m.userId);
     if (!ids.length) return { weekStart: weekStart.toISOString(), people: [] };
+    const exp = await this.calendar.expectedFor(orgId, weekStart, ids);
     const [hoursRows, subs] = await Promise.all([
       this.db
         .select({ userId: timeEntries.userId, seconds: sql<number>`coalesce(sum(${timeEntries.durationSeconds}), 0)::int`, billable: sql<number>`coalesce(sum(case when ${timeEntries.billable} then ${timeEntries.durationSeconds} else 0 end), 0)::int` })
@@ -612,7 +620,7 @@ export class TimeService {
         role: m.role,
         hours,
         billableHours: Math.round(((h?.billable ?? 0) / 3600) * 10) / 10,
-        expected: m.weeklyCapacityHours,
+        expected: exp.get(m.userId)?.expected ?? m.weeklyCapacityHours,
         status,
         submissionId: sub?.id ?? null,
         submittedAt: sub?.submittedAt ?? null,
@@ -635,6 +643,7 @@ export class TimeService {
     const active = members.filter((m) => !accessEnded(m) && m.role !== "guest" && (!onlyUserId || m.userId === onlyUserId));
     const ids = active.map((m) => m.userId);
     if (!ids.length) return { weekStart: weekStart.toISOString(), people: [] };
+    const exp = await this.calendar.expectedFor(orgId, weekStart, ids);
     const rows = await this.db
       .select({
         userId: timeEntries.userId,
@@ -672,7 +681,7 @@ export class TimeService {
         userId: m.userId,
         name: m.user.name,
         avatarUrl: m.user.avatarUrl,
-        expected: m.weeklyCapacityHours,
+        expected: exp.get(m.userId)?.expected ?? m.weeklyCapacityHours,
         projectHours: h(project),
         internalHours: h(internal),
         leaveHours: h(leave),

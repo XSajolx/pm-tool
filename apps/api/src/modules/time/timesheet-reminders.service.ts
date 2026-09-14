@@ -6,6 +6,7 @@ import { memberships, organizations, reminders, timeEntries, timesheetSubmission
 import { NotificationsService } from "../notifications/notifications.service.js";
 import { accessEnded } from "../auth/auth.service.js";
 import { startOfWeek } from "./time.service.js";
+import { WorkCalendarService } from "./work-calendar.service.js";
 
 export interface ReminderSlot {
   weekday: number;
@@ -34,6 +35,7 @@ export class TimesheetRemindersService implements OnModuleInit, OnModuleDestroy 
   constructor(
     @Inject(DRIZZLE) private readonly db: DB,
     private readonly notifications: NotificationsService,
+    private readonly calendar: WorkCalendarService,
   ) {}
 
   onModuleInit() {
@@ -86,6 +88,7 @@ export class TimesheetRemindersService implements OnModuleInit, OnModuleDestroy 
     const active = members.filter((m) => !accessEnded(m) && m.role !== "guest");
     if (!active.length) return { weekStart, people: [] as { userId: string; hours: number; expected: number; submitted: boolean }[] };
     const ids = active.map((m) => m.userId);
+    const exp = await this.calendar.expectedFor(orgId, weekStart, ids);
     const [hoursRows, subs] = await Promise.all([
       this.db
         .select({ userId: timeEntries.userId, seconds: sql<number>`coalesce(sum(${timeEntries.durationSeconds}), 0)::int` })
@@ -97,7 +100,7 @@ export class TimesheetRemindersService implements OnModuleInit, OnModuleDestroy 
     const hoursBy = new Map(hoursRows.map((h) => [h.userId, h.seconds / 3600]));
     const subBy = new Map(subs.map((s) => [s.userId, s.status]));
     const people = active
-      .map((m) => ({ userId: m.userId, hours: Math.round((hoursBy.get(m.userId) ?? 0) * 10) / 10, expected: m.weeklyCapacityHours, submitted: ["submitted", "approved"].includes(subBy.get(m.userId) ?? "") }))
+      .map((m) => ({ userId: m.userId, hours: Math.round((hoursBy.get(m.userId) ?? 0) * 10) / 10, expected: exp.get(m.userId)?.expected ?? m.weeklyCapacityHours, submitted: ["submitted", "approved"].includes(subBy.get(m.userId) ?? "") }))
       .filter((p) => p.hours < p.expected || !p.submitted);
     return { weekStart, people };
   }

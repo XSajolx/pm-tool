@@ -5,6 +5,7 @@ import { TimeService } from "./time.service.js";
 import { TimeCodesService } from "./time-codes.service.js";
 import { TimesheetRemindersService, type ReminderSlot } from "./timesheet-reminders.service.js";
 import { LeaveService, type LeaveKind } from "./leave.service.js";
+import { WorkCalendarService } from "./work-calendar.service.js";
 import { Auth, Roles } from "../auth/auth.decorators.js";
 import type { AuthContext } from "../auth/auth.types.js";
 
@@ -51,6 +52,14 @@ const codePatchSchema = z.object({ name: z.string().min(1).max(64).optional(), c
 /** Row 75 */
 const submitSchema = z.object({ week: z.string().min(8), approverId: z.string().uuid().optional() });
 const decisionSchema = z.object({ approve: z.boolean(), note: z.string().max(2000).optional() });
+/** Row 110 */
+const calendarSchema = z.object({ standardWeeklyHours: z.number().int().min(0).max(168).optional(), workingDays: z.array(z.number().int().min(0).max(6)).optional() });
+const holidaySchema = z.object({ date: z.string().min(8), name: z.string().trim().min(1).max(120), kind: z.enum(["holiday", "closure"]).optional() });
+const memberCalendarSchema = z.object({
+  weeklyCapacityHours: z.number().int().min(0).max(168).optional(),
+  workingDays: z.array(z.number().int().min(0).max(6)).nullable().optional(),
+  employmentType: z.enum(["full_time", "part_time", "contractor"]).optional(),
+});
 /** Row 98 */
 const leaveSchema = z.object({
   kind: z.enum(["vacation", "sick", "personal", "other"]),
@@ -74,6 +83,7 @@ export class TimeController {
     private readonly codes: TimeCodesService,
     private readonly reminders: TimesheetRemindersService,
     private readonly leave: LeaveService,
+    private readonly calendar: WorkCalendarService,
   ) {}
 
   /* ---- Row 98: time off ---- */
@@ -247,6 +257,39 @@ export class TimeController {
   @UsePipes(new ZodValidationPipe(submitSchema))
   submit(@Auth() auth: AuthContext, @Body() dto: z.infer<typeof submitSchema>) {
     return this.time.submitWeek(auth.orgId, this.actor(auth), dto.week, dto.approverId);
+  }
+
+  /* ---------------- Row 110: working hours & holidays ---------------- */
+  @Get("calendar")
+  calendar_(@Auth() auth: AuthContext) {
+    return this.calendar.settings(auth.orgId);
+  }
+
+  @Patch("calendar")
+  @Roles("owner", "admin")
+  @UsePipes(new ZodValidationPipe(calendarSchema))
+  updateCalendar(@Auth() auth: AuthContext, @Body() dto: z.infer<typeof calendarSchema>) {
+    return this.calendar.updateSettings(auth.orgId, dto);
+  }
+
+  @Post("calendar/holidays")
+  @Roles("owner", "admin")
+  @UsePipes(new ZodValidationPipe(holidaySchema))
+  addHoliday(@Auth() auth: AuthContext, @Body() dto: z.infer<typeof holidaySchema>) {
+    return this.calendar.addHoliday(auth.orgId, dto);
+  }
+
+  @Delete("calendar/holidays/:id")
+  @Roles("owner", "admin")
+  removeHoliday(@Auth() auth: AuthContext, @Param("id") id: string) {
+    return this.calendar.removeHoliday(auth.orgId, id);
+  }
+
+  @Patch("calendar/members/:userId")
+  @Roles("owner", "admin")
+  @UsePipes(new ZodValidationPipe(memberCalendarSchema))
+  updateMemberCalendar(@Auth() auth: AuthContext, @Param("userId") userId: string, @Body() dto: z.infer<typeof memberCalendarSchema>) {
+    return this.calendar.updateMember(auth.orgId, userId, dto);
   }
 
   /** Row 104: what's waiting on me. */

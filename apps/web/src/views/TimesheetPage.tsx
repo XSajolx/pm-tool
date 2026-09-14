@@ -130,7 +130,7 @@ export function TimesheetPage() {
           {sheet && (
             <span
               className={cn("ml-3 inline-flex items-center gap-2 rounded-full border px-2.5 py-0.5 text-xs font-medium tabular-nums", sheet.grandTotal >= sheet.expectedHours ? "border-green-200 bg-green-50 text-green-700" : "border-border bg-white text-slate-700")}
-              title="Logged this week vs your expected weekly hours"
+              title={`Logged this week vs your expected hours${sheet.holidays?.length ? ` (after ${sheet.holidays.map((h) => h.name).join(", ")})` : ""}`}
             >
               {fmtHours(sheet.grandTotal)}/{sheet.expectedHours}h
               <span className="h-1.5 w-16 overflow-hidden rounded-full bg-slate-100">
@@ -223,9 +223,13 @@ export function TimesheetPage() {
                   <th className="w-56 border-b border-r border-border px-3 py-2 text-left font-medium">Project</th>
                   {sheet.days.map((d, i) => {
                     const isToday = isoDay(new Date(d)) === isoDay(new Date());
+                    // Row 110: holidays and non-working days are shaded so a short week reads as intended.
+                    const holiday = sheet.holidays?.find((h) => h.date.slice(0, 10) === d.slice(0, 10));
+                    const offDay = sheet.workingDays ? !sheet.workingDays.includes(new Date(d).getUTCDay()) : i >= 5;
                     return (
-                      <th key={d} className={cn("w-20 border-b border-border px-2 py-2 text-center font-medium", isToday && "text-indigo-700", i >= 5 && "bg-slate-50/60")}>
+                      <th key={d} className={cn("w-20 border-b border-border px-2 py-2 text-center font-medium", isToday && "text-indigo-700", (offDay || holiday) && "bg-slate-50/60")} title={holiday ? `${holiday.name} (${holiday.kind})` : offDay ? "Not a working day" : undefined}>
                         {fmtDayLabel(d)}
+                        {holiday && <span className="block truncate text-[10px] font-normal text-emerald-700">🎌 {holiday.name}</span>}
                       </th>
                     );
                   })}
