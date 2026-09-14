@@ -4,6 +4,7 @@ import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
 import { channels, channelMembers, memberships, messages, notificationPreferences, notifications } from "../../db/schema.js";
 import { FilesService } from "../files/files.service.js";
+import { ReactionsService } from "../reactions/reactions.service.js";
 
 /** "Website Redesign" → "website-redesign" (channel names are slugs). */
 function slug(name: string) {
@@ -22,6 +23,7 @@ export class ChatService {
   constructor(
     @Inject(DRIZZLE) private readonly db: DB,
     private readonly files: FilesService,
+    private readonly reactions: ReactionsService,
   ) {}
 
   /**
@@ -152,10 +154,10 @@ export class ChatService {
           .groupBy(messages.parentMessageId)
       : [];
     const byParent = new Map(counts.map((c) => [c.parentMessageId!, c]));
-    const files = await this.files.forMessages(ids);
+    const [files, reacts] = await Promise.all([this.files.forMessages(ids), this.reactions.forEntities(orgId, userId, "message", ids)]);
     return rows.map((m) => {
       const c = byParent.get(m.id);
-      return { ...this.shape(m), replyCount: Number(c?.n ?? 0), lastReplyAt: c?.last ?? null, attachments: files.get(m.id) ?? [] };
+      return { ...this.shape(m), replyCount: Number(c?.n ?? 0), lastReplyAt: c?.last ?? null, attachments: files.get(m.id) ?? [], reactions: reacts[m.id] ?? [] };
     });
   }
 
@@ -172,11 +174,27 @@ export class ChatService {
       with: { author: true },
       orderBy: (m) => [asc(m.createdAt)],
     });
-    const files = await this.files.forMessages([root.id, ...replies.map((r) => r.id)]);
+    const allIds = [root.id, ...replies.map((r) => r.id)];
+    const [files, reacts] = await Promise.all([this.files.forMessages(allIds), this.reactions.forEntities(orgId, userId, "message", allIds)]);
     return {
-      root: { ...this.shape(root), replyCount: replies.length, lastReplyAt: replies.at(-1)?.createdAt ?? null, attachments: files.get(root.id) ?? [] },
-      replies: replies.map((r) => ({ ...this.shape(r), attachments: files.get(r.id) ?? [] })),
+      root: { ...this.shape(root), replyCount: replies.length, lastReplyAt: replies.at(-1)?.createdAt ?? null, attachments: files.get(root.id) ?? [], reactions: reacts[root.id] ?? [] },
+      replies: replies.map((r) => ({ ...this.shape(r), attachments: files.get(r.id) ?? [], reactions: reacts[r.id] ?? [] })),
     };
+  }
+
+  /**
+   * Row 44: toggle an emoji on a message. Returns the grouped reactions with
+   * `reacted` relative to the toggler; the broadcast lets each viewer work out
+   * their own flag from the user list.
+   */
+  async react(orgId: string, channelId: string, messageId: string, userId: string, emoji: string) {
+    await this.assertMember(channelId, userId);
+    const msg = await this.db.query.messages.findFirst({ where: and(eq(messages.id, messageId), eq(messages.channelId, channelId)), columns: { id: true, parentMessageId: true } });
+    if (!msg) throw new NotFoundException("Message not found");
+    const clean = (emoji ?? "").trim().slice(0, 16);
+    if (!clean) throw new BadRequestException("Pick an emoji");
+    const reactions = await this.reactions.toggle(orgId, userId, "message", messageId, clean);
+    return { messageId, parentMessageId: msg.parentMessageId, reactions };
   }
 
   /** A channel message, or — with `parentMessageId` — a reply in that message's thread (one level deep). */
@@ -202,7 +220,7 @@ export class ChatService {
       with: { author: true },
     });
     const files = await this.files.forMessages([row!.id]);
-    return { ...this.shape(withAuthor!), replyCount: 0, lastReplyAt: null, attachments: files.get(row!.id) ?? [] };
+    return { ...this.shape(withAuthor!), replyCount: 0, lastReplyAt: null, attachments: files.get(row!.id) ?? [], reactions: [] };
   }
 
   /**

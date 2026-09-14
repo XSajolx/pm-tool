@@ -47,6 +47,15 @@ export class ChatController {
     return msg;
   }
 
+  /** Row 44: toggle an emoji reaction on a message; everyone in the channel sees it move. */
+  @Post("channels/:id/messages/:messageId/reactions")
+  @Roles("owner", "admin", "member")
+  async react(@Auth() auth: AuthContext, @Param("id") id: string, @Param("messageId") messageId: string, @Body() body: { emoji: string }) {
+    const res = await this.chat.react(auth.orgId, id, messageId, auth.userId, body.emoji);
+    this.gateway.emitToChannel(id, "message:reaction", res);
+    return res;
+  }
+
   /** Row 42: mark the channel read up to now; other open tabs/devices are told. */
   @Post("channels/:id/read")
   async read(@Auth() auth: AuthContext, @Param("id") id: string) {

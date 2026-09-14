@@ -838,6 +838,12 @@ export const api = {
   addChannelMembers: (id: string, userIds: string[]) =>
     request<ChatMember[]>(`/chat/channels/${id}/members`, { method: "POST", body: JSON.stringify({ userIds }) }),
   leaveChannel: (id: string) => request<{ id: string; left: boolean }>(`/chat/channels/${id}/leave`, { method: "POST" }),
+  /** Row 44: toggle an emoji on a message. */
+  reactToMessage: (channelId: string, messageId: string, emoji: string) =>
+    request<{ messageId: string; parentMessageId: string | null; reactions: ReactionGroup[] }>(`/chat/channels/${channelId}/messages/${messageId}/reactions`, {
+      method: "POST",
+      body: JSON.stringify({ emoji }),
+    }),
   /** Row 42: I've read this channel up to now (synced to my other devices). */
   markChannelRead: (id: string) => request<{ channelId: string; lastReadAt: string }>(`/chat/channels/${id}/read`, { method: "POST" }),
   // ---- Projects: team (row 39) ----
@@ -1300,4 +1306,6 @@ export interface ChatMessage {
   lastReplyAt?: string | null;
   /** Row 43: files sent with the message. */
   attachments?: Attachment[];
+  /** Row 44: grouped emoji reactions. */
+  reactions?: ReactionGroup[];
 }

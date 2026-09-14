@@ -91,6 +91,11 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.server.to(channelId).emit("message:new", message);
   }
 
+  /** Any other channel-scoped event (reactions, edits…) to everyone viewing it. */
+  emitToChannel(channelId: string, event: string, payload: unknown) {
+    this.server.to(channelId).emit(event, payload);
+  }
+
   /**
    * Push to one person across all their open tabs. Used by NotificationsService;
    * a no-op if they have nothing open, since the row is already in the DB and

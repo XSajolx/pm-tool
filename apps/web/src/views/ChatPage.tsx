@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, type Attachment, type ChatChannel, type ChatMember, type ChatMessage } from "../lib/api.js";
+import { api, type Attachment, type ChatChannel, type ChatMember, type ChatMessage, type ReactionGroup } from "../lib/api.js";
 import { useAuth } from "../lib/auth.js";
 import { getSocket } from "../lib/socket.js";
 import { ChatActions, PeoplePicker } from "../components/ChatActions.js";
@@ -204,6 +204,11 @@ function MessagePane({ channelId, channel }: { channelId: string; channel?: Chat
       );
     };
     socket.on("message:new", onNew);
+    // Row 44: a reaction toggled by anyone in the channel. `reacted` is
+    // recomputed for *this* viewer from the user list.
+    const onReaction = (p: { messageId: string; parentMessageId: string | null; reactions: ReactionGroup[] }) =>
+      applyReactions(qc, channelId, meId, p);
+    socket.on("message:reaction", onReaction);
     // After a reconnect (API restart, flaky network) the server has forgotten
     // our room, so join again or live messages silently stop.
     const rejoin = () => socket.emit("join", channelId);
@@ -211,9 +216,15 @@ function MessagePane({ channelId, channel }: { channelId: string; channel?: Chat
     return () => {
       socket.emit("leave", channelId);
       socket.off("message:new", onNew);
+      socket.off("message:reaction", onReaction);
       socket.off("connect", rejoin);
     };
-  }, [channelId, qc]);
+  }, [channelId, qc, meId]);
+
+  const react = useMutation({
+    mutationFn: ({ messageId, emoji }: { messageId: string; emoji: string }) => api.reactToMessage(channelId, messageId, emoji),
+    onSuccess: (p) => applyReactions(qc, channelId, meId, p),
+  });
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -263,6 +274,7 @@ function MessagePane({ channelId, channel }: { channelId: string; channel?: Chat
                   members={members}
                   grouped={Boolean(prev && prev.author.id === m.author.id && !prev.replyCount && !isFirstUnread)}
                   onReply={() => setThreadId(m.id)}
+                  onReact={(emoji) => react.mutate({ messageId: m.id, emoji })}
                   threadOpen={threadId === m.id}
                 />
               </div>
@@ -301,6 +313,7 @@ function MessageRow({
   members,
   grouped,
   onReply,
+  onReact,
   threadOpen,
   compact,
 }: {
@@ -309,10 +322,12 @@ function MessageRow({
   members: ChatMember[];
   grouped?: boolean;
   onReply?: () => void;
+  onReact?: (emoji: string) => void;
   threadOpen?: boolean;
   compact?: boolean;
 }) {
   const mine = m.author.id === meId;
+  const [picker, setPicker] = useState(false);
   const initials = m.author.name
     .split(" ")
     .map((p) => p[0])
@@ -342,6 +357,47 @@ function MessageRow({
         )}
         {m.body && <MessageBody body={m.body} members={members} meId={meId} />}
         {m.attachments && m.attachments.length > 0 && <AttachmentList files={m.attachments} compact={compact} />}
+        {m.reactions && m.reactions.length > 0 && (
+          <div className="mt-1 flex flex-wrap items-center gap-1">
+            {m.reactions.map((g) => (
+              <button
+                key={g.emoji}
+                type="button"
+                onClick={() => onReact?.(g.emoji)}
+                title={g.users.map((u) => u.name).join(", ")}
+                className={cn(
+                  "flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-xs transition",
+                  g.reacted ? "border-indigo-300 bg-indigo-50 text-indigo-700" : "border-border bg-white text-slate-600 hover:border-slate-300",
+                )}
+              >
+                <span>{g.emoji}</span>
+                <span className="tabular-nums">{g.count}</span>
+              </button>
+            ))}
+            {onReact && (
+              <button type="button" onClick={() => setPicker((v) => !v)} className="rounded-full border border-dashed border-border px-1.5 py-0.5 text-[11px] text-slate-400 hover:bg-muted" title="Add reaction">
+                ☺+
+              </button>
+            )}
+          </div>
+        )}
+        {picker && onReact && (
+          <div className="mt-1 flex w-fit gap-0.5 rounded-md border border-border bg-white p-1 shadow-lg">
+            {QUICK_EMOJI.map((e) => (
+              <button
+                key={e}
+                type="button"
+                onClick={() => {
+                  onReact(e);
+                  setPicker(false);
+                }}
+                className="rounded px-1.5 py-0.5 text-base hover:bg-muted"
+              >
+                {e}
+              </button>
+            ))}
+          </div>
+        )}
         {onReply && (m.replyCount ?? 0) > 0 && (
           <button type="button" onClick={onReply} className="mt-1 flex items-center gap-1.5 text-xs font-medium text-indigo-600 hover:underline">
             💬 {m.replyCount} {m.replyCount === 1 ? "reply" : "replies"}
@@ -349,15 +405,25 @@ function MessageRow({
           </button>
         )}
       </div>
-      {onReply && (
-        <button
-          type="button"
-          onClick={onReply}
-          title="Reply in thread"
-          className="absolute right-2 top-0 hidden rounded-md border border-border bg-white px-1.5 py-0.5 text-[11px] text-slate-600 shadow-sm hover:text-indigo-700 group-hover:block"
-        >
-          💬 Reply
-        </button>
+      {(onReply || onReact) && (
+        <div className="absolute right-2 top-0 hidden items-center gap-0.5 rounded-md border border-border bg-white p-0.5 text-[11px] text-slate-600 shadow-sm group-hover:flex">
+          {onReact &&
+            QUICK_EMOJI.slice(0, 3).map((e) => (
+              <button key={e} type="button" onClick={() => onReact(e)} className="rounded px-1 text-sm hover:bg-muted" title={`React ${e}`}>
+                {e}
+              </button>
+            ))}
+          {onReact && (
+            <button type="button" onClick={() => setPicker((v) => !v)} className="rounded px-1 hover:bg-muted" title="More reactions">
+              ☺+
+            </button>
+          )}
+          {onReply && (
+            <button type="button" onClick={onReply} className="rounded px-1.5 hover:bg-muted hover:text-indigo-700" title="Reply in thread">
+              💬 Reply
+            </button>
+          )}
+        </div>
       )}
     </div>
   );
@@ -375,6 +441,10 @@ function ThreadPane({ channelId, messageId, meId, members, onClose }: { channelI
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [data?.replies.length]);
 
+  const react = useMutation({
+    mutationFn: ({ id, emoji }: { id: string; emoji: string }) => api.reactToMessage(channelId, id, emoji),
+    onSuccess: (p) => applyReactions(qc, channelId, meId, p),
+  });
   const reply = useMutation({
     mutationFn: ({ body, ids, files }: { body: string; ids: string[]; files: string[] }) => api.sendMessage(channelId, body, messageId, ids, files),
     onSuccess: () => {
@@ -394,7 +464,7 @@ function ThreadPane({ channelId, messageId, meId, members, onClose }: { channelI
       <div className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
         {data ? (
           <>
-            <MessageRow m={data.root} meId={meId} members={members} compact />
+            <MessageRow m={data.root} meId={meId} members={members} compact onReact={(emoji) => react.mutate({ id: data.root.id, emoji })} />
             <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
               <span className="h-px flex-1 bg-border" />
               {data.replies.length} {data.replies.length === 1 ? "reply" : "replies"}
@@ -402,7 +472,7 @@ function ThreadPane({ channelId, messageId, meId, members, onClose }: { channelI
             </div>
             {data.replies.map((r, i) => {
               const prev = data.replies[i - 1];
-              return <MessageRow key={r.id} m={r} meId={meId} members={members} compact grouped={Boolean(prev && prev.author.id === r.author.id)} />;
+              return <MessageRow key={r.id} m={r} meId={meId} members={members} compact grouped={Boolean(prev && prev.author.id === r.author.id)} onReact={(emoji) => react.mutate({ id: r.id, emoji })} />;
             })}
           </>
         ) : (
@@ -891,4 +961,14 @@ function ChannelHeader({ channel, title, filesOpen, onToggleFiles }: { channel?:
       )}
     </div>
   );
+}
+
+const QUICK_EMOJI = ["👍", "✅", "🎉", "❤️", "😂", "👀", "🔥", "🙏"];
+
+/** Row 44: write a message's reactions into the channel and thread caches, with `reacted` for this viewer. */
+function applyReactions(qc: ReturnType<typeof useQueryClient>, channelId: string, meId: string, p: { messageId: string; reactions: ReactionGroup[] }) {
+  const reactions = p.reactions.map((g) => ({ ...g, reacted: g.users.some((u) => u.id === meId) }));
+  const patch = (m: ChatMessage) => (m.id === p.messageId ? { ...m, reactions } : m);
+  qc.setQueryData<ChatMessage[]>(["messages", channelId], (old = []) => old.map(patch));
+  qc.setQueriesData<ThreadData>({ queryKey: ["thread", channelId] }, (old) => (old ? { root: patch(old.root), replies: old.replies.map(patch) } : old));
 }
