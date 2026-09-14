@@ -1,10 +1,14 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { BadRequestException, Inject, Injectable, Logger, NotFoundException, type OnModuleDestroy, type OnModuleInit } from "@nestjs/common";
+import { and, asc, eq, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
 import { companies, contacts, dealStages, deals } from "../../db/schema.js";
 import { ActivityService } from "../activity/activity.service.js";
 import { ProjectsService } from "../projects/projects.service.js";
+import { NotificationsService } from "../notifications/notifications.service.js";
+
+/** Row 55: an open deal nobody has touched for this long is flagged stale. */
+export const DEFAULT_STALE_DAYS = 14;
 
 export type DealStageKind = "open" | "won" | "lost";
 
@@ -29,6 +33,9 @@ export interface DealDto {
   expectedCloseDate?: string | null;
   lostReason?: string | null;
   ownerId?: string | null;
+  /** Row 55 */
+  nextActionAt?: string | null;
+  nextActionNote?: string | null;
 }
 
 export interface StageDto {
@@ -41,12 +48,68 @@ export interface StageDto {
 type StageRow = typeof dealStages.$inferSelect;
 
 @Injectable()
-export class DealsService {
+export class DealsService implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(DealsService.name);
+  private sweepTimer: NodeJS.Timeout | null = null;
+
   constructor(
     @Inject(DRIZZLE) private readonly db: DB,
     private readonly activity: ActivityService,
     private readonly projects: ProjectsService,
+    private readonly notifications: NotificationsService,
   ) {}
+
+  /* ---------------- Row 55: follow-up reminders ---------------- */
+
+  onModuleInit() {
+    // Cheap enough to run often; the query only touches deals whose date has passed.
+    this.sweepTimer = setInterval(() => void this.sweepFollowUps(), 5 * 60 * 1000);
+    setTimeout(() => void this.sweepFollowUps(), 5000);
+  }
+
+  onModuleDestroy() {
+    if (this.sweepTimer) clearInterval(this.sweepTimer);
+  }
+
+  /** Every open deal whose next-action date has arrived and hasn't been reminded yet → inbox item for its owner. */
+  async sweepFollowUps() {
+    try {
+      const now = new Date();
+      const due = await this.db.query.deals.findMany({
+        where: and(
+          isNull(deals.archivedAt),
+          isNull(deals.closedAt),
+          lte(deals.nextActionAt, now),
+          or(isNull(deals.nextActionRemindedAt), sql`${deals.nextActionRemindedAt} < ${deals.nextActionAt}`),
+        ),
+        with: { company: { columns: { name: true } } },
+        limit: 200,
+      });
+      for (const d of due) {
+        if (d.ownerId) {
+          await this.notifications.notifyDirect({
+            orgId: d.organizationId,
+            receiverId: d.ownerId,
+            entityType: "deal",
+            entityId: d.id,
+            verb: "follow_up",
+            title: `Follow up: ${d.title}`,
+            body: [d.nextActionNote, d.company?.name].filter(Boolean).join(" · ") || "Next action is due",
+            data: { dealId: d.id },
+          });
+        }
+        await this.db.update(deals).set({ nextActionRemindedAt: now }).where(eq(deals.id, d.id));
+      }
+      if (due.length) this.logger.log(`sent ${due.length} deal follow-up reminder(s)`);
+    } catch (err) {
+      this.logger.warn(`follow-up sweep failed: ${(err as Error).message}`);
+    }
+  }
+
+  /** Something happened on the deal — it isn't stale any more. */
+  async touch(orgId: string, id: string) {
+    await this.db.update(deals).set({ lastActivityAt: new Date() }).where(and(eq(deals.id, id), eq(deals.organizationId, orgId)));
+  }
 
   /* ---------------- stages (row 53) ---------------- */
 
@@ -142,9 +205,21 @@ export class DealsService {
     return rows.map(shape);
   }
 
-  /** The pipeline: one column per stage with count, value and weighted value. */
-  async board(orgId: string) {
-    const [stages, all] = await Promise.all([this.stages(orgId), this.list(orgId)]);
+  /** The pipeline: one column per stage with count, value and weighted value. Row 55: open deals get stale/follow-up flags. */
+  async board(orgId: string, staleDays = DEFAULT_STALE_DAYS) {
+    const [stages, list] = await Promise.all([this.stages(orgId), this.list(orgId)]);
+    const now = Date.now();
+    const cutoff = now - Math.max(1, staleDays) * 86_400_000;
+    const all = list.map((d) => {
+      const open = d.stage?.kind === "open" || !d.stage;
+      const idleDays = Math.floor((now - new Date(d.lastActivityAt).getTime()) / 86_400_000);
+      return {
+        ...d,
+        idleDays,
+        stale: open && new Date(d.lastActivityAt).getTime() < cutoff,
+        followUpDue: open && Boolean(d.nextActionAt) && new Date(d.nextActionAt!).getTime() <= now,
+      };
+    });
     const firstOpen = stages.find((s) => s.kind === "open") ?? stages[0]!;
     return stages.map((st) => {
       const items = all.filter((d) => (d.stageId ?? firstOpen.id) === st.id);
@@ -199,12 +274,17 @@ export class DealsService {
     await this.assertLinks(orgId, dto);
 
     const patch: Record<string, unknown> = { updatedAt: new Date() };
-    for (const k of ["title", "companyId", "contactId", "value", "currency", "probability", "lostReason", "ownerId"] as const) {
+    for (const k of ["title", "companyId", "contactId", "value", "currency", "probability", "lostReason", "ownerId", "nextActionNote"] as const) {
       if (dto[k] !== undefined) patch[k] = dto[k];
     }
     if (dto.expectedCloseDate !== undefined) {
       patch.expectedCloseDate = dto.expectedCloseDate ? new Date(dto.expectedCloseDate) : null;
     }
+    if (dto.nextActionAt !== undefined) {
+      patch.nextActionAt = dto.nextActionAt ? new Date(dto.nextActionAt) : null;
+      patch.nextActionRemindedAt = null; // a new date means a new reminder
+    }
+    patch.lastActivityAt = new Date();
     let moved: StageRow | null = null;
     if (dto.stageId && dto.stageId !== before.stageId) {
       moved = await this.stage(orgId, dto.stageId);
@@ -228,7 +308,7 @@ export class DealsService {
   /** Kanban drop: new stage and position in one call. */
   async move(orgId: string, userId: string, id: string, stageId: string, position: number) {
     const before = await this.get(orgId, id);
-    const patch: Record<string, unknown> = { position, updatedAt: new Date() };
+    const patch: Record<string, unknown> = { position, updatedAt: new Date(), lastActivityAt: new Date() };
     const stage = await this.stage(orgId, stageId);
     const changed = stageId !== before.stageId;
     if (changed) this.applyStage(patch, stage);

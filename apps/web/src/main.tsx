@@ -166,7 +166,13 @@ const resourcingRoute = createRoute({
 const companiesRoute = createRoute({ getParentRoute: () => rootRoute, path: "/crm/companies", component: CompaniesPage });
 const companyRoute = createRoute({ getParentRoute: () => rootRoute, path: "/crm/companies/$companyId", component: CompanyPage });
 const contactsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/crm/contacts", component: ContactsPage });
-const dealsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/crm/deals", component: DealsPage });
+const dealsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/crm/deals",
+  component: DealsPage,
+  // ?deal=<id> opens that deal's drawer (inbox follow-up reminders link here).
+  validateSearch: (s: Record<string, unknown>): { deal?: string } => (typeof s.deal === "string" ? { deal: s.deal } : {}),
+});
 const estimatesRoute = createRoute({ getParentRoute: () => rootRoute, path: "/crm/estimates", component: EstimatesPage });
 const estimateRoute = createRoute({ getParentRoute: () => rootRoute, path: "/crm/estimates/$estimateId", component: EstimatePage });
 const meetingsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/crm/meetings", component: MeetingsPage });

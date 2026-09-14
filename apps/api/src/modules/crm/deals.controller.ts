@@ -16,6 +16,8 @@ const schema = z.object({
   expectedCloseDate: z.string().datetime().nullable().optional(),
   lostReason: z.string().max(2000).nullable().optional(),
   ownerId: z.string().uuid().nullable().optional(),
+  nextActionAt: z.string().datetime().nullable().optional(),
+  nextActionNote: z.string().max(255).nullable().optional(),
 });
 
 const moveSchema = z.object({ stageId: z.string().uuid(), position: z.number() });
@@ -38,8 +40,9 @@ export class DealsController {
 
   /** Grouped by stage with totals — what the pipeline view renders. */
   @Get("board")
-  board(@Auth() auth: AuthContext) {
-    return this.deals.board(auth.orgId);
+  board(@Auth() auth: AuthContext, @Query("staleDays") staleDays?: string) {
+    const n = Number(staleDays);
+    return this.deals.board(auth.orgId, Number.isFinite(n) && n > 0 ? n : undefined);
   }
 
   /* Row 53: pipeline stages — renamable, reorderable, with won/lost marked. Declared before ":id". */
@@ -72,6 +75,14 @@ export class DealsController {
   @Roles("owner", "admin")
   deleteStage(@Auth() auth: AuthContext, @Param("id") id: string, @Query("moveTo") moveTo?: string) {
     return this.deals.deleteStage(auth.orgId, id, moveTo || undefined);
+  }
+
+  /** Row 55: run the follow-up reminder sweep now (it also runs every 5 minutes). */
+  @Post("sweep")
+  @Roles("owner", "admin")
+  async sweep() {
+    await this.deals.sweepFollowUps();
+    return { ok: true };
   }
 
   @Get(":id")

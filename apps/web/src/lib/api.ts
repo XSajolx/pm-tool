@@ -665,6 +665,13 @@ export interface Deal {
   expectedCloseDate: string | null;
   closedAt: string | null;
   lostReason: string | null;
+  /** Row 55 */
+  nextActionAt: string | null;
+  nextActionNote: string | null;
+  lastActivityAt: string;
+  idleDays?: number;
+  stale?: boolean;
+  followUpDue?: boolean;
   position: number;
   company: { id: string; name: string } | null;
   contact: { id: string; name: string } | null;
@@ -684,6 +691,8 @@ export interface DealInput {
   expectedCloseDate?: string | null;
   lostReason?: string | null;
   ownerId?: string | null;
+  nextActionAt?: string | null;
+  nextActionNote?: string | null;
 }
 
 export interface DealColumn {
@@ -741,14 +750,21 @@ export interface EstimateInput {
 
 export type NoteEntity = "company" | "contact" | "deal";
 
+export type NoteKind = "note" | "call" | "meeting" | "email";
+
 export interface CrmNote {
   id: string;
   entityType: NoteEntity;
   entityId: string;
   body: string;
+  /** Row 54: what kind of interaction, and when it happened. */
+  kind: NoteKind;
+  occurredAt: string;
   pinned: boolean;
   createdAt: string;
   author: { id: string; name: string; avatarUrl: string | null };
+  /** Set on a company's log for entries that belong to one of its contacts or deals. */
+  about?: { type: NoteEntity; id: string; name: string } | null;
 }
 
 export interface Meeting {
@@ -1192,7 +1208,7 @@ export const api = {
 
   // ---- CRM: deals ----
   getDeals: () => request<Deal[]>(`/crm/deals`),
-  getDealBoard: () => request<DealColumn[]>(`/crm/deals/board`),
+  getDealBoard: (staleDays?: number) => request<DealColumn[]>(`/crm/deals/board${staleDays ? `?staleDays=${staleDays}` : ""}`),
   getDeal: (id: string) => request<Deal>(`/crm/deals/${id}`),
   createDeal: (body: DealInput) =>
     request<Deal>(`/crm/deals`, { method: "POST", body: JSON.stringify(body) }),
@@ -1233,8 +1249,8 @@ export const api = {
   // ---- CRM: notes & meetings ----
   getNotes: (entityType: NoteEntity, entityId: string) =>
     request<CrmNote[]>(`/crm/notes/${entityType}/${entityId}`),
-  addNote: (entityType: NoteEntity, entityId: string, body: string) =>
-    request<CrmNote>(`/crm/notes/${entityType}/${entityId}`, { method: "POST", body: JSON.stringify({ body }) }),
+  addNote: (entityType: NoteEntity, entityId: string, body: { body: string; kind?: NoteKind; occurredAt?: string | null }) =>
+    request<CrmNote>(`/crm/notes/${entityType}/${entityId}`, { method: "POST", body: JSON.stringify(body) }),
   pinNote: (id: string) => request<CrmNote>(`/crm/notes/${id}/pin`, { method: "PATCH" }),
   deleteNote: (id: string) => request<{ id: string }>(`/crm/notes/${id}`, { method: "DELETE" }),
   getMeetings: (opts: { from?: string; to?: string; mine?: boolean } = {}) => {

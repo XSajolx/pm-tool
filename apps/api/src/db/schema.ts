@@ -1388,6 +1388,8 @@ export const estimateStatus = pgEnum("estimate_status", [
 ]);
 
 export const crmNoteEntity = pgEnum("crm_note_entity", ["company", "contact", "deal"]);
+/** Row 54: a note is one kind of interaction; calls, meetings and emails are logged the same way. */
+export const crmNoteKind = pgEnum("crm_note_kind", ["note", "call", "meeting", "email"]);
 
 export const companies = pgTable(
   "companies",
@@ -1452,6 +1454,13 @@ export const deals = pgTable(
     /** 0-100. Defaults per stage; editable. Drives weighted pipeline value. */
     probability: integer("probability").notNull().default(10),
     expectedCloseDate: timestamp("expected_close_date", { withTimezone: true }),
+    /** Row 55: the next thing to do on this deal and when; the owner gets an inbox reminder when it's due. */
+    nextActionAt: timestamp("next_action_at", { withTimezone: true }),
+    nextActionNote: varchar("next_action_note", { length: 255 }),
+    /** Stamped when the reminder for the current nextActionAt has gone out. */
+    nextActionRemindedAt: timestamp("next_action_reminded_at", { withTimezone: true }),
+    /** Last human touch — edits, stage moves, logged interactions. Drives the stale flag. */
+    lastActivityAt: timestamp("last_activity_at", { withTimezone: true }).defaultNow().notNull(),
     closedAt: timestamp("closed_at", { withTimezone: true }),
     lostReason: text("lost_reason"),
     ownerId: uuid("owner_id").references(() => users.id, { onDelete: "set null" }),
@@ -1530,6 +1539,9 @@ export const crmNotes = pgTable(
     entityType: crmNoteEntity("entity_type").notNull(),
     entityId: uuid("entity_id").notNull(),
     body: text("body").notNull(),
+    kind: crmNoteKind("kind").notNull().default("note"),
+    /** When the call/meeting happened (defaults to when it was logged). */
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).defaultNow().notNull(),
     pinned: boolean("pinned").notNull().default(false),
     authorId: uuid("author_id")
       .notNull()

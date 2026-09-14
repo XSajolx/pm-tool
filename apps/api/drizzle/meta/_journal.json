@@ -169,6 +169,20 @@
       "when": 1789346218615,
       "tag": "0023_drop_legacy_deal_stage",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1789346534785,
+      "tag": "0024_interaction_log",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1789346628591,
+      "tag": "0025_deal_follow_ups",
+      "breakpoints": true
     }
   ]
 }

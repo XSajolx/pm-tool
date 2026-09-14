@@ -20,6 +20,7 @@ const VERB_LABEL: Record<string, string> = {
   comment_assigned: "assigned you a comment",
   mentioned: "mentioned you",
   posted: "posted",
+  follow_up: "— follow-up due",
   commented: "commented",
   status_changed: "changed the status",
   completed: "marked this complete",
@@ -268,6 +269,8 @@ function NotificationList({
                       if (!n.readAt) markRead.mutate(n.id);
                       if (n.entityType === "task") {
                         navigate({ to: "/t/$taskId", params: { taskId: n.entityId } });
+                      } else if (n.entityType === "deal") {
+                        navigate({ to: "/crm/deals", search: { deal: n.entityId } });
                       } else if (n.entityType === "message" && typeof n.data?.channelId === "string") {
                         // Row 41: a chat mention opens the channel it happened in.
                         navigate({ to: "/chat/$channelId", params: { channelId: n.data.channelId } });

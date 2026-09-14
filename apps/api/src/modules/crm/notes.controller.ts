@@ -6,7 +6,11 @@ import { Auth, Roles } from "../auth/auth.decorators.js";
 import type { AuthContext } from "../auth/auth.types.js";
 
 const entitySchema = z.enum(["company", "contact", "deal"]);
-const bodySchema = z.object({ body: z.string().min(1).max(20_000) });
+const bodySchema = z.object({
+  body: z.string().min(1).max(20_000),
+  kind: z.enum(["note", "call", "meeting", "email"]).optional(),
+  occurredAt: z.string().datetime().nullable().optional(),
+});
 
 @Controller("crm/notes")
 export class NotesController {
@@ -26,14 +30,14 @@ export class NotesController {
     @Param("entityId") entityId: string,
     @Body() dto: z.infer<typeof bodySchema>,
   ) {
-    return this.notes.create(auth.orgId, auth.userId, entitySchema.parse(entityType) as NoteEntity, entityId, dto.body);
+    return this.notes.create(auth.orgId, auth.userId, entitySchema.parse(entityType) as NoteEntity, entityId, dto);
   }
 
   @Patch(":id")
   @Roles("owner", "admin", "member")
-  @UsePipes(new ZodValidationPipe(bodySchema))
-  update(@Auth() auth: AuthContext, @Param("id") id: string, @Body() dto: z.infer<typeof bodySchema>) {
-    return this.notes.update(auth.orgId, { userId: auth.userId, role: auth.role }, id, dto.body);
+  @UsePipes(new ZodValidationPipe(bodySchema.partial()))
+  update(@Auth() auth: AuthContext, @Param("id") id: string, @Body() dto: Partial<z.infer<typeof bodySchema>>) {
+    return this.notes.update(auth.orgId, { userId: auth.userId, role: auth.role }, id, dto);
   }
 
   @Patch(":id/pin")

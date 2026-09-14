@@ -1,5 +1,5 @@
-import { useState, type FormEvent } from "react";
-import { Link } from "@tanstack/react-router";
+import { useEffect, useState, type FormEvent } from "react";
+import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   DndContext,
@@ -29,13 +29,37 @@ export const STAGE_TONE: Record<DealStageRow["kind"], string> = {
 };
 
 /** The pipeline. Drag a card between columns to change its stage. */
+const STALE_KEY = "pm:dealStaleDays";
+
 export function DealsPage() {
   const qc = useQueryClient();
+  const navigate = useNavigate();
+  const search = useSearch({ strict: false }) as { deal?: string };
   const [creating, setCreating] = useState(false);
-  const [openId, setOpenId] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(search.deal ?? null);
   const [active, setActive] = useState<Deal | null>(null);
+  // Row 55: how long a deal may sit untouched before it's flagged. Per person, remembered locally.
+  const [staleDays, setStaleDays] = useState(() => {
+    try {
+      return Number(localStorage.getItem(STALE_KEY)) || 14;
+    } catch {
+      return 14;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(STALE_KEY, String(staleDays));
+    } catch {
+      /* ignore */
+    }
+  }, [staleDays]);
+  useEffect(() => {
+    if (search.deal) setOpenId(search.deal);
+  }, [search.deal]);
 
-  const { data: columns = [] } = useQuery({ queryKey: ["deal-board"], queryFn: api.getDealBoard });
+  const { data: columns = [] } = useQuery({ queryKey: ["deal-board", staleDays], queryFn: () => api.getDealBoard(staleDays) });
+  const staleCount = columns.flatMap((c) => c.deals).filter((d) => d.stale).length;
+  const dueCount = columns.flatMap((c) => c.deals).filter((d) => d.followUpDue).length;
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
   const move = useMutation({
@@ -80,7 +104,18 @@ export function DealsPage() {
           Open pipeline <span className="font-medium text-slate-700">{fmtMoney(openTotal)}</span> · weighted{" "}
           <span className="font-medium text-slate-700">{fmtMoney(weighted)}</span>
         </span>
-        <Link to="/settings" className="ml-auto text-xs text-muted-foreground hover:text-indigo-700" title="Rename, reorder or add stages in Settings → Deal stages">
+        {(staleCount > 0 || dueCount > 0) && (
+          <span className="text-xs">
+            {dueCount > 0 && <span className="rounded-full bg-red-50 px-2 py-0.5 text-red-700">⏰ {dueCount} follow-up{dueCount === 1 ? "" : "s"} due</span>}
+            {staleCount > 0 && <span className="ml-1 rounded-full bg-amber-50 px-2 py-0.5 text-amber-800">💤 {staleCount} stale</span>}
+          </span>
+        )}
+        <label className="ml-auto flex items-center gap-1 text-[11px] text-muted-foreground" title="Open deals with no activity for this long are flagged stale">
+          Stale after
+          <input type="number" min={1} max={365} value={staleDays} onChange={(e) => setStaleDays(Math.max(1, Number(e.target.value) || 14))} className="w-12 rounded-md border border-border px-1 py-0.5 text-[11px] text-slate-700" />
+          days
+        </label>
+        <Link to="/settings" className="text-xs text-muted-foreground hover:text-indigo-700" title="Rename, reorder or add stages in Settings → Deal stages">
           ⚙ Stages
         </Link>
         <button onClick={() => setCreating(true)} className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-indigo-700">
@@ -102,7 +137,15 @@ export function DealsPage() {
       </DndContext>
 
       {creating && <NewDealDialog onClose={() => setCreating(false)} />}
-      {openId && <DealDrawer dealId={openId} onClose={() => setOpenId(null)} />}
+      {openId && (
+        <DealDrawer
+          dealId={openId}
+          onClose={() => {
+            setOpenId(null);
+            if (search.deal) navigate({ to: "/crm/deals", search: {} });
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -149,6 +192,21 @@ function CardBody({ deal, dragging }: { deal: Deal; dragging?: boolean }) {
     <div className={cn("cursor-grab rounded-md border border-border bg-white p-2.5 shadow-sm transition hover:border-indigo-300", dragging && "rotate-1 shadow-lg")}>
       <p className="truncate text-sm font-medium text-slate-800">{deal.title}</p>
       <p className="truncate text-xs text-muted-foreground">{deal.company?.name ?? "No company"}</p>
+      {(deal.followUpDue || deal.stale || deal.nextActionAt) && (
+        <div className="mt-1.5 flex flex-wrap items-center gap-1 text-[10px]">
+          {deal.nextActionAt && (
+            <span className={cn("rounded px-1.5 py-0.5 font-medium", deal.followUpDue ? "bg-red-50 text-red-700" : "bg-sky-50 text-sky-700")} title={deal.nextActionNote ?? "Next action"}>
+              ⏰ {fmtShortDate(deal.nextActionAt)}
+              {deal.nextActionNote ? ` · ${deal.nextActionNote}` : ""}
+            </span>
+          )}
+          {deal.stale && (
+            <span className="rounded bg-amber-50 px-1.5 py-0.5 font-medium text-amber-800" title="No activity for a while">
+              💤 {deal.idleDays}d idle
+            </span>
+          )}
+        </div>
+      )}
       <div className="mt-2 flex items-center gap-2">
         <span className="text-sm font-semibold tabular-nums text-slate-800">{fmtMoney(deal.value, deal.currency)}</span>
         <span className="text-[11px] tabular-nums text-muted-foreground">{deal.probability}%</span>
@@ -300,6 +358,29 @@ function DealDrawer({ dealId, onClose }: { dealId: string; onClose: () => void }
                     <input defaultValue={deal.lostReason ?? ""} onBlur={(e) => update.mutate({ lostReason: e.target.value || null })} className={input} placeholder="Why did we lose it?" />
                   </Row>
                 )}
+                <Row label="Next action">
+                  <div className="flex flex-col gap-1">
+                    <input
+                      type="date"
+                      defaultValue={deal.nextActionAt?.slice(0, 10) ?? ""}
+                      onBlur={(e) => (e.target.value || null) !== (deal.nextActionAt?.slice(0, 10) ?? null) && update.mutate({ nextActionAt: e.target.value ? new Date(`${e.target.value}T09:00:00`).toISOString() : null })}
+                      className={input}
+                      title="You'll get an inbox reminder on this day"
+                    />
+                    <input
+                      defaultValue={deal.nextActionNote ?? ""}
+                      onBlur={(e) => e.target.value.trim() !== (deal.nextActionNote ?? "") && update.mutate({ nextActionNote: e.target.value.trim() || null })}
+                      placeholder="e.g. Send revised proposal"
+                      className={input}
+                    />
+                  </div>
+                </Row>
+                <Row label="Activity">
+                  <span className="text-xs text-slate-600">
+                    Last touched {fmtShortDate(deal.lastActivityAt)}
+                    {deal.nextActionAt && new Date(deal.nextActionAt) <= new Date() && !deal.closedAt ? <span className="ml-1 text-red-600">· follow-up due</span> : null}
+                  </span>
+                </Row>
                 <Row label="Owner"><span className="text-sm text-slate-700">{deal.owner?.name ?? "—"}</span></Row>
                 {deal.closedAt && <Row label="Closed"><span className="text-sm text-slate-700">{fmtShortDate(deal.closedAt)}</span></Row>}
               </div>

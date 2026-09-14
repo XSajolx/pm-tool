@@ -157,6 +157,43 @@ export class NotificationsService {
     }
   }
 
+  /**
+   * One addressed notification for something that isn't a task — e.g. a deal
+   * follow-up (row 55). No preference gating: the receiver asked for it by
+   * setting the date.
+   */
+  async notifyDirect(input: {
+    orgId: string;
+    receiverId: string;
+    actorId?: string | null;
+    entityType: string;
+    entityId: string;
+    verb: string;
+    title: string;
+    body?: string | null;
+    data?: Record<string, unknown> | null;
+    category?: "primary" | "other";
+  }) {
+    try {
+      await this.insertAndPush([
+        {
+          organizationId: input.orgId,
+          receiverId: input.receiverId,
+          triggeredById: input.actorId ?? null,
+          entityType: input.entityType,
+          entityId: input.entityId,
+          verb: input.verb,
+          category: input.category ?? "primary",
+          title: input.title,
+          body: input.body ?? null,
+          data: input.data ?? null,
+        },
+      ]);
+    } catch (err) {
+      this.logger.error(`direct notification failed: ${(err as Error).message}`);
+    }
+  }
+
   private async insertAndPush(values: (typeof notifications.$inferInsert)[]) {
     const rows = await this.db.insert(notifications).values(values).returning();
     // Push live to anyone with the app open.
