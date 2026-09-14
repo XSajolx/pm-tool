@@ -19,6 +19,7 @@ import { ResourcingModule } from "./modules/resourcing/resourcing.module.js";
 import { CrmModule } from "./modules/crm/crm.module.js";
 import { DocumentsModule } from "./modules/documents/documents.module.js";
 import { FilesModule } from "./modules/files/files.module.js";
+import { InboundModule } from "./modules/inbound/inbound.module.js";
 
 @Module({
   imports: [
@@ -41,6 +42,7 @@ import { FilesModule } from "./modules/files/files.module.js";
     ResourcingModule,
     CrmModule,
     DocumentsModule,
+    InboundModule,
   ],
   controllers: [HealthController],
 })

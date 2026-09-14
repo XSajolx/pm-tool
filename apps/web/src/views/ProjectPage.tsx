@@ -233,6 +233,8 @@ export function ProjectPage() {
           </div>
         </section>
 
+        <InboundEmailCard projectId={project.id} canManage={canManage} />
+
         {project.description && (
           <section className="mt-6 rounded-lg border border-border bg-white p-4">
             <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -789,5 +791,92 @@ function ApplyTemplate({ projectId }: { projectId: string }) {
         Due dates are set relative to the project start date{result ? ` · ${result}` : "."}
       </p>
     </div>
+  );
+}
+
+
+/**
+ * Row 78: the project's email-in address. Forward a client mail there and it
+ * becomes a task (or a comment on the task named in the subject), attachments
+ * included. The "test" form fakes an inbound mail until a provider is wired up.
+ */
+function InboundEmailCard({ projectId, canManage }: { projectId: string; canManage: boolean }) {
+  const qc = useQueryClient();
+  const { data } = useQuery({ queryKey: ["inbound-email", projectId], queryFn: () => api.getInboundEmail(projectId) });
+  const regen = useMutation({ mutationFn: () => api.regenerateInboundEmail(projectId), onSuccess: (next) => qc.setQueryData(["inbound-email", projectId], next) });
+  const [copied, setCopied] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [from, setFrom] = useState("client@example.com");
+  const [subject, setSubject] = useState("");
+  const [text, setText] = useState("");
+  const send = useMutation({
+    mutationFn: () => api.testInboundEmail(projectId, { from, subject, text }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["tasks"] });
+      qc.invalidateQueries({ queryKey: ["project", projectId] });
+      setSubject("");
+      setText("");
+    },
+  });
+  const copy = async () => {
+    if (!data) return;
+    try {
+      await navigator.clipboard.writeText(data.address);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard blocked - the address is still selectable */
+    }
+  };
+  return (
+    <section className="mt-6 rounded-lg border border-border bg-white">
+      <h2 className="border-b border-border px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Email-in</h2>
+      <div className="space-y-3 p-4 text-sm">
+        <p className="text-xs text-muted-foreground">
+          Forward a client email to this address and it becomes a task in this project - attachments included. Put an existing task reference like <code className="rounded bg-muted px-1">[PM-142]</code> in the subject (or reply in-thread) and it lands as a comment instead.
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <code className="select-all rounded-md border border-border bg-[#fbfbfa] px-2.5 py-1 text-xs text-slate-800">{data?.address ?? "…"}</code>
+          <button type="button" onClick={copy} className="rounded-md border border-border px-2 py-1 text-xs font-medium text-slate-600 hover:bg-muted">
+            {copied ? "Copied ✓" : "Copy"}
+          </button>
+          {canManage && (
+            <button type="button" onClick={() => regen.mutate()} disabled={regen.isPending} className="text-xs text-slate-500 hover:text-red-600 hover:underline disabled:opacity-50" title="Old address stops working">
+              Regenerate
+            </button>
+          )}
+          <button type="button" onClick={() => setTesting((t) => !t)} className="ml-auto text-xs text-indigo-600 hover:underline">
+            {testing ? "Hide test" : "Send a test email"}
+          </button>
+        </div>
+        {data && !data.configured && (
+          <p className="text-[11px] text-amber-700">Inbound mail service not connected yet (set INBOUND_EMAIL_DOMAIN + INBOUND_EMAIL_SECRET and point Postmark / SES at /public/inbound/email). The address works the moment it is.</p>
+        )}
+        {testing && (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (subject.trim()) send.mutate();
+            }}
+            className="grid gap-2 rounded-md border border-border bg-[#fbfbfa] p-3 sm:grid-cols-2"
+          >
+            <input value={from} onChange={(e) => setFrom(e.target.value)} placeholder="From (client@example.com)" className="rounded-md border border-border px-2 py-1 text-xs" />
+            <input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Subject - becomes the task title" className="rounded-md border border-border px-2 py-1 text-xs" required />
+            <textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="Email body - becomes the description" rows={3} className="rounded-md border border-border px-2 py-1 text-xs sm:col-span-2" />
+            <div className="flex items-center gap-2 sm:col-span-2">
+              <button type="submit" disabled={send.isPending || !subject.trim()} className="rounded-md bg-indigo-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-50">
+                Deliver test email
+              </button>
+              {send.isSuccess && (
+                <Link to="/t/$taskId" params={{ taskId: send.data.taskId }} className="text-xs text-green-700 hover:underline">
+                  ✓ Created {send.data.kind === "task" ? "a task" : "a comment"} - open it
+                </Link>
+              )}
+              {send.isError && <span className="text-xs text-red-600">{(send.error as Error).message}</span>}
+            </div>
+          </form>
+        )}
+      </div>
+    </section>
   );
 }

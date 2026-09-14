@@ -1099,6 +1099,8 @@ export const projects = pgTable(
     companyId: uuid("company_id").references((): AnyPgColumn => companies.id, { onDelete: "set null" }),
     /** The person accountable for the project. */
     leadId: uuid("lead_id").references(() => users.id, { onDelete: "set null" }),
+    /** Row 78: secret part of the project's email-in address. Null until first requested. */
+    inboundToken: varchar("inbound_token", { length: 32 }),
     description: text("description"),
     status: projectStatus("status").notNull().default("active"),
     color: varchar("color", { length: 16 }).notNull().default("#6366f1"),

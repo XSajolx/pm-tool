@@ -1368,6 +1368,13 @@ export const api = {
   updateMilestone: (id: string, body: MilestoneWrite) =>
     request<Milestone>(`/milestones/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteMilestone: (id: string) => request<{ id: string }>(`/milestones/${id}`, { method: "DELETE" }),
+  /** Row 78: email-in to a project. */
+  getInboundEmail: (projectId: string) =>
+    request<{ address: string; token: string; domain: string; configured: boolean }>(`/projects/${projectId}/inbound-email`),
+  regenerateInboundEmail: (projectId: string) =>
+    request<{ address: string; token: string; domain: string; configured: boolean }>(`/projects/${projectId}/inbound-email/regenerate`, { method: "POST" }),
+  testInboundEmail: (projectId: string, body: { from: string; subject: string; text?: string; attachments?: { name: string; contentType: string; contentBase64: string }[] }) =>
+    request<{ kind: "task" | "comment"; taskId: string; projectId: string }>(`/projects/${projectId}/inbound-email/test`, { method: "POST", body: JSON.stringify(body) }),
   /** Row 75: milestone sign-off. */
   requestMilestoneSignoff: (id: string, body: { approverId?: string } = {}) =>
     request<Milestone>(`/milestones/${id}/signoff`, { method: "POST", body: JSON.stringify(body) }),

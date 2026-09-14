@@ -1,0 +1,1 @@
+ALTER TABLE "projects" ADD COLUMN "inbound_token" varchar(32);
