@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import type { Member, Status, Task } from "../lib/api.js";
 import { StatusPill } from "../components/ui.js";
+import { TaskTimerButton } from "../components/TaskTimerButton.js";
 import { AssigneeCell, DueCell, PriorityCell, StatusCell, type UpdateTask } from "../components/InlineEditors.js";
 import { groupTasks, sortTasks, type GroupBy, type SortDir, type SortKey } from "../components/taskViewUtils.js";
 
@@ -63,7 +64,7 @@ export function ListView({ tasks, statuses, members, groupBy, sort, sortDir, onO
                     tabIndex={0}
                     onClick={() => onOpenTask(t.id)}
                     onKeyDown={(e) => e.key === "Enter" && onOpenTask(t.id)}
-                    className={`grid w-full cursor-pointer grid-cols-[24px_1fr_130px_130px_120px_110px] items-center gap-2 border-b border-border px-4 py-2 text-left last:border-0 hover:bg-muted/40 ${selected.has(t.id) ? "bg-indigo-50/60" : ""}`}
+                    className={`group grid w-full cursor-pointer grid-cols-[24px_1fr_130px_130px_120px_110px] items-center gap-2 border-b border-border px-4 py-2 text-left last:border-0 hover:bg-muted/40 ${selected.has(t.id) ? "bg-indigo-50/60" : ""}`}
                   >
                     <input
                       type="checkbox"
@@ -76,6 +77,7 @@ export function ListView({ tasks, statuses, members, groupBy, sort, sortDir, onO
                     <span className="flex min-w-0 items-center gap-2 text-sm text-slate-800">
                       {t.reference && <span className="text-[11px] text-muted-foreground">{t.reference}</span>}
                       <span className={`truncate ${t.status?.category === "done" ? "text-slate-400 line-through" : ""}`}>{t.title}</span>
+                      <TaskTimerButton taskId={t.id} />
                       {t.recurrence && (
                         <span className="shrink-0 text-[11px] text-indigo-500" title={`Repeats ${t.recurrence}`}>
                           ↻

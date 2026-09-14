@@ -6,7 +6,8 @@ import { Auth, Roles } from "../auth/auth.decorators.js";
 import type { AuthContext } from "../auth/auth.types.js";
 
 const startSchema = z.object({
-  projectId: z.string().uuid(),
+  /** Row 90: optional when taskId is given. */
+  projectId: z.string().uuid().optional(),
   taskId: z.string().uuid().optional(),
   /** Row 87 */
   stageId: z.string().uuid().optional(),
@@ -15,6 +16,7 @@ const startSchema = z.object({
 });
 
 const manualSchema = startSchema.extend({
+  projectId: z.string().uuid(),
   startedAt: z.string().datetime(),
   endedAt: z.string().datetime().optional(),
   durationSeconds: z.number().int().positive().optional(),

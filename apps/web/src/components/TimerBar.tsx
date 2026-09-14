@@ -54,8 +54,8 @@ export function TimerBar() {
             className="h-2 w-2 shrink-0 animate-pulse rounded-full"
             style={{ background: running.project.color }}
           />
-          <span className="min-w-0 flex-1 truncate text-xs font-medium text-indigo-900">
-            {running.project.name}
+          <span className="min-w-0 flex-1 truncate text-xs font-medium text-indigo-900" title={running.task ? `${running.project.name} · ${running.task.title}` : running.project.name}>
+            {running.task ? running.task.title : running.project.name}
           </span>
           <span className="font-mono text-xs tabular-nums text-indigo-700">
             {fmtClock(elapsed)}

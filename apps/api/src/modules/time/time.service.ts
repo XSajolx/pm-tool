@@ -18,7 +18,8 @@ export interface Actor {
 }
 
 export interface StartDto {
-  projectId: string;
+  /** Row 90: optional when a task is given - the task's project is used. */
+  projectId?: string;
   taskId?: string;
   /** Row 87: optional stage of the project. */
   stageId?: string;
@@ -27,6 +28,8 @@ export interface StartDto {
 }
 
 export interface ManualEntryDto extends StartDto {
+  /** Manual entries always name the project. */
+  projectId: string;
   startedAt: string;
   /** Either an end time or a duration; duration wins if both are sent. */
   endedAt?: string;
@@ -158,7 +161,11 @@ export class TimeService {
    * rather than refusing — the user's intent is "I'm on this now", not "error".
    */
   async start(orgId: string, userId: string, dto: StartDto) {
-    await this.assertProjectAndTask(orgId, dto.projectId, dto.taskId, dto.stageId);
+    // Row 90: "start from any task card" - the project is implied by the task.
+    const projectId = dto.projectId ?? (dto.taskId ? await this.projectForTask(orgId, dto.taskId) : null);
+    if (!projectId) throw new BadRequestException("Pick a project or a task to track time on");
+    await this.assertProjectAndTask(orgId, projectId, dto.taskId, dto.stageId);
+    // One running timer per person: starting a new one stops the old one.
     await this.stop(orgId, userId);
 
     const [row] = await this.db
@@ -166,7 +173,7 @@ export class TimeService {
       .values({
         organizationId: orgId,
         userId,
-        projectId: dto.projectId,
+        projectId,
         taskId: dto.taskId ?? null,
         stageId: dto.stageId ?? null,
         description: dto.description ?? null,
@@ -523,6 +530,18 @@ export class TimeService {
   }
 
   /** Project must be in this org; task (if given) must live in the project's space. */
+  /** Row 90: the project that owns a task (task → list → space → project), or null. */
+  private async projectForTask(orgId: string, taskId: string) {
+    const [row] = await this.db
+      .select({ spaceId: lists.spaceId })
+      .from(tasks)
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .where(and(eq(tasks.id, taskId), eq(tasks.organizationId, orgId)));
+    if (!row) throw new BadRequestException("Task not found");
+    const project = await this.db.query.projects.findFirst({ where: and(eq(projects.spaceId, row.spaceId), eq(projects.organizationId, orgId), isNull(projects.archivedAt)), columns: { id: true } });
+    return project?.id ?? null;
+  }
+
   private async assertProjectAndTask(orgId: string, projectId: string, taskId?: string, stageId?: string) {
     const project = await this.db.query.projects.findFirst({
       where: and(eq(projects.id, projectId), eq(projects.organizationId, orgId)),

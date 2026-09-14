@@ -1458,7 +1458,7 @@ export const api = {
 
   // ---- Time tracking ----
   getRunningTimer: () => request<TimeEntry | null>(`/time/running`),
-  startTimer: (body: { projectId: string; taskId?: string; description?: string; billable?: boolean }) =>
+  startTimer: (body: { projectId?: string; taskId?: string; description?: string; billable?: boolean }) =>
     request<TimeEntry>(`/time/start`, { method: "POST", body: JSON.stringify(body) }),
   stopTimer: () => request<TimeEntry | null>(`/time/stop`, { method: "POST" }),
   getTimeEntries: (opts: { userId?: string; projectId?: string; from?: string; to?: string } = {}) => {

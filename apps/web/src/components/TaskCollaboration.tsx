@@ -10,6 +10,7 @@ import {
 import { Avatar } from "./ui.js";
 import { MuteButton } from "./MuteButton.js";
 import { FollowButton } from "./FollowButton.js";
+import { TaskTimerButton } from "./TaskTimerButton.js";
 import { cn } from "../lib/utils.js";
 
 const QUICK_EMOJI = ["👍", "🎉", "🚀", "👀", "🔥"];
@@ -155,6 +156,7 @@ export function TaskCollaboration({ taskId, listId, statuses }: Props) {
         <EmojiPicker onPick={(e) => react.mutate(e)} />
 
         <span className="ml-auto" />
+        <TaskTimerButton taskId={taskId} label />
         <FollowButton entityType="task" entityId={taskId} />
         <MuteButton entityType="task" entityId={taskId} />
       </div>
