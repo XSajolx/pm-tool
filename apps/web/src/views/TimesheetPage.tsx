@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api.js";
 import { useAuth } from "../lib/auth.js";
@@ -19,8 +19,10 @@ export function TimesheetPage() {
 
   const [weekOf, setWeekOf] = useState(() => new Date());
   const [forUser, setForUser] = useState<string>("");
-  // Row 88: hand-added rows are project or project+task.
-  const [extraRows, setExtraRows] = useState<{ projectId: string; taskId: string | null; taskTitle?: string | null }[]>([]);
+  // Row 88: hand-added rows are project or project+task. Row 89: they're remembered per week
+  // (browser-side) so a copied set of rows survives a reload even before hours are typed.
+  type ExtraRow = { projectId: string; taskId: string | null; taskTitle?: string | null };
+  const [extraRows, setExtraRows] = useState<ExtraRow[]>([]);
 
   const { data: members = [] } = useQuery({ queryKey: ["members"], queryFn: api.getMembers, enabled: isAdmin });
   const { data: projects = [] } = useQuery({ queryKey: ["projects"], queryFn: () => api.getProjects() });
@@ -38,6 +40,40 @@ export function TimesheetPage() {
       qc.invalidateQueries({ queryKey: ["timesheet"] });
       qc.invalidateQueries({ queryKey: ["time-entries"] });
       qc.invalidateQueries({ queryKey: ["projects"] });
+    },
+  });
+
+  const rowsKey = sheet ? `ts-rows:${sheet.userId}:${sheet.weekStart.slice(0, 10)}` : null;
+  useEffect(() => {
+    if (!rowsKey) return;
+    try {
+      const saved = localStorage.getItem(rowsKey);
+      setExtraRows(saved ? (JSON.parse(saved) as ExtraRow[]) : []);
+    } catch {
+      setExtraRows([]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rowsKey]);
+  const rememberRows = (next: ExtraRow[]) => {
+    setExtraRows(next);
+    if (rowsKey) {
+      try {
+        localStorage.setItem(rowsKey, JSON.stringify(next));
+      } catch {
+        /* storage blocked - rows still show for this visit */
+      }
+    }
+  };
+
+  // Row 89: copy last week's rows (projects / tasks) into this week - rows only, never the hours.
+  const copyPrevWeek = useMutation({
+    mutationFn: () => api.getTimesheet(new Date(weekOf.getTime() - WEEK_MS).toISOString(), forUser || undefined),
+    onSuccess: (prev) => {
+      const have = new Set([...(sheet?.rows ?? []), ...extraRows].map((r) => `${r.projectId}:${r.taskId ?? ""}`));
+      const fresh = prev.rows
+        .filter((r) => !have.has(`${r.projectId}:${r.taskId ?? ""}`))
+        .map((r) => ({ projectId: r.projectId, taskId: r.taskId, taskTitle: r.taskTitle }));
+      rememberRows([...extraRows, ...fresh]);
     },
   });
 
@@ -205,7 +241,13 @@ export function TimesheetPage() {
             </table>
 
             {editable && addable.length > 0 && (
-              <AddRowPicker projects={addable} onAdd={(row) => setExtraRows((x) => [...x, row])} />
+              <AddRowPicker
+                projects={addable}
+                onAdd={(row) => rememberRows([...extraRows, row])}
+                onCopyPrev={() => copyPrevWeek.mutate()}
+                copying={copyPrevWeek.isPending}
+                copied={copyPrevWeek.isSuccess ? copyPrevWeek.data.rows.length : null}
+              />
             )}
           </div>
         )}
@@ -246,7 +288,19 @@ function HourCell({ value, editable, onCommit }: { value: number; editable: bool
 }
 
 /** Row 88: add a row for a project, or for one task inside it. */
-function AddRowPicker({ projects, onAdd }: { projects: { id: string; name: string }[]; onAdd: (row: { projectId: string; taskId: string | null; taskTitle?: string | null }) => void }) {
+function AddRowPicker({
+  projects,
+  onAdd,
+  onCopyPrev,
+  copying,
+  copied,
+}: {
+  projects: { id: string; name: string }[];
+  onAdd: (row: { projectId: string; taskId: string | null; taskTitle?: string | null }) => void;
+  onCopyPrev: () => void;
+  copying: boolean;
+  copied: number | null;
+}) {
   const [projectId, setProjectId] = useState("");
   const [taskId, setTaskId] = useState("");
   const { data: tasks = [] } = useQuery({ queryKey: ["pickable-tasks", projectId], queryFn: () => api.getPickableTasks(projectId), enabled: Boolean(projectId) });
@@ -283,6 +337,11 @@ function AddRowPicker({ projects, onAdd }: { projects: { id: string; name: strin
           Add row
         </button>
       )}
+      <span className="mx-1 h-4 w-px bg-border" />
+      <button type="button" onClick={onCopyPrev} disabled={copying} className="rounded-md border border-border px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-muted disabled:opacity-50" title="Bring last week's project / task rows into this week - rows only, not the hours">
+        {copying ? "Copying…" : "⧉ Copy last week's rows"}
+      </button>
+      {copied !== null && <span className="text-[11px] text-muted-foreground">{copied ? `${copied} row${copied === 1 ? "" : "s"} from last week` : "Last week had no rows"}</span>}
     </div>
   );
 }
