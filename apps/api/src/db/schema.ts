@@ -769,6 +769,11 @@ export const notificationPreferences = pgTable(
     comment: boolean("comment").notNull().default(true),
     mention: boolean("mention").notNull().default(true),
     taskCompleted: boolean("task_completed").notNull().default(true),
+    /**
+     * Row 73: per-type channel matrix - `{ mention: { inApp, email, push }, ... }`.
+     * Null = defaults (the legacy booleans above still seed the in-app column).
+     */
+    channels: jsonb("channels").$type<Record<string, { inApp?: boolean; email?: boolean; push?: boolean }>>(),
     ...timestamps,
   },
   (t) => [uniqueIndex("notification_prefs_org_user_uq").on(t.organizationId, t.userId)],

@@ -32,6 +32,21 @@ export function Sidebar() {
       qc.invalidateQueries({ queryKey: ["notifications"] });
     };
     socket.on("notification:new", bump);
+    // Row 73: "push" = a desktop notification, only when the user opted in per type
+    // (the server decides) and the browser permission is granted.
+    const push = (p: { title: string; body?: string; link?: string }) => {
+      if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+      try {
+        const n = new Notification(p.title, { body: p.body || undefined, tag: p.link});
+        n.onclick = () => {
+          window.focus();
+          if (p.link) window.location.assign(p.link);
+        };
+      } catch {
+        /* some browsers throw when the tab is hidden */
+      }
+    };
+    socket.on("notification:push", push);
     // Row 42: a new message in any of my channels, or a read mark from another
     // device, changes the unread badges.
     const chatChanged = () => qc.invalidateQueries({ queryKey: ["channels"] });
@@ -39,6 +54,7 @@ export function Sidebar() {
     socket.on("chat:read", chatChanged);
     return () => {
       socket.off("notification:new", bump);
+      socket.off("notification:push", push);
       socket.off("chat:unread", chatChanged);
       socket.off("chat:read", chatChanged);
     };

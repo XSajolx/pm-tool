@@ -1,18 +1,14 @@
 import { Body, Controller, Get, Param, Patch, Post, Query, UsePipes } from "@nestjs/common";
 import { z } from "zod";
 import { ZodValidationPipe } from "../../common/zod-validation.pipe.js";
-import { NotificationsService, type InboxTab } from "./notifications.service.js";
+import { NOTIF_TYPES, NotificationsService, type InboxTab } from "./notifications.service.js";
 import { RemindersService } from "./reminders.service.js";
 import { Auth } from "../auth/auth.decorators.js";
 import type { AuthContext } from "../auth/auth.types.js";
 
-const preferencesSchema = z.object({
-  propertyChange: z.boolean().optional(),
-  statusChange: z.boolean().optional(),
-  comment: z.boolean().optional(),
-  mention: z.boolean().optional(),
-  taskCompleted: z.boolean().optional(),
-});
+/** Row 73: `{ mention: { email: false }, reminders: { push: true } }` - any subset. */
+const channelSchema = z.object({ inApp: z.boolean().optional(), email: z.boolean().optional(), push: z.boolean().optional() });
+const preferencesSchema = z.object(Object.fromEntries(NOTIF_TYPES.map((t) => [t, channelSchema.optional()])) as Record<(typeof NOTIF_TYPES)[number], z.ZodOptional<typeof channelSchema>>);
 
 const snoozeSchema = z.object({ until: z.string().datetime() });
 const tabSchema = z.enum(["all", "mentions", "assigned", "approvals", "alerts", "replies", "later", "cleared"]);

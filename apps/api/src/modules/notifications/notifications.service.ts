@@ -11,18 +11,93 @@ import {
   users,
 } from "../../db/schema.js";
 import { ChatGateway } from "../chat/chat.gateway.js";
+import { MailerService } from "./mailer.service.js";
 import type { FieldChange } from "../activity/activity.service.js";
 
-/** Which preference toggle gates a given verb. */
-const PREFERENCE_FOR_VERB: Record<string, keyof PreferenceFlags> = {
-  updated: "propertyChange",
-  status_changed: "statusChange",
-  commented: "comment",
+/**
+ * Row 73: every verb rolls up to a notification *type*, and each type has its
+ * own in-app / email / push switches per user.
+ */
+export const NOTIF_TYPES = [
+  "mention",
+  "assigned",
+  "comment",
+  "statusChange",
+  "propertyChange",
+  "taskCompleted",
+  "approvals",
+  "reminders",
+  "chat",
+] as const;
+export type NotifType = (typeof NOTIF_TYPES)[number];
+export interface ChannelPrefs {
+  inApp: boolean;
+  email: boolean;
+  push: boolean;
+}
+export type ChannelMatrix = Record<NotifType, ChannelPrefs>;
+
+const TYPE_FOR_VERB: Record<string, NotifType> = {
   mentioned: "mention",
   comment_assigned: "mention",
+  assigned: "assigned",
+  commented: "comment",
+  status_changed: "statusChange",
+  updated: "propertyChange",
   completed: "taskCompleted",
-  assigned: "propertyChange",
+  doc_review_requested: "approvals",
+  doc_approved: "approvals",
+  doc_rejected: "approvals",
+  proposal_viewed: "approvals",
+  proposal_accepted: "approvals",
+  proposal_declined: "approvals",
+  timesheet_submitted: "approvals",
+  timesheet_approved: "approvals",
+  timesheet_rejected: "approvals",
+  milestone_signoff: "approvals",
+  due_soon: "reminders",
+  overdue: "reminders",
+  follow_up: "reminders",
+  posted: "chat",
 };
+
+/** Sensible defaults: everything in-app, the addressed stuff also by email, only the urgent stuff as push. */
+const ch = (email: boolean, push: boolean): ChannelPrefs => ({ inApp: true, email, push });
+export const DEFAULT_CHANNELS: ChannelMatrix = {
+  mention: ch(true, true),
+  assigned: ch(true, true),
+  comment: ch(false, false),
+  statusChange: ch(false, false),
+  propertyChange: ch(false, false),
+  taskCompleted: ch(false, false),
+  approvals: ch(true, true),
+  reminders: ch(true, false),
+  chat: ch(false, false),
+};
+
+/** Legacy boolean columns (pre row 73) still seed the in-app switch. */
+const LEGACY_FLAG_FOR_TYPE: Partial<Record<NotifType, keyof PreferenceFlags>> = {
+  mention: "mention",
+  assigned: "propertyChange",
+  comment: "comment",
+  statusChange: "statusChange",
+  propertyChange: "propertyChange",
+  taskCompleted: "taskCompleted",
+};
+
+type StoredChannels = Record<string, Partial<ChannelPrefs>> | null | undefined;
+
+/** Defaults <- legacy booleans (in-app) <- stored matrix. */
+export function resolveChannels(row: (Partial<PreferenceFlags> & { channels?: StoredChannels }) | null | undefined): ChannelMatrix {
+  const out = {} as ChannelMatrix;
+  for (const type of NOTIF_TYPES) {
+    const base = { ...DEFAULT_CHANNELS[type] };
+    const legacy = LEGACY_FLAG_FOR_TYPE[type];
+    if (row && legacy && typeof row[legacy] === "boolean") base.inApp = row[legacy] as boolean;
+    out[type] = { ...base, ...(row?.channels?.[type] ?? {}) };
+  }
+  return out;
+}
 
 /**
  * Verbs that are *addressed to you* rather than ambient. These land in the
@@ -93,6 +168,7 @@ export class NotificationsService {
   constructor(
     @Inject(DRIZZLE) private readonly db: DB,
     private readonly gateway: ChatGateway,
+    private readonly mailer: MailerService,
   ) {}
 
   /* ---------------------------------------------------------------- *
@@ -129,11 +205,8 @@ export class NotificationsService {
       const recipients = all.filter((id) => !skip.has(id));
       if (!recipients.length) return;
 
-      const allowed = await this.filterByPreference(input.orgId, recipients, input.verb);
-      if (!allowed.length) return;
-
       await this.insertAndPush(
-        allowed.map((receiverId) => ({
+        recipients.map((receiverId) => ({
           organizationId: input.orgId,
           receiverId,
           triggeredById: input.actorId,
@@ -171,11 +244,9 @@ export class NotificationsService {
     try {
       const receivers = [...new Set(input.receiverIds)].filter((id) => id !== input.actorId);
       if (!receivers.length) return;
-      const allowed = await this.filterByPreference(input.orgId, receivers, input.verb);
-      if (!allowed.length) return;
 
       await this.insertAndPush(
-        allowed.map((receiverId) => ({
+        receivers.map((receiverId) => ({
           organizationId: input.orgId,
           receiverId,
           triggeredById: input.actorId,
@@ -230,11 +301,49 @@ export class NotificationsService {
     }
   }
 
+  /**
+   * Row 73: the single delivery gate. Each receiver's matrix decides, per type,
+   * whether the row lands in the inbox (in-app), goes out by email, and/or is
+   * pushed as a desktop notification. Unknown verbs always reach the inbox.
+   */
   private async insertAndPush(values: (typeof notifications.$inferInsert)[]) {
-    const rows = await this.db.insert(notifications).values(values).returning();
+    if (!values.length) return;
+    const orgId = values[0]!.organizationId;
+    const receiverIds = [...new Set(values.map((v) => v.receiverId))];
+    const prefRows = await this.db
+      .select()
+      .from(notificationPreferences)
+      .where(and(eq(notificationPreferences.organizationId, orgId), inArray(notificationPreferences.userId, receiverIds)));
+    const matrixFor = new Map(receiverIds.map((id) => [id, resolveChannels(prefRows.find((p) => p.userId === id))]));
+    const channelsOf = (v: { receiverId: string; verb: string }): ChannelPrefs => {
+      const type = TYPE_FOR_VERB[v.verb];
+      return type ? matrixFor.get(v.receiverId)![type] : { inApp: true, email: false, push: false };
+    };
+
+    const inApp = values.filter((v) => channelsOf(v).inApp);
+    const rows = inApp.length ? await this.db.insert(notifications).values(inApp).returning() : [];
     // Push live to anyone with the app open.
     for (const row of rows) {
       this.gateway.emitToUser(row.receiverId, "notification:new", row);
+    }
+
+    // Side channels. Email needs the address; push is a socket event the web app
+    // turns into a browser notification (no push server needed).
+    const wantEmail = values.filter((v) => channelsOf(v).email);
+    const wantPush = values.filter((v) => channelsOf(v).push);
+    if (wantEmail.length) {
+      const people = await this.db
+        .select({ id: users.id, email: users.email })
+        .from(users)
+        .where(inArray(users.id, [...new Set(wantEmail.map((v) => v.receiverId))]));
+      const emailOf = new Map(people.map((u) => [u.id, u.email]));
+      for (const v of wantEmail) {
+        const to = emailOf.get(v.receiverId);
+        if (to) void this.mailer.send({ to, subject: v.title, text: v.body ?? v.title, link: linkFor(v) });
+      }
+    }
+    for (const v of wantPush) {
+      this.gateway.emitToUser(v.receiverId, "notification:push", { title: v.title, body: v.body ?? "", link: linkFor(v), verb: v.verb });
     }
   }
 
@@ -288,24 +397,6 @@ export class NotificationsService {
     return { recipients: [...ids], assignees };
   }
 
-  private async filterByPreference(orgId: string, userIds: string[], verb: string) {
-    const key = PREFERENCE_FOR_VERB[verb];
-    if (!key) return userIds; // Unknown verb: deliver rather than silently drop.
-
-    const prefs = await this.db
-      .select()
-      .from(notificationPreferences)
-      .where(
-        and(
-          eq(notificationPreferences.organizationId, orgId),
-          inArray(notificationPreferences.userId, userIds),
-        ),
-      );
-    const byUser = new Map(prefs.map((p) => [p.userId, p]));
-
-    // No row means the user has never touched their settings — everything on.
-    return userIds.filter((id) => (byUser.get(id) ?? DEFAULT_PREFERENCES)[key]);
-  }
 
   /* ---------------------------------------------------------------- *
    * Inbox
@@ -475,6 +566,7 @@ export class NotificationsService {
    * Preferences
    * ---------------------------------------------------------------- */
 
+  /** Row 73: the resolved per-type channel matrix for this user. */
   async getPreferences(orgId: string, userId: string) {
     const row = await this.db.query.notificationPreferences.findFirst({
       where: and(
@@ -482,19 +574,27 @@ export class NotificationsService {
         eq(notificationPreferences.userId, userId),
       ),
     });
-    return row ?? { organizationId: orgId, userId, ...DEFAULT_PREFERENCES };
+    return { channels: resolveChannels(row), emailConfigured: this.mailer.configured };
   }
 
-  async updatePreferences(orgId: string, userId: string, patch: Partial<PreferenceFlags>) {
-    const [row] = await this.db
+  /** Merge a partial matrix (`{ mention: { email: false } }`) into the stored one. */
+  async updatePreferences(orgId: string, userId: string, patch: Partial<Record<NotifType, Partial<ChannelPrefs>>>) {
+    const current = await this.db.query.notificationPreferences.findFirst({
+      where: and(eq(notificationPreferences.organizationId, orgId), eq(notificationPreferences.userId, userId)),
+    });
+    const resolved = resolveChannels(current);
+    const next = { ...resolved } as ChannelMatrix;
+    for (const type of NOTIF_TYPES) {
+      if (patch[type]) next[type] = { ...resolved[type], ...patch[type] };
+    }
+    await this.db
       .insert(notificationPreferences)
-      .values({ organizationId: orgId, userId, ...DEFAULT_PREFERENCES, ...patch })
+      .values({ organizationId: orgId, userId, ...DEFAULT_PREFERENCES, channels: next })
       .onConflictDoUpdate({
         target: [notificationPreferences.organizationId, notificationPreferences.userId],
-        set: { ...patch, updatedAt: new Date() },
-      })
-      .returning();
-    return row!;
+        set: { channels: next, updatedAt: new Date() },
+      });
+    return { channels: next, emailConfigured: this.mailer.configured };
   }
 
   /**
@@ -532,5 +632,27 @@ export class NotificationsService {
         replyCount: r.entityType === "task" ? (countByTask.get(r.entityId) ?? 0) : 0,
       };
     });
+  }
+}
+
+
+/** Where a notification points in the web app - used for email and push. */
+function linkFor(v: { entityType: string; entityId: string; data?: Record<string, unknown> | null }): string | undefined {
+  const d = v.data ?? {};
+  switch (v.entityType) {
+    case "task":
+      return `/t/${v.entityId}`;
+    case "document":
+      return `/docs/${v.entityId}`;
+    case "proposal":
+      return `/crm/proposals/${v.entityId}`;
+    case "deal":
+      return `/crm/deals?deal=${v.entityId}`;
+    case "milestone":
+      return typeof d.projectId === "string" ? `/projects/${d.projectId}` : undefined;
+    case "message":
+      return typeof d.channelId === "string" ? `/chat/${d.channelId}` : undefined;
+    default:
+      return "/inbox";
   }
 }

@@ -481,12 +481,26 @@ export interface MyTask extends Task {
   list: { id: string; name: string; spaceId: string; spaceName: string | null } | null;
 }
 
+/** Row 73: per-type delivery switches. */
+export type NotifType =
+  | "mention"
+  | "assigned"
+  | "comment"
+  | "statusChange"
+  | "propertyChange"
+  | "taskCompleted"
+  | "approvals"
+  | "reminders"
+  | "chat";
+export interface ChannelPrefs {
+  inApp: boolean;
+  email: boolean;
+  push: boolean;
+}
 export interface NotificationPreferences {
-  propertyChange: boolean;
-  statusChange: boolean;
-  comment: boolean;
-  mention: boolean;
-  taskCompleted: boolean;
+  channels: Record<NotifType, ChannelPrefs>;
+  /** False when the server has no mail provider - email switches still save, but nothing goes out. */
+  emailConfigured: boolean;
 }
 
 export interface ReactionGroup {
@@ -1179,7 +1193,7 @@ export const api = {
     }),
   getNotificationPreferences: () =>
     request<NotificationPreferences>(`/notifications/preferences`),
-  updateNotificationPreferences: (patch: Partial<NotificationPreferences>) =>
+  updateNotificationPreferences: (patch: Partial<Record<NotifType, Partial<ChannelPrefs>>>) =>
     request<NotificationPreferences>(`/notifications/preferences`, {
       method: "PATCH",
       body: JSON.stringify(patch),

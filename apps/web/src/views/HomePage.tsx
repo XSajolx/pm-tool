@@ -6,6 +6,7 @@ import {
   type AppNotification,
   type InboxTab,
   type MyTask,
+  type NotifType,
   type TypedInboxTab,
   type TaskComment,
 } from "../lib/api.js";
@@ -459,6 +460,27 @@ function NotificationRow({
   );
 }
 
+const NOTIF_TYPE_ROWS: { key: NotifType; label: string }[] = [
+  { key: "mention", label: "Mentions & assigned comments" },
+  { key: "assigned", label: "Task assigned to me" },
+  { key: "approvals", label: "Approvals & sign-offs" },
+  { key: "reminders", label: "Due-date reminders & follow-ups" },
+  { key: "comment", label: "Comments on tasks I follow" },
+  { key: "statusChange", label: "Status changes" },
+  { key: "propertyChange", label: "Property changes" },
+  { key: "taskCompleted", label: "Task completed" },
+  { key: "chat", label: "Chat activity" },
+];
+const CHANNELS: { key: "inApp" | "email" | "push"; label: string }[] = [
+  { key: "inApp", label: "In-app" },
+  { key: "email", label: "Email" },
+  { key: "push", label: "Push" },
+];
+
+/**
+ * Row 73: per-type channel matrix. In-app = lands in this inbox; Email = sent
+ * to your address; Push = a browser/desktop notification while the app is open.
+ */
 function PreferencesPopover({ onClose }: { onClose: () => void }) {
   const qc = useQueryClient();
   const { data: prefs } = useQuery({
@@ -467,38 +489,66 @@ function PreferencesPopover({ onClose }: { onClose: () => void }) {
   });
   const update = useMutation({
     mutationFn: api.updateNotificationPreferences,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["notification-preferences"] }),
+    onSuccess: (next) => qc.setQueryData(["notification-preferences"], next),
   });
-
-  const rows: { key: keyof NonNullable<typeof prefs>; label: string }[] = [
-    { key: "propertyChange", label: "Property changes" },
-    { key: "statusChange", label: "Status changes" },
-    { key: "comment", label: "Comments" },
-    { key: "mention", label: "Mentions and assigned comments" },
-    { key: "taskCompleted", label: "Task completed" },
-  ];
+  const [perm, setPerm] = useState<NotificationPermission | "unsupported">(() =>
+    typeof Notification === "undefined" ? "unsupported" : Notification.permission,
+  );
+  const askPush = async () => {
+    if (typeof Notification === "undefined") return;
+    setPerm(await Notification.requestPermission());
+  };
 
   return (
     <>
       <div className="fixed inset-0 z-20" onClick={onClose} />
-      <div className="absolute right-0 top-full z-30 mt-1 w-64 rounded-md border border-border bg-white p-2 shadow-lg">
+      <div className="absolute right-0 top-full z-30 mt-1 w-[26rem] rounded-md border border-border bg-white p-2 shadow-lg">
         <p className="px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
           Notify me about
         </p>
-        {rows.map((r) => (
-          <label
-            key={r.key}
-            className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm text-slate-700 hover:bg-muted"
-          >
-            <input
-              type="checkbox"
-              checked={Boolean(prefs?.[r.key])}
-              onChange={(e) => update.mutate({ [r.key]: e.target.checked })}
-              className="accent-indigo-600"
-            />
-            {r.label}
-          </label>
-        ))}
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-[11px] text-muted-foreground">
+              <th className="px-2 py-1 text-left font-medium">Type</th>
+              {CHANNELS.map((c) => (
+                <th key={c.key} className="w-14 px-1 py-1 text-center font-medium">
+                  {c.label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {NOTIF_TYPE_ROWS.map((row) => (
+              <tr key={row.key} className="hover:bg-muted">
+                <td className="rounded-l px-2 py-1.5 text-slate-700">{row.label}</td>
+                {CHANNELS.map((c) => (
+                  <td key={c.key} className="px-1 py-1.5 text-center">
+                    <input
+                      type="checkbox"
+                      aria-label={`${row.label} - ${c.label}`}
+                      checked={Boolean(prefs?.channels[row.key]?.[c.key])}
+                      disabled={!prefs}
+                      onChange={(e) => update.mutate({ [row.key]: { [c.key]: e.target.checked } })}
+                      className="accent-indigo-600"
+                    />
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div className="mt-1 space-y-1 border-t border-border px-2 pt-2 text-[11px] text-muted-foreground">
+          {prefs && !prefs.emailConfigured && <p>Email is not connected on this server yet - switches are saved, mail goes out once it is.</p>}
+          {perm === "unsupported" ? (
+            <p>This browser can't show push notifications.</p>
+          ) : perm === "granted" ? (
+            <p>Push shows as a browser notification while the app is open.</p>
+          ) : (
+            <button type="button" onClick={askPush} className="text-indigo-600 hover:underline">
+              {perm === "denied" ? "Browser notifications are blocked - allow them in site settings" : "Enable browser notifications for push"}
+            </button>
+          )}
+        </div>
       </div>
     </>
   );

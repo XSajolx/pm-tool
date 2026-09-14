@@ -260,6 +260,13 @@
       "when": 1789350247270,
       "tag": "0036_reminders",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1789350607296,
+      "tag": "0037_notif_channels",
+      "breakpoints": true
     }
   ]
 }
