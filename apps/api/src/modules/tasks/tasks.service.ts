@@ -40,6 +40,7 @@ const TRACKED_FIELDS = [
   "contactId",
   "dealId",
   "timeEstimateMinutes",
+  "clientVisible",
 ];
 
 /** Relation shape for the CRM links a task carries (row 38). */

@@ -270,6 +270,8 @@ export interface Doc {
   /** Row 65: share link token (null = not shared). */
   shareToken: string | null;
   sharedAt: string | null;
+  /** Row 119 */
+  clientVisible: boolean;
   /** Row 63: sign-off. */
   reviewStatus: DocReviewStatus;
   approverId: string | null;
@@ -297,6 +299,8 @@ export interface Doc {
 }
 
 export interface DocWrite {
+  /** Row 119 */
+  clientVisible?: boolean;
   title?: string;
   body?: string;
   content?: Record<string, unknown> | null;
@@ -328,6 +332,8 @@ export interface Task {
   title: string;
   /** Row 95: time logged against the task, for estimate-vs-actual. */
   loggedSeconds?: number;
+  /** Row 119 */
+  clientVisible?: boolean;
   description: string | null;
   reference: string | null;
   priority: Priority | null;
@@ -479,6 +485,28 @@ export interface TaskComment {
 /** Fields PATCH /tasks/:id accepts. `null` clears a value. */
 export type Recurrence = "daily" | "weekly" | "monthly";
 
+/** Row 118: what a client sees. */
+export interface PortalProject {
+  organization: { name: string; brandColor: string; brandLogoUrl: string | null; brandFooter: string | null };
+  project: { id: string; name: string; color: string; status: string; client: string | null; lead: string | null; startDate: string | null; endDate: string | null; description: string | null };
+  stages: { id: string; index: number; name: string; status: "not_started" | "active" | "completed"; progressPct: number; startedAt: string | null; completedAt: string | null }[];
+  stageSummary: { total: number; completed: number; current: string | null };
+  milestones: { id: string; name: string; description: string | null; targetDate: string | null; reachedAt: string | null; signoffStatus: string | null; signoffNote: string | null; signoffBy: string | null; openTasks: number; clientApprovedAt?: string | null; clientApprovedBy?: string | null; clientApprovalNote?: string | null; clientDecision?: "approved" | "changes_requested" | null }[];
+  tasks: { id: string; reference: string | null; title: string; status: string | null; statusCategory: string | null; statusColor: string | null; dueDate: string | null; completedAt: string | null }[];
+  docs: { id: string; title: string; icon: string | null; updatedAt: string; reviewStatus: string; shareToken: string | null; clientApprovedAt?: string | null; clientApprovedBy?: string | null; clientDecision?: "approved" | "changes_requested" | null }[];
+  generatedAt: string;
+}
+export interface PortalDoc {
+  id: string;
+  title: string;
+  icon: string | null;
+  settings: DocSettings;
+  content: Record<string, unknown> | null;
+  body: string;
+  updatedAt: string;
+  reviewStatus: string;
+}
+
 export type TaskPatch = Partial<{
   recurrence: Recurrence | null;
   recurrenceInterval: number;
@@ -495,6 +523,8 @@ export type TaskPatch = Partial<{
   stageId: string | null;
   milestoneId: string | null;
   assigneeIds: string[];
+  /** Row 119 */
+  clientVisible: boolean;
 }>;
 
 export interface TaskTemplate {
@@ -1786,6 +1816,9 @@ export const api = {
     request<TimesheetSubmission>(`/time/timesheet/submissions/${id}/reopen`, { method: "POST", body: JSON.stringify({ reason }) }),
   getTimesheetEvents: (id: string) =>
     request<{ id: string; kind: string; note: string | null; createdAt: string; actor: { id: string; name: string } | null }[]>(`/time/timesheet/submissions/${id}/events`),
+  /** Row 118 */
+  getPortalPreview: (projectId: string) => request<PortalProject>(`/portal/preview/${projectId}`),
+  getPortalPreviewDoc: (projectId: string, docId: string) => request<PortalDoc>(`/portal/preview/${projectId}/docs/${docId}`),
   /** Row 117: authenticated ZIP download (workspace or one project). */
   downloadExport: async (projectId?: string) => {
     const token = await accessToken();

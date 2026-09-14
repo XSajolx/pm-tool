@@ -387,6 +387,7 @@ export function DocPage() {
           >
             PDF
           </button>
+          <ClientVisibleToggle doc={doc} />
           <ShareButton doc={doc} />
           <button
             type="button"
@@ -995,6 +996,27 @@ function ReviewSection({ doc }: { doc: Doc }) {
 }
 
 /** Row 65: a public read-only link. Internal-only blocks (🔒) are stripped server-side. */
+/** Row 119: list this doc on the client portal (internal blocks are stripped there, like the share link). */
+function ClientVisibleToggle({ doc }: { doc: Doc }) {
+  const qc = useQueryClient();
+  const toggle = useMutation({
+    mutationFn: () => api.updateDocument(doc.id, { clientVisible: !doc.clientVisible }),
+    onSuccess: (updated) => { qc.setQueryData(["document", doc.id], updated); qc.invalidateQueries({ queryKey: ["documents"] }); },
+  });
+  return (
+    <button
+      type="button"
+      onClick={() => toggle.mutate()}
+      disabled={toggle.isPending}
+      className={`rounded-md border px-2.5 py-1 text-xs transition ${doc.clientVisible ? "border-indigo-300 bg-indigo-50 text-indigo-700" : "border-border text-slate-600 hover:bg-muted"}`}
+      title={doc.clientVisible ? "Shown on the client portal - click to hide" : "Hidden from clients - click to show on the client portal"}
+      data-testid="doc-client-visible"
+    >
+      {doc.clientVisible ? "👁 Client-visible" : "Client-visible: off"}
+    </button>
+  );
+}
+
 function ShareButton({ doc }: { doc: Doc }) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);

@@ -32,6 +32,8 @@ export interface DocumentWrite {
   icon?: string | null;
   cover?: string | null;
   settings?: DocumentSettings;
+  /** Row 119 */
+  clientVisible?: boolean;
 }
 
 @Injectable()

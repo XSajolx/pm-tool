@@ -41,6 +41,7 @@ import { MyWorkPage } from "./views/MyWorkPage.js";
 import { DocsPage, DocPage } from "./views/DocsPage.js";
 import { DashboardsPage } from "./views/DashboardsPage.js";
 import { OverviewPage } from "./views/OverviewPage.js";
+import { PortalPreviewPage } from "./views/PortalPreviewPage.js";
 import { TaskOpenPage } from "./views/TaskOpenPage.js";
 import { SpaceOverviewPage } from "./views/SpaceOverviewPage.js";
 import { AuthPage } from "./views/AuthPage.js";
@@ -196,6 +197,7 @@ const docsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/docs", 
 const docRoute = createRoute({ getParentRoute: () => rootRoute, path: "/docs/$docId", component: DocPage });
 const dashboardsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/dashboards", component: DashboardsPage });
 const overviewRoute = createRoute({ getParentRoute: () => rootRoute, path: "/overview", component: OverviewPage });
+const portalPreviewRoute = createRoute({ getParentRoute: () => rootRoute, path: "/portal/preview/$projectId", component: PortalPreviewPage });
 const spaceRoute = createRoute({ getParentRoute: () => rootRoute, path: "/s/$spaceId", component: SpaceOverviewPage });
 const chatIndexRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -294,6 +296,7 @@ const routeTree = rootRoute.addChildren([
   docRoute,
   dashboardsRoute,
   overviewRoute,
+  portalPreviewRoute,
   spaceRoute,
   settingsRoute,
   myWorkRoute,

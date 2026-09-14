@@ -133,6 +133,11 @@ export function ProjectPage() {
           <a href="#project-docs" className="rounded-full border border-border bg-white px-2.5 py-1 text-slate-700 hover:border-indigo-300 hover:text-indigo-700">
             📄 Docs
           </a>
+          {canManage && (
+            <Link to="/portal/preview/$projectId" params={{ projectId: project.id }} className="rounded-full border border-border bg-white px-2.5 py-1 text-slate-700 hover:border-indigo-300 hover:text-indigo-700" title="See exactly what a client guest sees (row 118)">
+              👁 Preview as client
+            </Link>
+          )}
           {project.company && (
             <Link to="/crm/companies/$companyId" params={{ companyId: project.company.id }} className="rounded-full border border-border bg-white px-2.5 py-1 text-slate-700 hover:border-indigo-300 hover:text-indigo-700">
               🏢 {project.company.name}

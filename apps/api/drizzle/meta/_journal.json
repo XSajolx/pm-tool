@@ -442,6 +442,13 @@
       "when": 1789398376831,
       "tag": "0062_custom_fields",
       "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1789399621076,
+      "tag": "0063_client_visible",
+      "breakpoints": true
     }
   ]
 }

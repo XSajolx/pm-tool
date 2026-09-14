@@ -261,6 +261,8 @@ export const tasks = pgTable(
     dueDate: timestamp("due_date", { withTimezone: true }),
     completedAt: timestamp("completed_at", { withTimezone: true }),
     timeEstimateMinutes: integer("time_estimate_minutes"),
+    /** Row 119: shown on the client portal when true (default off). tasks_client_visible */
+    clientVisible: boolean("client_visible").notNull().default(false),
     createdById: uuid("created_by_id").references(() => users.id),
     ...timestamps,
   },
@@ -1965,6 +1967,8 @@ export const documents = pgTable(
     supersededById: uuid("superseded_by_id").references((): AnyPgColumn => documents.id, { onDelete: "set null" }),
     supersededAt: timestamp("superseded_at", { withTimezone: true }),
     effectiveFrom: timestamp("effective_from", { withTimezone: true }),
+    /** Row 119: listed on the client portal (internal blocks stripped) when true. */
+    clientVisible: boolean("client_visible").notNull().default(false),
     /** Row 65: public read-only link (internal-only blocks stripped). Null = not shared. */
     shareToken: varchar("share_token", { length: 64 }),
     sharedAt: timestamp("shared_at", { withTimezone: true }),

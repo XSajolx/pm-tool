@@ -25,6 +25,8 @@ export const createTaskSchema = z.object({
   recurrence: z.enum(["daily", "weekly", "monthly"]).nullable().optional(),
   recurrenceInterval: z.number().int().min(1).max(365).optional(),
   /** Whole minutes; null clears the estimate. */
+  /** Row 119 */
+  clientVisible: z.boolean().optional(),
   timeEstimateMinutes: z.number().int().min(0).max(100_000).nullable().optional(),
   assigneeIds: z.array(z.string().uuid()).optional(),
 });

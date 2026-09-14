@@ -187,6 +187,14 @@ export function TaskDetail({ taskId, listId, spaceId, statuses, members, onClose
               {/* Row 114 */}
               <CustomFieldsPanel entityType="task" entityId={task.id} />
 
+              {/* Row 119: default off; on = title, status and due date appear on the client portal */}
+              <Field label="Client">
+                <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+                  <input type="checkbox" checked={Boolean(task.clientVisible)} onChange={(e) => save.mutate({ clientVisible: e.target.checked })} className="h-4 w-4 accent-indigo-600" data-testid="task-client-visible" />
+                  Visible on client portal
+                </label>
+              </Field>
+
               <Field label="Assignees">
                 <div className="flex flex-wrap items-center gap-1.5">
                   {task.assignees.map((a) => (

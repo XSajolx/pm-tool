@@ -14,6 +14,6 @@ import { NotificationsModule } from "../notifications/notifications.module.js";
   imports: [ChatModule, NotificationsModule],
   controllers: [DocumentsController, PublicDocumentsController, SnippetsController, BrandingController, DocTemplatesController],
   providers: [DocumentsService, SnippetsService, DocTemplatesService],
-  exports: [DocTemplatesService],
+  exports: [DocumentsService, DocTemplatesService],
 })
 export class DocumentsModule {}

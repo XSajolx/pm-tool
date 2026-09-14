@@ -24,6 +24,7 @@ import { InboundModule } from "./modules/inbound/inbound.module.js";
 import { IntegrationsModule } from "./modules/integrations/integrations.module.js";
 import { CustomFieldsModule } from "./modules/custom-fields/custom-fields.module.js";
 import { ExportModule } from "./modules/export/export.module.js";
+import { PortalModule } from "./modules/portal/portal.module.js";
 
 @Module({
   imports: [
@@ -51,6 +52,7 @@ import { ExportModule } from "./modules/export/export.module.js";
     IntegrationsModule,
     CustomFieldsModule,
     ExportModule,
+    PortalModule,
   ],
   controllers: [HealthController],
 })

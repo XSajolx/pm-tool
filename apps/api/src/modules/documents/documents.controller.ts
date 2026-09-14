@@ -25,6 +25,8 @@ const schema = z.object({
   icon: z.string().max(16).nullable().optional(),
   cover: z.string().max(64).nullable().optional(),
   settings: settingsSchema.optional(),
+  /** Row 119 */
+  clientVisible: z.boolean().optional(),
 });
 
 const linkEntity = z.enum(["project", "task", "company", "deal"]);
