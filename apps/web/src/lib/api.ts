@@ -726,6 +726,8 @@ export interface TimesheetSubmission {
   note: string | null;
   submittedAt: string;
   decidedAt: string | null;
+  /** Row 92 */
+  decidedBy?: { id: string; name: string } | null;
 }
 
 export interface Timesheet {

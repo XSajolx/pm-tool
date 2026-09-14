@@ -235,6 +235,7 @@ function ManualEntryForm() {
       >
         Log time
       </button>
+      {create.isError && <span className="basis-full text-xs text-red-600">{(create.error as Error).message.replace(/^API \d+: /, "").replace(/^\{.*"message":"([^"]+)".*\}$/, "$1")}</span>}
     </form>
   );
 }

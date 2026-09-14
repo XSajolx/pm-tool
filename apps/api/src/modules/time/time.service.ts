@@ -165,6 +165,7 @@ export class TimeService {
     const projectId = dto.projectId ?? (dto.taskId ? await this.projectForTask(orgId, dto.taskId) : null);
     if (!projectId) throw new BadRequestException("Pick a project or a task to track time on");
     const project = await this.assertProjectAndTask(orgId, projectId, dto.taskId, dto.stageId);
+    await this.assertWeekUnlocked(orgId, userId, new Date());
     // One running timer per person: starting a new one stops the old one.
     await this.stop(orgId, userId);
 
@@ -215,6 +216,7 @@ export class TimeService {
   async createManual(orgId: string, userId: string, dto: ManualEntryDto) {
     const project = await this.assertProjectAndTask(orgId, dto.projectId, dto.taskId, dto.stageId);
     const startedAt = new Date(dto.startedAt);
+    await this.assertWeekUnlocked(orgId, userId, startedAt);
     const durationSeconds =
       dto.durationSeconds ??
       (dto.endedAt
@@ -255,6 +257,7 @@ export class TimeService {
     },
   ) {
     const existing = await this.owned(orgId, actor, id);
+    await this.assertWeekUnlocked(orgId, existing.userId, existing.startedAt);
     if (patch.projectId || patch.taskId !== undefined) {
       await this.assertProjectAndTask(
         orgId,
@@ -276,7 +279,8 @@ export class TimeService {
   }
 
   async remove(orgId: string, actor: Actor, id: string) {
-    await this.owned(orgId, actor, id);
+    const existing = await this.owned(orgId, actor, id);
+    await this.assertWeekUnlocked(orgId, existing.userId, existing.startedAt);
     await this.db.delete(timeEntries).where(eq(timeEntries.id, id));
     return { id, deleted: true };
   }
@@ -373,6 +377,7 @@ export class TimeService {
       submission:
         (await this.db.query.timesheetSubmissions.findFirst({
           where: and(eq(timesheetSubmissions.userId, userId), eq(timesheetSubmissions.weekStart, weekStart)),
+          with: { decidedBy: { columns: { id: true, name: true } } },
         })) ?? null,
       weekStart: weekStart.toISOString(),
       days: [0, 1, 2, 3, 4, 5, 6].map((i) =>
@@ -398,6 +403,7 @@ export class TimeService {
   ) {
     const userId = this.resolveUser(actor, dto.userId) ?? actor.userId;
     await this.assertProjectAndTask(orgId, dto.projectId, dto.taskId ?? undefined);
+    await this.assertWeekUnlocked(orgId, userId, new Date(dto.date));
     // Row 88: a cell is (project, task-or-none, day).
     const taskMatch = dto.taskId ? eq(timeEntries.taskId, dto.taskId) : isNull(timeEntries.taskId);
 
@@ -534,6 +540,22 @@ export class TimeService {
   }
 
   /** Project must be in this org; task (if given) must live in the project's space. */
+  /**
+   * Row 92: once a week is approved its hours are locked - no new entries, edits
+   * or deletions for that person in that week until a project manager unlocks it
+   * (row 93). Rejected / submitted weeks stay editable.
+   */
+  private async assertWeekUnlocked(orgId: string, userId: string, at: Date) {
+    const weekStart = startOfWeek(at);
+    const sub = await this.db.query.timesheetSubmissions.findFirst({
+      where: and(eq(timesheetSubmissions.organizationId, orgId), eq(timesheetSubmissions.userId, userId), eq(timesheetSubmissions.weekStart, weekStart)),
+      columns: { status: true },
+    });
+    if (sub?.status === "approved") {
+      throw new ForbiddenException(`The week of ${weekStart.toLocaleDateString()} is approved and locked - ask a project manager to unlock it before changing hours`);
+    }
+  }
+
   /** Row 90: the project that owns a task (task → list → space → project), or null. */
   private async projectForTask(orgId: string, taskId: string) {
     const [row] = await this.db

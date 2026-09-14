@@ -101,7 +101,9 @@ export function TimesheetPage() {
   }, [sheet, extraRows, projects, codes]);
 
   const addable = [...projects.filter((p) => p.status === "active").map((p) => ({ id: p.id, name: p.name })), ...codes.map((c) => ({ id: c.id, name: `Internal · ${c.name}` }))];
-  const editable = !forUser || forUser === user?.id || isAdmin;
+  // Row 92: an approved week is locked for everyone until a project manager unlocks it.
+  const locked = sheet?.submission?.status === "approved";
+  const editable = (!forUser || forUser === user?.id || isAdmin) && !locked;
   const weekStart = sheet ? new Date(sheet.weekStart) : null;
   const weekEnd = weekStart ? new Date(weekStart.getTime() + 6 * 86_400_000) : null;
 
@@ -161,6 +163,9 @@ export function TimesheetPage() {
             {submit.isError && <span className="text-xs text-red-600">{(submit.error as Error).message}</span>}
           </div>
         )}
+        {sheet && forUser && isAdmin && sheet.submission && (
+          <ApproveControls submission={sheet.submission} onDone={() => qc.invalidateQueries({ queryKey: ["timesheet"] })} />
+        )}
         {isAdmin && (
           <select value={forUser} onChange={(e) => setForUser(e.target.value)} className={cn("rounded-md border border-border bg-white px-2 py-1 text-xs text-slate-700", forUser ? "ml-auto" : "")}>
             <option value="">My timesheet</option>
@@ -172,6 +177,13 @@ export function TimesheetPage() {
       </div>
 
       <div className="flex-1 overflow-auto p-6">
+        {locked && sheet?.submission && (
+          <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800">
+            🔒 This week is approved{sheet.submission.decidedBy ? ` by ${sheet.submission.decidedBy.name}` : ""}
+            {sheet.submission.decidedAt ? ` on ${new Date(sheet.submission.decidedAt).toLocaleDateString()}` : ""} and its hours are locked.
+            <span className="text-xs text-green-700">Need a change? Ask a project manager to unlock it.</span>
+          </div>
+        )}
         {isLoading || !sheet ? (
           <p className="text-sm text-muted-foreground">Loading…</p>
         ) : (
@@ -290,6 +302,41 @@ function HourCell({ value, editable, onCommit }: { value: number; editable: bool
       onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
       className="h-9 w-full bg-transparent text-center text-sm tabular-nums text-slate-800 outline-none placeholder:text-slate-300 focus:bg-indigo-50"
     />
+  );
+}
+
+/** Row 92: approve or send back someone's submitted week, right on their timesheet. */
+function ApproveControls({ submission, onDone }: { submission: { id: string; status: string; note: string | null; decidedBy?: { name: string } | null }; onDone: () => void }) {
+  const [rejecting, setRejecting] = useState(false);
+  const [note, setNote] = useState("");
+  const decide = useMutation({ mutationFn: (body: { approve: boolean; note?: string }) => api.decideTimesheet(submission.id, body), onSuccess: onDone });
+  if (submission.status === "approved") return <span className="ml-auto rounded-full bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700">✓ Approved{submission.decidedBy ? ` by ${submission.decidedBy.name}` : ""}</span>;
+  if (submission.status === "rejected") return <span className="ml-auto rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700" title={submission.note ?? undefined}>Sent back{submission.note ? `: ${submission.note}` : ""}</span>;
+  return (
+    <div className="ml-auto flex items-center gap-2">
+      <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800">Awaiting your approval</span>
+      {rejecting ? (
+        <>
+          <input autoFocus value={note} onChange={(e) => setNote(e.target.value)} placeholder="What needs fixing?" className="w-48 rounded-md border border-border px-2 py-1 text-xs" />
+          <button type="button" disabled={decide.isPending} onClick={() => decide.mutate({ approve: false, note: note.trim() || undefined })} className="rounded-md bg-red-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-50">
+            Send back
+          </button>
+          <button type="button" onClick={() => setRejecting(false)} className="text-xs text-slate-500 hover:underline">
+            Cancel
+          </button>
+        </>
+      ) : (
+        <>
+          <button type="button" disabled={decide.isPending} onClick={() => decide.mutate({ approve: true })} className="rounded-md bg-green-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50">
+            ✓ Approve
+          </button>
+          <button type="button" disabled={decide.isPending} onClick={() => setRejecting(true)} className="rounded-md border border-border px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-red-50 hover:text-red-700 disabled:opacity-50">
+            ✕ Reject
+          </button>
+        </>
+      )}
+      {decide.isError && <span className="text-xs text-red-600">{(decide.error as Error).message}</span>}
+    </div>
   );
 }
 

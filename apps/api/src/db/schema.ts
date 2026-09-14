@@ -2265,3 +2265,9 @@ export const invitationsRelations = relations(invitations, ({ one }) => ({
   user: one(users, { fields: [invitations.userId], references: [users.id], relationName: "invitation_user" }),
   invitedBy: one(users, { fields: [invitations.invitedById], references: [users.id], relationName: "invitation_inviter" }),
 }));
+
+export const timesheetSubmissionsRelations = relations(timesheetSubmissions, ({ one }) => ({
+  user: one(users, { fields: [timesheetSubmissions.userId], references: [users.id], relationName: "timesheet_owner" }),
+  approver: one(users, { fields: [timesheetSubmissions.approverId], references: [users.id], relationName: "timesheet_approver" }),
+  decidedBy: one(users, { fields: [timesheetSubmissions.decidedById], references: [users.id], relationName: "timesheet_decider" }),
+}));
