@@ -20,6 +20,18 @@ export class IntegrationsController {
     return this.integrations.list(auth.orgId);
   }
 
+  /** Row 116: every service with its status, last check and what fixes it. */
+  @Get("health")
+  health(@Auth() auth: AuthContext) {
+    return this.integrations.health(auth.orgId);
+  }
+
+  @Post("email/check")
+  @Roles("owner", "admin")
+  checkEmail(@Auth() auth: AuthContext) {
+    return this.integrations.checkEmail(auth.orgId);
+  }
+
   /** Returns the consent URL; the web app navigates there. */
   @Post(":provider/start")
   @Roles("owner", "admin")

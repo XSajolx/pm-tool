@@ -1,9 +1,11 @@
-import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Inject, Injectable, Logger, NotFoundException, type OnModuleDestroy, type OnModuleInit } from "@nestjs/common";
 import { and, eq } from "drizzle-orm";
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
-import { integrations } from "../../db/schema.js";
+import { integrations, memberships } from "../../db/schema.js";
+import { MailerService } from "../notifications/mailer.service.js";
+import { NotificationsService } from "../notifications/notifications.service.js";
 import { ActivityService } from "../activity/activity.service.js";
 
 export type Provider = "google_drive" | "dropbox";
@@ -54,15 +56,80 @@ interface PendingState { orgId: string; userId: string; provider: Provider; expi
  * `check()` for the health page.
  */
 @Injectable()
-export class IntegrationsService {
+export class IntegrationsService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(IntegrationsService.name);
+  private timer: NodeJS.Timeout | null = null;
   /** OAuth state nonces (single-process; fine for one API instance). */
   private readonly pending = new Map<string, PendingState>();
 
   constructor(
     @Inject(DRIZZLE) private readonly db: DB,
     private readonly activity: ActivityService,
+    private readonly mailer: MailerService,
+    private readonly notifications: NotificationsService,
   ) {}
+
+  /** Row 116: re-check every connected account hourly so a broken link is never silent. */
+  onModuleInit() {
+    this.timer = setInterval(() => void this.sweep(), 60 * 60 * 1000);
+    setTimeout(() => void this.sweep(), 20_000);
+  }
+  onModuleDestroy() {
+    if (this.timer) clearInterval(this.timer);
+  }
+
+  async sweep() {
+    try {
+      const rows = await this.db.query.integrations.findMany({ where: eq(integrations.status, "connected") });
+      for (const row of rows) await this.check(row.organizationId, row.provider as Provider).catch(() => undefined);
+    } catch (err) {
+      this.logger.warn(`integration sweep failed: ${(err as Error).message}`);
+    }
+  }
+
+  /**
+   * Row 116: one view of every service the workspace depends on - the OAuth
+   * connections plus email, calendar and e-signature - with status, last
+   * check and what is needed to fix it.
+   */
+  async health(orgId: string) {
+    const providers = await this.list(orgId);
+    const mail = this.mailer.lastResult;
+    const email = {
+      id: "email",
+      label: "Email (Resend)",
+      status: !this.mailer.configured ? "not_set_up" : mail && !mail.ok ? "failing" : "connected",
+      detail: !this.mailer.configured ? "Add RESEND_API_KEY (and MAIL_FROM) to the API .env" : mail ? `${mail.what === "send" ? "Last email" : "Last check"} ${mail.ok ? "succeeded" : "failed"}` : "Configured - no email sent yet",
+      lastCheckedAt: mail?.at ?? null,
+      lastError: mail?.ok === false ? mail.error : null,
+      canCheck: this.mailer.configured,
+    };
+    const google = providers.find((p) => p.provider === "google_drive");
+    const calendar = {
+      id: "calendar",
+      label: "Google Calendar",
+      status: "not_set_up",
+      detail: google?.status === "connected" ? "Drive is connected; calendar sync is not part of this build yet" : "Comes with the Google connection once calendar sync is built",
+      lastCheckedAt: null,
+      lastError: null,
+      canCheck: false,
+    };
+    const esign = {
+      id: "esign",
+      label: "E-signature",
+      status: "not_set_up",
+      detail: "Proposals are accepted from the share page (row 55); a DocuSign / Dropbox Sign connection is not part of this build",
+      lastCheckedAt: null,
+      lastError: null,
+      canCheck: false,
+    };
+    return { providers, services: [email, calendar, esign] };
+  }
+
+  async checkEmail(orgId: string) {
+    await this.mailer.check();
+    return this.health(orgId);
+  }
 
   configured(provider: Provider) {
     const e = ENV[provider];
@@ -199,6 +266,22 @@ export class IntegrationsService {
       const msg = (err as Error).message;
       const status = /invalid_grant|expired|revoked|401|unauthori[sz]ed/i.test(msg) ? "needs_reconnect" : "failing";
       await this.db.update(integrations).set({ status, lastCheckedAt: new Date(), lastError: msg, updatedAt: new Date() }).where(eq(integrations.id, row.id));
+      // Row 116: tell the admins once, when the status changes.
+      if (row.status === "connected") {
+        const admins = await this.db.query.memberships.findMany({ where: eq(memberships.organizationId, orgId), columns: { userId: true, role: true } });
+        for (const m of admins.filter((x) => x.role === "owner" || x.role === "admin")) {
+          await this.notifications.notifyDirect({
+            orgId,
+            receiverId: m.userId,
+            entityType: "integration",
+            entityId: row.id,
+            verb: "integration_failing",
+            title: `${ENV[provider].label} ${status === "needs_reconnect" ? "needs reconnecting" : "is failing"}`,
+            body: `${msg} - open Settings › Connections to reconnect or retry.`,
+            data: { provider, link: "/settings?section=connections" },
+          }).catch(() => undefined);
+        }
+      }
     }
     return this.list(orgId);
   }

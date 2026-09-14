@@ -12,8 +12,27 @@ export class MailerService {
   private readonly from = process.env.MAIL_FROM ?? "PM Tool <notifications@pm-tool.local>";
   private readonly appUrl = (process.env.WEB_URL ?? process.env.CORS_ORIGIN ?? "http://localhost:5173").split(",")[0]!.trim();
 
+  /** Row 116: the last send / check outcome, for the health page. */
+  lastResult: { at: string; ok: boolean; error: string | null; what: "send" | "check" } | null = null;
+
   get configured() {
     return Boolean(this.apiKey);
+  }
+
+  /** Row 116: verify the key without sending anything (Resend lists domains). */
+  async check() {
+    if (!this.apiKey) return { ok: false, error: "RESEND_API_KEY is not set" };
+    try {
+      const res = await fetch("https://api.resend.com/domains", { headers: { Authorization: `Bearer ${this.apiKey}` } });
+      const ok = res.ok;
+      const error = ok ? null : `Resend responded ${res.status}`;
+      this.lastResult = { at: new Date().toISOString(), ok, error, what: "check" };
+      return { ok, error };
+    } catch (err) {
+      const error = (err as Error).message;
+      this.lastResult = { at: new Date().toISOString(), ok: false, error, what: "check" };
+      return { ok: false, error };
+    }
   }
 
   async send(input: { to: string; subject: string; text: string; link?: string }) {
@@ -28,10 +47,13 @@ export class MailerService {
         headers: { Authorization: `Bearer ${this.apiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify({ from: this.from, to: [input.to], subject: input.subject, text: body }),
       });
-      if (!res.ok) this.logger.warn(`email to ${input.to} failed: ${res.status} ${await res.text()}`);
+      const detail = res.ok ? null : `${res.status} ${await res.text()}`;
+      if (detail) this.logger.warn(`email to ${input.to} failed: ${detail}`);
+      this.lastResult = { at: new Date().toISOString(), ok: res.ok, error: detail, what: "send" };
       return { sent: res.ok };
     } catch (err) {
       this.logger.warn(`email to ${input.to} failed: ${(err as Error).message}`);
+      this.lastResult = { at: new Date().toISOString(), ok: false, error: (err as Error).message, what: "send" };
       return { sent: false };
     }
   }

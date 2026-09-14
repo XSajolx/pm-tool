@@ -946,6 +946,21 @@ export interface IntegrationStatus {
   lastError: string | null;
 }
 
+/** Row 116 */
+export interface ServiceHealth {
+  id: "email" | "calendar" | "esign";
+  label: string;
+  status: "connected" | "failing" | "not_set_up";
+  detail: string;
+  lastCheckedAt: string | null;
+  lastError: string | null;
+  canCheck: boolean;
+}
+export interface IntegrationHealth {
+  providers: IntegrationStatus[];
+  services: ServiceHealth[];
+}
+
 /** Row 110 */
 export type EmploymentType = "full_time" | "part_time" | "contractor";
 export interface WorkCalendar {
@@ -1794,6 +1809,9 @@ export const api = {
   startIntegration: (provider: IntegrationProvider) => request<{ url: string }>(`/integrations/${provider}/start`, { method: "POST" }),
   checkIntegration: (provider: IntegrationProvider) => request<IntegrationStatus[]>(`/integrations/${provider}/check`, { method: "POST" }),
   disconnectIntegration: (provider: IntegrationProvider) => request<IntegrationStatus[]>(`/integrations/${provider}`, { method: "DELETE" }),
+  /** Row 116 */
+  getIntegrationHealth: () => request<IntegrationHealth>(`/integrations/health`),
+  checkEmailService: () => request<IntegrationHealth>(`/integrations/email/check`, { method: "POST" }),
   /** Row 110 */
   getWorkCalendar: () => request<WorkCalendar>(`/time/calendar`),
   updateWorkCalendar: (body: { standardWeeklyHours?: number; workingDays?: number[] }) => request<WorkCalendar>(`/time/calendar`, { method: "PATCH", body: JSON.stringify(body) }),

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, type IntegrationProvider, type IntegrationStatus } from "../lib/api.js";
+import { api, type IntegrationProvider, type IntegrationStatus, type ServiceHealth } from "../lib/api.js";
 import { cn } from "../lib/utils.js";
 
 /**
@@ -15,6 +15,46 @@ const STATUS: Record<IntegrationStatus["status"], { label: string; cls: string }
   disconnected: { label: "Not connected", cls: "bg-slate-100 text-slate-600 border-slate-200" },
 };
 const ICON: Record<IntegrationProvider, string> = { google_drive: "🟢", dropbox: "🔷" };
+
+const SERVICE_STATUS: Record<ServiceHealth["status"], { label: string; cls: string }> = {
+  connected: STATUS.connected,
+  failing: STATUS.failing,
+  not_set_up: { label: "Not set up", cls: "bg-slate-100 text-slate-600 border-slate-200" },
+};
+
+/** Row 116: the non-OAuth services (email, calendar, e-sign) with status, last check and retry. */
+function ServiceHealthList({ canEdit }: { canEdit: boolean }) {
+  const qc = useQueryClient();
+  const { data } = useQuery({ queryKey: ["integration-health"], queryFn: api.getIntegrationHealth, refetchInterval: 5 * 60_000 });
+  const checkEmail = useMutation({ mutationFn: () => api.checkEmailService(), onSuccess: (h) => qc.setQueryData(["integration-health"], h) });
+  if (!data) return null;
+  return (
+    <section className="mt-6" data-testid="service-health">
+      <h2 className="text-sm font-semibold text-slate-800">Integration health</h2>
+      <p className="text-xs text-muted-foreground">Connected accounts are re-checked every hour; admins get an inbox alert when one breaks. Everything else the app relies on is listed here too.</p>
+      <ul className="mt-2 divide-y divide-border rounded-lg border border-border bg-white">
+        {data.services.map((s) => {
+          const st = SERVICE_STATUS[s.status];
+          return (
+            <li key={s.id} className="flex flex-wrap items-center gap-3 px-4 py-2.5 text-sm">
+              <div className="min-w-0 flex-1">
+                <p className="font-medium text-slate-800">{s.label}</p>
+                <p className="text-xs text-muted-foreground">{s.detail}{s.lastCheckedAt ? ` · ${new Date(s.lastCheckedAt).toLocaleString()}` : ""}</p>
+                {s.lastError && <p className="text-xs text-red-600">{s.lastError}</p>}
+              </div>
+              <span className={cn("rounded-full border px-2 py-0.5 text-[11px] font-medium", st.cls)}>{st.label}</span>
+              {canEdit && s.canCheck && s.id === "email" && (
+                <button type="button" disabled={checkEmail.isPending} onClick={() => checkEmail.mutate()} className="rounded-md border border-border bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:border-indigo-300 hover:text-indigo-700 disabled:opacity-50">
+                  {checkEmail.isPending ? "Checking…" : s.status === "failing" ? "Retry" : "Check now"}
+                </button>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
 
 export function ConnectionsSettings({ canEdit }: { canEdit: boolean }) {
   const qc = useQueryClient();
@@ -37,7 +77,7 @@ export function ConnectionsSettings({ canEdit }: { canEdit: boolean }) {
 
   return (
     <div className="max-w-2xl" data-testid="connections">
-      <h1 className="text-lg font-semibold text-slate-900">Connections</h1>
+      <h1 className="text-lg font-semibold text-slate-900">Connections & integration health</h1>
       <p className="mt-1 text-sm text-muted-foreground">
         Connect a cloud drive once for the whole workspace. Members then link existing files to projects, tasks and docs. Files are linked, never copied - one source of truth.
       </p>
@@ -84,7 +124,7 @@ export function ConnectionsSettings({ canEdit }: { canEdit: boolean }) {
                     ) : (
                       <>
                         <button type="button" disabled={check.isPending} onClick={() => check.mutate(r.provider)} className="rounded-md border border-border bg-white px-3 py-1.5 font-medium text-slate-700 hover:border-indigo-300 hover:text-indigo-700 disabled:opacity-50">
-                          {check.isPending ? "Checking…" : "Check now"}
+                          {check.isPending ? "Checking…" : r.status === "connected" ? "Check now" : "Retry"}
                         </button>
                         {r.status !== "connected" && (
                           <button type="button" disabled={start.isPending} onClick={() => start.mutate(r.provider)} className="rounded-md bg-indigo-600 px-3 py-1.5 font-medium text-white hover:bg-indigo-700 disabled:opacity-50">Reconnect</button>
@@ -100,6 +140,7 @@ export function ConnectionsSettings({ canEdit }: { canEdit: boolean }) {
           })}
         </ul>
       )}
+      <ServiceHealthList canEdit={canEdit} />
     </div>
   );
 }

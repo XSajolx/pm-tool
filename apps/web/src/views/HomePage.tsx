@@ -38,6 +38,7 @@ const VERB_LABEL: Record<string, string> = {
   due_soon: "— due soon",
   overdue: "— overdue",
   milestone_at_risk: "— milestone at risk",
+  integration_failing: "— connection needs attention",
   doc_review_requested: "asked you to review",
   milestone_signoff_requested: "asked you to sign off",
   milestone_approved: "signed off",

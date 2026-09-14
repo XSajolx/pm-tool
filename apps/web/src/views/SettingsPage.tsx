@@ -28,7 +28,7 @@ const SECTIONS: { id: Section; label: string; hint: string }[] = [
   { id: "statuses", label: "Task statuses", hint: "Per space: names, colours, order, done state" },
   { id: "workhours", label: "Working hours & holidays", hint: "Standard week, days off, and each person's hours" },
   { id: "notifications", label: "Notifications", hint: "Defaults for new members, and workspace quiet hours" },
-  { id: "connections", label: "Connections", hint: "Google Drive and Dropbox - link files, never copy them" },
+  { id: "connections", label: "Connections & health", hint: "Drive, Dropbox, email: connected, needs reconnect or failing" },
   { id: "timecodes", label: "Time codes & reminders", hint: "Internal codes, and when to nudge unfinished timesheets" },
   { id: "priorities", label: "Priorities", hint: "The four priority levels" },
   { id: "stages", label: "Stage templates", hint: "Default stage sequences for new projects" },
