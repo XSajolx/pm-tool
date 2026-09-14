@@ -14,6 +14,7 @@ import { Sidebar } from "./components/Sidebar.js";
 import { WorkspacePage } from "./views/WorkspacePage.js";
 import { ChatPage } from "./views/ChatPage.js";
 import { ResetPasswordPage } from "./views/ResetPasswordPage.js";
+import { MfaEnrollPage, MfaVerifyPage } from "./views/MfaPages.js";
 import { HomePage } from "./views/HomePage.js";
 import { IntakePage } from "./views/IntakePage.js";
 import { ProjectsPage } from "./views/ProjectsPage.js";
@@ -52,7 +53,7 @@ import "./doc-editor.css";
  * where the user was headed instead of dumping them on the index.
  */
 function Protected() {
-  const { session, user, memberships, loading } = useAuth();
+  const { session, user, memberships, loading, mfa, activeOrgId } = useAuth();
   const { pathname } = useLocation();
 
   // Client-facing pages (proposal links, rows 58-59) live outside the login gate.
@@ -62,6 +63,9 @@ function Protected() {
   if (!session) return <AuthPage />;
   // Signed in, but `/auth/me` hasn't answered yet.
   if (!user) return <Splash />;
+  // Row 81: enrolled users prove the second factor every session; required roles must enrol.
+  if (mfa && mfa.enrolled && !mfa.verified) return <MfaVerifyPage />;
+  if (mfa && !mfa.enrolled && memberships.find((m) => m.organizationId === activeOrgId)?.mfaRequired) return <MfaEnrollPage />;
   if (!memberships.length && API_CONFIGURED) return <CreateOrgPage />;
 
   return (

@@ -1,4 +1,5 @@
 import {
+  useRef,
   createContext,
   useCallback,
   useContext,
@@ -10,7 +11,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import type { Session } from "@supabase/supabase-js";
 import { supabase, supabaseConfigured } from "./supabase.js";
-import { api, API_CONFIGURED, API_URL, setActiveOrg, getActiveOrg, type AuthedUser, type Membership, ApiError } from "./api.js";
+import { api, API_CONFIGURED, API_URL, setActiveOrg, getActiveOrg, type AuthedUser, type Membership, type MfaState, ApiError } from "./api.js";
 
 interface AuthState {
   /** null while we're still restoring a persisted session. */
@@ -21,6 +22,10 @@ interface AuthState {
   /** The caller's role in the active org — drives what the UI offers. */
   role: Membership["role"] | null;
   loading: boolean;
+  /** Row 81: second-factor state of the current session (null until /auth/me answers). */
+  mfa: MfaState | null;
+  /** Re-ask /auth/me (after 2FA enrolment / verification). */
+  refreshMe: () => Promise<void>;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (name: string, email: string, password: string) => Promise<{ needsEmailConfirm: boolean }>;
   /** Row 80: Google Workspace sign-in via Supabase OAuth (redirects away and back). */
@@ -54,6 +59,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<AuthedUser | null>(null);
   const [memberships, setMemberships] = useState<Membership[]>([]);
+  const [mfa, setMfa] = useState<MfaState | null>(null);
+  // Once we have a user, later session events (token refresh, 2FA upgrade) must not
+  // blank the app with a splash - they just re-ask /auth/me quietly.
+  const hasUser = useRef(false);
   const [activeOrgId, setActiveOrgIdState] = useState<string | null>(getActiveOrg());
   const [loading, setLoading] = useState(true);
   const queryClient = useQueryClient();
@@ -75,8 +84,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { data: sub } = supabase.auth.onAuthStateChange((_event, next) => {
       setSession(next);
       if (!next) {
+        hasUser.current = false;
         setUser(null);
         setMemberships([]);
+        setMfa(null);
         setActiveOrg(null);
         setActiveOrgIdState(null);
         queryClient.clear();
@@ -92,8 +103,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const loadMe = useCallback(async () => {
     const me = await api.me();
+    hasUser.current = true;
     setUser(me.user);
     setMemberships(me.memberships);
+    setMfa(me.mfa ?? { enrolled: false, verified: true });
 
     // Keep the stored org only if it's still one the user belongs to.
     const stored = getActiveOrg();
@@ -117,7 +130,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
     let active = true;
-    setLoading(true);
+    if (!hasUser.current) setLoading(true);
     // Only a rejected token means the session is useless. A network blip or a
     // restarting API is retried for a while instead of signing the user out.
     const attempt = async (tries: number): Promise<void> => {
@@ -250,6 +263,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       activeOrgId,
       role: memberships.find((m) => m.organizationId === activeOrgId)?.role ?? null,
       loading,
+      mfa,
+      refreshMe: loadMe,
       signIn,
       signUp,
       signInWithGoogle,
@@ -265,6 +280,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       memberships,
       activeOrgId,
       loading,
+      mfa,
+      loadMe,
       signIn,
       signUp,
       signInWithGoogle,

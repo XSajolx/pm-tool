@@ -19,6 +19,8 @@ export interface AuthContext {
   role: Role;
   /** Row 80: how the session was minted - "google", "email", ... (from Supabase app_metadata). */
   provider?: string;
+  /** Row 81: second-factor state of this request's session. */
+  mfa?: { enrolled: boolean; verified: boolean; sessionId: string | null };
 }
 
 declare module "express" {

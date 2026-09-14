@@ -115,9 +115,16 @@ export interface AuthedUser {
   name: string;
 }
 
+export interface MfaState {
+  enrolled: boolean;
+  verified: boolean;
+}
+
 export interface Membership {
   organizationId: string;
   role: "owner" | "admin" | "member" | "guest";
+  /** Row 81 */
+  mfaRequired?: boolean;
   organization: { id: string; name: string; slug: string };
 }
 
@@ -1039,7 +1046,15 @@ export interface MeetingInput {
 
 export const api = {
   // ---- Auth ----
-  me: () => request<{ user: AuthedUser; memberships: Membership[] }>(`/auth/me`),
+  me: () => request<{ user: AuthedUser; memberships: Membership[]; mfa?: MfaState }>(`/auth/me`),
+  /** Row 81: two-factor authentication. */
+  mfaStatus: () => request<MfaState & { backupCodesLeft: number }>(`/auth/mfa`),
+  mfaEnrolled: () => request<{ codes: string[]; left: number }>(`/auth/mfa/enrolled`, { method: "POST" }),
+  mfaDisable: () => request<{ enrolled: boolean }>(`/auth/mfa`, { method: "DELETE" }),
+  mfaBackupCodes: () => request<{ codes: string[]; left: number }>(`/auth/mfa/backup-codes`, { method: "POST" }),
+  mfaUseBackup: (code: string) => request<{ verified: boolean; left: number }>(`/auth/mfa/backup/use`, { method: "POST", body: JSON.stringify({ code }) }),
+  getMfaPolicy: () => request<{ mfaRequiredRoles: string[] }>(`/auth/mfa/policy`),
+  updateMfaPolicy: (roles: string[]) => request<{ mfaRequiredRoles: string[] }>(`/auth/mfa/policy`, { method: "PATCH", body: JSON.stringify({ roles }) }),
   createOrganization: (name: string) =>
     request<{ id: string; name: string; slug: string; role: Membership["role"] }>(
       `/auth/organizations`,

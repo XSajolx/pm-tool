@@ -4,6 +4,8 @@ import { api, type DealStageRow, type DocTemplate, type ProposalTemplate, type S
 import { ProposalSectionsEditor } from "../components/ProposalSections.js";
 import { DocEditor } from "../components/doc/DocEditor.js";
 import { useAuth } from "../lib/auth.js";
+import { MfaEnroll } from "./MfaPages.js";
+import { supabase } from "../lib/supabase.js";
 import { PRIORITY } from "../components/ui.js";
 import type { Priority } from "../lib/api.js";
 
@@ -11,7 +13,7 @@ import type { Priority } from "../lib/api.js";
  * Workspace settings. Sections are added as the roadmap lands; each one is a
  * self-contained panel that owns its own queries.
  */
-type Section = "statuses" | "priorities" | "stages" | "tags" | "templates" | "dealstages" | "proposals" | "snippets" | "branding" | "dockit" | "sso";
+type Section = "statuses" | "priorities" | "stages" | "tags" | "templates" | "dealstages" | "proposals" | "snippets" | "branding" | "dockit" | "sso" | "security";
 
 const SECTIONS: { id: Section; label: string; hint: string }[] = [
   { id: "statuses", label: "Task statuses", hint: "Per space: names, colours, order, done state" },
@@ -24,6 +26,7 @@ const SECTIONS: { id: Section; label: string; hint: string }[] = [
   { id: "snippets", label: "Snippets", hint: "Reusable doc content that stays in sync" },
   { id: "branding", label: "Branding", hint: "Colour, logo and footer on PDFs and client pages" },
   { id: "sso", label: "Sign-in & SSO", hint: "Google Workspace domain that auto-joins" },
+  { id: "security", label: "Security & 2FA", hint: "Authenticator app, backup codes, who must use it" },
   { id: "dockit", label: "Doc starter kit", hint: "Docs every new project starts with" },
 ];
 
@@ -67,6 +70,7 @@ export function SettingsPage() {
           {section === "snippets" && <SnippetSettings canEdit={canEdit} />}
           {section === "branding" && <BrandingSettings canEdit={canEdit} />}
           {section === "sso" && <SsoSettings canEdit={canEdit} />}
+          {section === "security" && <SecuritySettings canEdit={canEdit} />}
           {section === "dockit" && <DocKitSettings canEdit={canEdit} />}
         </div>
       </div>
@@ -893,6 +897,101 @@ function BrandingSettings({ canEdit }: { canEdit: boolean }) {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * Security & 2FA (row 81)
+ * ------------------------------------------------------------------ */
+const ALL_ROLES = ["owner", "admin", "member", "guest"] as const;
+
+function SecuritySettings({ canEdit }: { canEdit: boolean }) {
+  const qc = useQueryClient();
+  const { refreshMe } = useAuth();
+  const { data: status } = useQuery({ queryKey: ["mfa"], queryFn: api.mfaStatus });
+  const { data: policy } = useQuery({ queryKey: ["mfa-policy"], queryFn: api.getMfaPolicy });
+  const [enrolling, setEnrolling] = useState(false);
+  const [freshCodes, setFreshCodes] = useState<string[] | null>(null);
+  const done = async () => {
+    setEnrolling(false);
+    await qc.invalidateQueries({ queryKey: ["mfa"] });
+    await refreshMe();
+  };
+  const disable = useMutation({
+    mutationFn: async () => {
+      const { data } = await supabase.auth.mfa.listFactors();
+      for (const f of data?.totp ?? []) await supabase.auth.mfa.unenroll({ factorId: f.id });
+      return api.mfaDisable();
+    },
+    onSuccess: done,
+  });
+  const regen = useMutation({ mutationFn: api.mfaBackupCodes, onSuccess: (r) => { setFreshCodes(r.codes); void qc.invalidateQueries({ queryKey: ["mfa"] }); } });
+  const savePolicy = useMutation({ mutationFn: (roles: string[]) => api.updateMfaPolicy(roles), onSuccess: (p) => qc.setQueryData(["mfa-policy"], p) });
+  const required = policy?.mfaRequiredRoles ?? [];
+
+  return (
+    <div>
+      <h1 className="text-lg font-semibold text-slate-900">Security &amp; two-factor authentication</h1>
+      <p className="mt-1 text-sm text-muted-foreground">A second factor from an authenticator app protects your account even if your password leaks.</p>
+
+      <section className="mt-5 max-w-xl rounded-lg border border-border bg-white p-4">
+        <h2 className="text-sm font-semibold text-slate-800">Your account</h2>
+        {!status ? (
+          <p className="mt-2 text-sm text-muted-foreground">Loading…</p>
+        ) : enrolling ? (
+          <div className="mt-3">
+            <MfaEnroll onDone={() => void done()} />
+          </div>
+        ) : status.enrolled ? (
+          <div className="mt-2 space-y-3 text-sm">
+            <p className="text-green-700">✓ Two-factor authentication is on. {status.backupCodesLeft} backup code{status.backupCodesLeft === 1 ? "" : "s"} left.</p>
+            {freshCodes && (
+              <ul className="grid grid-cols-2 gap-1 rounded-md border border-border bg-[#fbfbfa] p-3 font-mono text-sm text-slate-800">
+                {freshCodes.map((c) => (
+                  <li key={c}>{c}</li>
+                ))}
+              </ul>
+            )}
+            <div className="flex flex-wrap gap-2">
+              <button type="button" onClick={() => regen.mutate()} disabled={regen.isPending} className="rounded-md border border-border px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-muted disabled:opacity-50">
+                New backup codes
+              </button>
+              <button type="button" onClick={() => disable.mutate()} disabled={disable.isPending} className="rounded-md border border-border px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50">
+                Turn off 2FA
+              </button>
+            </div>
+            {(regen.isError || disable.isError) && <p className="text-xs text-red-600">{((regen.error ?? disable.error) as Error).message}</p>}
+          </div>
+        ) : (
+          <div className="mt-2 space-y-2 text-sm">
+            <p className="text-muted-foreground">Two-factor authentication is off.</p>
+            <button type="button" onClick={() => setEnrolling(true)} className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700">
+              Set up authenticator app
+            </button>
+          </div>
+        )}
+      </section>
+
+      <section className="mt-5 max-w-xl rounded-lg border border-border bg-white p-4">
+        <h2 className="text-sm font-semibold text-slate-800">Workspace policy</h2>
+        <p className="mt-1 text-xs text-muted-foreground">People in these roles must set up 2FA before they can use the workspace.</p>
+        <div className="mt-3 flex flex-wrap gap-3">
+          {ALL_ROLES.map((role) => (
+            <label key={role} className="flex items-center gap-1.5 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={required.includes(role)}
+                disabled={!canEdit || !policy || savePolicy.isPending}
+                onChange={(e) => savePolicy.mutate(e.target.checked ? [...required, role] : required.filter((r) => r !== role))}
+                className="accent-indigo-600"
+              />
+              {role}
+            </label>
+          ))}
+        </div>
+        {savePolicy.isError && <p className="mt-2 text-xs text-red-600">{(savePolicy.error as Error).message}</p>}
+      </section>
     </div>
   );
 }

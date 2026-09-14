@@ -9,6 +9,7 @@ import type { Request } from "express";
 import { AuthService } from "./auth.service.js";
 import { TokenService } from "./token.service.js";
 import { IS_PUBLIC } from "./auth.decorators.js";
+import { MfaService } from "./mfa.service.js";
 
 /**
  * Registered globally (see auth.module), so every route is authenticated unless
@@ -21,6 +22,7 @@ export class AuthGuard implements CanActivate {
     private readonly tokens: TokenService,
     private readonly auth: AuthService,
     private readonly reflector: Reflector,
+    private readonly mfa: MfaService,
   ) {}
 
   async canActivate(ctx: ExecutionContext): Promise<boolean> {
@@ -40,7 +42,9 @@ export class AuthGuard implements CanActivate {
     const claims = await this.tokens.verify(header.slice("Bearer ".length).trim());
     const user = await this.auth.resolveUser(claims);
     const provider = (claims as { app_metadata?: { provider?: string } }).app_metadata?.provider;
-    req.auth = { ...this.auth.toContext(user), provider };
+    // Row 81: is this session second-factor verified (aal2 or a backup code)?
+    const mfa = await this.mfa.sessionState(user, claims as { aal?: string; session_id?: string });
+    req.auth = { ...this.auth.toContext(user), provider, mfa };
     return true;
   }
 }

@@ -77,6 +77,8 @@ export const users = pgTable(
     email: varchar("email", { length: 320 }).notNull(),
     name: varchar("name", { length: 255 }).notNull(),
     avatarUrl: text("avatar_url"),
+    /** Row 81: set once the user verified a TOTP factor (Supabase MFA). Null = no 2FA. */
+    mfaEnrolledAt: timestamp("mfa_enrolled_at", { withTimezone: true }),
     ...timestamps,
   },
   (t) => [
@@ -101,6 +103,8 @@ export const organizations = pgTable(
     brandFooter: varchar("brand_footer", { length: 255 }),
     /** Row 80: Google Workspace domain - a verified Google sign-in on this domain auto-joins as member. */
     ssoDomain: varchar("sso_domain", { length: 255 }),
+    /** Row 81: roles that must have 2FA enrolled before they can use the workspace. */
+    mfaRequiredRoles: jsonb("mfa_required_roles").$type<string[]>().notNull().default([]),
     ...timestamps,
   },
   (t) => [uniqueIndex("organizations_slug_uq").on(t.slug)],
@@ -2185,4 +2189,32 @@ export const signInAttempts = pgTable("sign_in_attempts", {
   failedCount: integer("failed_count").notNull().default(0),
   lockedUntil: timestamp("locked_until", { withTimezone: true }),
   lastFailedAt: timestamp("last_failed_at", { withTimezone: true }),
+});
+
+/* ------------------------------------------------------------------ *
+ * 2FA backup codes (row 81). TOTP itself lives in Supabase Auth; backup
+ * codes are ours: ten single-use codes, stored hashed. Using one marks the
+ * current Supabase session (its `session_id` claim) as second-factor
+ * verified for twelve hours.
+ * ------------------------------------------------------------------ */
+export const mfaBackupCodes = pgTable(
+  "mfa_backup_codes",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    codeHash: varchar("code_hash", { length: 64 }).notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("mfa_backup_codes_user_idx").on(t.userId)],
+);
+
+export const mfaBackupSessions = pgTable("mfa_backup_sessions", {
+  sessionId: varchar("session_id", { length: 64 }).primaryKey(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
 });

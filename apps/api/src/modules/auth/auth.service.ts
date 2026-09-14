@@ -78,6 +78,8 @@ export class AuthService {
     return rows.map((m) => ({
       organizationId: m.organizationId,
       role: m.role,
+      /** Row 81: this workspace insists on 2FA for my role. */
+      mfaRequired: (m.organization.mfaRequiredRoles ?? []).includes(m.role),
       organization: {
         id: m.organization.id,
         name: m.organization.name,
