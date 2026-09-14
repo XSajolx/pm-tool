@@ -1113,6 +1113,8 @@ export const projects = pgTable(
     inboundToken: varchar("inbound_token", { length: 32 }),
     description: text("description"),
     status: projectStatus("status").notNull().default("active"),
+    /** Row 91: "client" = a real project; "internal" = a time code (admin, training, PTO…) with no client or space. */
+    kind: varchar("kind", { length: 16 }).notNull().default("client"),
     color: varchar("color", { length: 16 }).notNull().default("#6366f1"),
     startDate: timestamp("start_date", { withTimezone: true }),
     endDate: timestamp("end_date", { withTimezone: true }),

@@ -164,7 +164,7 @@ export class TimeService {
     // Row 90: "start from any task card" - the project is implied by the task.
     const projectId = dto.projectId ?? (dto.taskId ? await this.projectForTask(orgId, dto.taskId) : null);
     if (!projectId) throw new BadRequestException("Pick a project or a task to track time on");
-    await this.assertProjectAndTask(orgId, projectId, dto.taskId, dto.stageId);
+    const project = await this.assertProjectAndTask(orgId, projectId, dto.taskId, dto.stageId);
     // One running timer per person: starting a new one stops the old one.
     await this.stop(orgId, userId);
 
@@ -177,7 +177,8 @@ export class TimeService {
         taskId: dto.taskId ?? null,
         stageId: dto.stageId ?? null,
         description: dto.description ?? null,
-        billable: dto.billable ?? true,
+        // Row 91: internal codes are never billable.
+        billable: project.kind === "internal" ? false : (dto.billable ?? true),
         startedAt: new Date(),
         source: "timer",
       })
@@ -212,7 +213,7 @@ export class TimeService {
    * ---------------------------------------------------------------- */
 
   async createManual(orgId: string, userId: string, dto: ManualEntryDto) {
-    await this.assertProjectAndTask(orgId, dto.projectId, dto.taskId, dto.stageId);
+    const project = await this.assertProjectAndTask(orgId, dto.projectId, dto.taskId, dto.stageId);
     const startedAt = new Date(dto.startedAt);
     const durationSeconds =
       dto.durationSeconds ??
@@ -232,7 +233,7 @@ export class TimeService {
         taskId: dto.taskId ?? null,
         stageId: dto.stageId ?? null,
         description: dto.description ?? null,
-        billable: dto.billable ?? true,
+        billable: project.kind === "internal" ? false : (dto.billable ?? true),
         startedAt,
         endedAt: new Date(startedAt.getTime() + durationSeconds * 1000),
         durationSeconds,
@@ -328,7 +329,7 @@ export class TimeService {
     // Row 88: one row per project *or* project+task, so a week can be typed in straight.
     const byProject = new Map<
       string,
-      { projectId: string; projectName: string; color: string; taskId: string | null; taskTitle: string | null; taskReference: string | null; hours: number[] }
+      { projectId: string; projectName: string; color: string; internal: boolean; taskId: string | null; taskTitle: string | null; taskReference: string | null; hours: number[] }
     >();
     for (const r of rows) {
       const day = Math.floor((r.startedAt.getTime() - weekStart.getTime()) / DAY_MS);
@@ -342,6 +343,7 @@ export class TimeService {
           projectId: r.projectId,
           projectName: r.project.name,
           color: r.project.color,
+          internal: r.project.kind === "internal",
           taskId: r.taskId ?? null,
           taskTitle: r.task?.title ?? null,
           taskReference: r.task?.reference ?? null,
@@ -447,6 +449,7 @@ export class TimeService {
         .where(eq(timeEntries.id, first.id));
       for (const e of extra) await this.db.delete(timeEntries).where(eq(timeEntries.id, e.id));
     } else {
+      const proj = await this.db.query.projects.findFirst({ where: eq(projects.id, dto.projectId), columns: { kind: true } });
       await this.db.insert(timeEntries).values({
         organizationId: orgId,
         userId,
@@ -455,6 +458,7 @@ export class TimeService {
         startedAt,
         endedAt,
         durationSeconds: seconds,
+        billable: proj?.kind !== "internal",
         source: "timesheet",
       });
     }

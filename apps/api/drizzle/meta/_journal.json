@@ -351,6 +351,13 @@
       "when": 1789356476113,
       "tag": "0049_time_entry_stage",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1789357289209,
+      "tag": "0050_project_kind",
+      "breakpoints": true
     }
   ]
 }

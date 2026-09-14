@@ -656,6 +656,8 @@ export interface Project {
   lead: { id: string; name: string; avatarUrl: string | null } | null;
   description: string | null;
   status: ProjectStatus;
+  /** Row 91: "client" project or "internal" time code. */
+  kind?: "client" | "internal";
   color: string;
   startDate: string | null;
   endDate: string | null;
@@ -705,6 +707,14 @@ export interface TimeEntry {
   stage?: { id: string; name: string } | null;
 }
 
+/** Row 91 */
+export interface TimeCode {
+  id: string;
+  name: string;
+  color: string;
+  archived: boolean;
+}
+
 /** Row 75 */
 export interface TimesheetSubmission {
   id: string;
@@ -724,7 +734,7 @@ export interface Timesheet {
   submission: TimesheetSubmission | null;
   weekStart: string;
   days: string[];
-  rows: { projectId: string; projectName: string; color: string; taskId: string | null; taskTitle: string | null; taskReference: string | null; hours: number[]; total: number }[];
+  rows: { projectId: string; projectName: string; color: string; internal?: boolean; taskId: string | null; taskTitle: string | null; taskReference: string | null; hours: number[]; total: number }[];
   totals: number[];
   grandTotal: number;
   /** Row 88: the person's weekly capacity, for "29/40". */
@@ -1457,6 +1467,11 @@ export const api = {
     request<{ id: string; archived: boolean }>(`/projects/${id}`, { method: "DELETE" }),
 
   // ---- Time tracking ----
+  /** Row 91: internal time codes (admin, training, PTO…). */
+  getTimeCodes: (includeArchived = false) => request<TimeCode[]>(`/time/codes${includeArchived ? "?includeArchived=true" : ""}`),
+  createTimeCode: (body: { name: string; color?: string }) => request<TimeCode>(`/time/codes`, { method: "POST", body: JSON.stringify(body) }),
+  updateTimeCode: (id: string, body: { name?: string; color?: string; archived?: boolean }) =>
+    request<TimeCode>(`/time/codes/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   getRunningTimer: () => request<TimeEntry | null>(`/time/running`),
   startTimer: (body: { projectId?: string; taskId?: string; description?: string; billable?: boolean }) =>
     request<TimeEntry>(`/time/start`, { method: "POST", body: JSON.stringify(body) }),

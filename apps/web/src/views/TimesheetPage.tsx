@@ -26,6 +26,8 @@ export function TimesheetPage() {
 
   const { data: members = [] } = useQuery({ queryKey: ["members"], queryFn: api.getMembers, enabled: isAdmin });
   const { data: projects = [] } = useQuery({ queryKey: ["projects"], queryFn: () => api.getProjects() });
+  // Row 91: internal time codes are rows too - a full week can always be accounted for.
+  const { data: codes = [] } = useQuery({ queryKey: ["time-codes"], queryFn: () => api.getTimeCodes() });
 
   const weekIso = weekOf.toISOString();
   const { data: sheet, isLoading } = useQuery({
@@ -92,12 +94,13 @@ export function TimesheetPage() {
       .filter((x) => !have.has(key(x)))
       .map((x) => {
         const p = projects.find((pr) => pr.id === x.projectId);
-        return { projectId: x.projectId, projectName: p?.name ?? "Project", color: p?.color ?? "#94a3b8", taskId: x.taskId, taskTitle: x.taskTitle ?? null, taskReference: null, hours: [0, 0, 0, 0, 0, 0, 0], total: 0 };
+        const c = codes.find((cd) => cd.id === x.projectId);
+        return { projectId: x.projectId, projectName: p?.name ?? c?.name ?? "Project", color: p?.color ?? c?.color ?? "#94a3b8", internal: Boolean(c), taskId: x.taskId, taskTitle: x.taskTitle ?? null, taskReference: null, hours: [0, 0, 0, 0, 0, 0, 0], total: 0 };
       });
     return [...base, ...added];
-  }, [sheet, extraRows, projects]);
+  }, [sheet, extraRows, projects, codes]);
 
-  const addable = projects.filter((p) => p.status === "active");
+  const addable = [...projects.filter((p) => p.status === "active").map((p) => ({ id: p.id, name: p.name })), ...codes.map((c) => ({ id: c.id, name: `Internal · ${c.name}` }))];
   const editable = !forUser || forUser === user?.id || isAdmin;
   const weekStart = sheet ? new Date(sheet.weekStart) : null;
   const weekEnd = weekStart ? new Date(weekStart.getTime() + 6 * 86_400_000) : null;
@@ -195,7 +198,10 @@ export function TimesheetPage() {
                       <span className="flex items-center gap-2">
                         <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: r.color }} />
                         <span className="min-w-0">
-                          <span className="block truncate font-medium text-slate-800">{r.projectName}</span>
+                          <span className="block truncate font-medium text-slate-800">
+                            {r.projectName}
+                            {r.internal && <span className="ml-1.5 rounded bg-slate-100 px-1 text-[10px] font-normal text-slate-500">internal</span>}
+                          </span>
                           {r.taskId && (
                             <span className="block truncate text-[11px] text-muted-foreground" title={r.taskTitle ?? undefined}>
                               {r.taskReference ? `${r.taskReference} · ` : "↳ "}

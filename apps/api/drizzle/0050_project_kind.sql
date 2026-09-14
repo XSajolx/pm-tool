@@ -1,0 +1,1 @@
+ALTER TABLE "projects" ADD COLUMN "kind" varchar(16) DEFAULT 'client' NOT NULL;

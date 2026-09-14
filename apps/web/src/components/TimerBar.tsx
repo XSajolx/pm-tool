@@ -19,6 +19,7 @@ export function TimerBar() {
     queryKey: ["projects"],
     queryFn: () => api.getProjects(),
   });
+  const { data: codes = [] } = useQuery({ queryKey: ["time-codes"], queryFn: () => api.getTimeCodes() });
 
   const [projectId, setProjectId] = useState("");
   const [elapsed, setElapsed] = useState(0);
@@ -85,6 +86,15 @@ export function TimerBar() {
             {p.name}
           </option>
         ))}
+        {codes.length > 0 && (
+          <optgroup label="Internal">
+            {codes.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </optgroup>
+        )}
       </select>
       <button
         onClick={() => start.mutate()}

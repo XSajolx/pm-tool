@@ -123,6 +123,8 @@ export function TimeTrackingPage() {
 function ManualEntryForm() {
   const qc = useQueryClient();
   const { data: projects = [] } = useQuery({ queryKey: ["projects"], queryFn: () => api.getProjects() });
+  // Row 91: internal codes sit in the same picker, under their own heading.
+  const { data: codes = [] } = useQuery({ queryKey: ["time-codes"], queryFn: () => api.getTimeCodes() });
   const [projectId, setProjectId] = useState("");
   // Row 87: optional stage + task on the entry.
   const [stageId, setStageId] = useState("");
@@ -172,9 +174,18 @@ function ManualEntryForm() {
         required
       >
         <option value="">Project…</option>
-        {projects.filter((p) => p.status === "active").map((p) => (
-          <option key={p.id} value={p.id}>{p.name}</option>
-        ))}
+        <optgroup label="Projects">
+          {projects.filter((p) => p.status === "active").map((p) => (
+            <option key={p.id} value={p.id}>{p.name}</option>
+          ))}
+        </optgroup>
+        {codes.length > 0 && (
+          <optgroup label="Internal">
+            {codes.map((c) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </optgroup>
+        )}
       </select>
       {projectId && stages.length > 0 && (
         <select value={stageId} onChange={(e) => setStageId(e.target.value)} className={input + " w-36"} title="Stage (optional)">

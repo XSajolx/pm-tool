@@ -37,7 +37,10 @@ export class ProjectAccessService {
 
   async canSeeProject(orgId: string, viewer: Viewer, projectId: string) {
     const visible = await this.visibleProjectIds(orgId, viewer);
-    return visible === null || visible.has(projectId);
+    if (visible === null || visible.has(projectId)) return true;
+    // Row 91: internal time codes are for everyone.
+    const p = await this.db.query.projects.findFirst({ where: and(eq(projects.id, projectId), eq(projects.organizationId, orgId)), columns: { kind: true } });
+    return p?.kind === "internal";
   }
 
   async assertProject(orgId: string, viewer: Viewer, projectId: string) {

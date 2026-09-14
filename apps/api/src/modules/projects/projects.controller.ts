@@ -37,7 +37,8 @@ export class ProjectsController {
   @Get()
   async list(@Auth() auth: AuthContext, @Query("archived") archived?: string) {
     // Row 84: team members and guests only see the projects they're on.
-    const rows = await this.projects.list(auth.orgId, archived === "true");
+    // Row 91: internal time codes live in the same table but aren't projects to browse.
+    const rows = (await this.projects.list(auth.orgId, archived === "true")).filter((p) => p.kind !== "internal");
     const visible = await this.access.visibleProjectIds(auth.orgId, auth);
     return visible ? rows.filter((p) => visible.has(p.id)) : rows;
   }

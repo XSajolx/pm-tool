@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, UsePipes
 import { z } from "zod";
 import { ZodValidationPipe } from "../../common/zod-validation.pipe.js";
 import { TimeService } from "./time.service.js";
+import { TimeCodesService } from "./time-codes.service.js";
 import { Auth, Roles } from "../auth/auth.decorators.js";
 import type { AuthContext } from "../auth/auth.types.js";
 
@@ -42,13 +43,40 @@ const cellSchema = z.object({
 });
 
 const WRITERS = ["owner", "admin", "member"] as const;
+/** Row 91 */
+const codeSchema = z.object({ name: z.string().min(1).max(64), color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional() });
+const codePatchSchema = z.object({ name: z.string().min(1).max(64).optional(), color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), archived: z.boolean().optional() });
 /** Row 75 */
 const submitSchema = z.object({ week: z.string().min(8), approverId: z.string().uuid().optional() });
 const decisionSchema = z.object({ approve: z.boolean(), note: z.string().max(2000).optional() });
 
 @Controller("time")
 export class TimeController {
-  constructor(private readonly time: TimeService) {}
+  constructor(
+    private readonly time: TimeService,
+    private readonly codes: TimeCodesService,
+  ) {}
+
+  /* ---- Row 91: internal time codes ---- */
+
+  @Get("codes")
+  listCodes(@Auth() auth: AuthContext, @Query("includeArchived") includeArchived?: string) {
+    return this.codes.list(auth.orgId, includeArchived === "true");
+  }
+
+  @Post("codes")
+  @Roles("owner", "admin")
+  @UsePipes(new ZodValidationPipe(codeSchema))
+  createCode(@Auth() auth: AuthContext, @Body() dto: z.infer<typeof codeSchema>) {
+    return this.codes.create(auth.orgId, dto.name, dto.color);
+  }
+
+  @Patch("codes/:id")
+  @Roles("owner", "admin")
+  @UsePipes(new ZodValidationPipe(codePatchSchema))
+  updateCode(@Auth() auth: AuthContext, @Param("id") id: string, @Body() dto: z.infer<typeof codePatchSchema>) {
+    return this.codes.update(auth.orgId, id, dto);
+  }
 
   private actor(auth: AuthContext) {
     return { userId: auth.userId, role: auth.role };

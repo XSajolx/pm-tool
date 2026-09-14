@@ -14,11 +14,12 @@ import type { Priority } from "../lib/api.js";
  * Workspace settings. Sections are added as the roadmap lands; each one is a
  * self-contained panel that owns its own queries.
  */
-type Section = "people" | "statuses" | "priorities" | "stages" | "tags" | "templates" | "dealstages" | "proposals" | "snippets" | "branding" | "dockit" | "sso" | "security";
+type Section = "people" | "timecodes" | "statuses" | "priorities" | "stages" | "tags" | "templates" | "dealstages" | "proposals" | "snippets" | "branding" | "dockit" | "sso" | "security";
 
 const SECTIONS: { id: Section; label: string; hint: string }[] = [
   { id: "people", label: "People & roles", hint: "Who's in the workspace and what each role can do" },
   { id: "statuses", label: "Task statuses", hint: "Per space: names, colours, order, done state" },
+  { id: "timecodes", label: "Time codes", hint: "Internal codes people log time to without a project" },
   { id: "priorities", label: "Priorities", hint: "The four priority levels" },
   { id: "stages", label: "Stage templates", hint: "Default stage sequences for new projects" },
   { id: "tags", label: "Tags", hint: "Workspace tags: rename, recolour, merge, retire" },
@@ -64,6 +65,7 @@ export function SettingsPage() {
           )}
           {section === "statuses" && <StatusSettings canEdit={canEdit} />}
           {section === "people" && <PeopleSettings canEdit={canEdit} />}
+          {section === "timecodes" && <TimeCodeSettings canEdit={canEdit} />}
           {section === "priorities" && <PrioritySettings />}
           {section === "stages" && <StageTemplateSettings canEdit={canEdit} />}
           {section === "tags" && <TagSettings canEdit={canEdit} />}
@@ -992,6 +994,55 @@ function PendingInvitations() {
         ))}
       </ul>
       {(resend.isError || revoke.isError) && <p className="px-4 pb-2 text-xs text-red-600">{((resend.error ?? revoke.error) as Error).message}</p>}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * Time codes (row 91): admin, internal, training, sales, PTO… - hours
+ * logged here are never billable and need no project.
+ * ------------------------------------------------------------------ */
+function TimeCodeSettings({ canEdit }: { canEdit: boolean }) {
+  const qc = useQueryClient();
+  const { data: codes = [] } = useQuery({ queryKey: ["time-codes", "all"], queryFn: () => api.getTimeCodes(true) });
+  const refresh = () => qc.invalidateQueries({ queryKey: ["time-codes"] });
+  const [name, setName] = useState("");
+  const create = useMutation({ mutationFn: () => api.createTimeCode({ name: name.trim() }), onSuccess: () => { setName(""); void refresh(); } });
+  const update = useMutation({ mutationFn: ({ id, ...body }: { id: string; name?: string; color?: string; archived?: boolean }) => api.updateTimeCode(id, body), onSuccess: refresh });
+  const field = "rounded-md border border-border bg-white px-2.5 py-1.5 text-sm outline-none focus:border-indigo-500 disabled:opacity-60";
+  return (
+    <div>
+      <h1 className="text-lg font-semibold text-slate-900">Time codes</h1>
+      <p className="mt-1 text-sm text-muted-foreground">Internal codes people can log hours to without a client project - so a full week is always accounted for. Time on a code is never billable.</p>
+      <ul className="mt-5 max-w-xl divide-y divide-border overflow-hidden rounded-lg border border-border bg-white">
+        {codes.map((c) => (
+          <li key={c.id} className={`flex items-center gap-3 px-3 py-2 ${c.archived ? "opacity-50" : ""}`}>
+            <input type="color" value={c.color} disabled={!canEdit} onChange={(e) => update.mutate({ id: c.id, color: e.target.value })} className="h-7 w-9 cursor-pointer rounded border border-border" title="Colour" />
+            <input defaultValue={c.name} disabled={!canEdit} onBlur={(e) => e.target.value.trim() && e.target.value.trim() !== c.name && update.mutate({ id: c.id, name: e.target.value.trim() })} className={`${field} flex-1`} />
+            {c.archived && <span className="text-[11px] text-muted-foreground">retired</span>}
+            {canEdit && (
+              <button type="button" onClick={() => update.mutate({ id: c.id, archived: !c.archived })} className="text-xs text-slate-500 hover:underline">
+                {c.archived ? "Restore" : "Retire"}
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
+      {canEdit && (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (name.trim()) create.mutate();
+          }}
+          className="mt-3 flex max-w-xl items-center gap-2"
+        >
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="New code, e.g. Recruiting" className={`${field} flex-1`} />
+          <button type="submit" disabled={!name.trim() || create.isPending} className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50">
+            Add code
+          </button>
+        </form>
+      )}
+      {(create.isError || update.isError) && <p className="mt-2 text-xs text-red-600">{((create.error ?? update.error) as Error).message}</p>}
     </div>
   );
 }
