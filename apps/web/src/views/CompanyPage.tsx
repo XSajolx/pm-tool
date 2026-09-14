@@ -8,10 +8,11 @@ import { fmtMoney, fmtShortDate } from "../lib/format.js";
 import { NotesPanel } from "../components/NotesPanel.js";
 import { CrmTasks } from "../components/CrmTasks.js";
 import { ContactDialog } from "../components/ContactDialog.js";
+import { DocsTab } from "../components/DocsTab.js";
 import { NotFound } from "../components/NotFound.js";
 import { cn } from "../lib/utils.js";
 
-type Tab = "contacts" | "projects" | "deals" | "tasks" | "estimates" | "notes";
+type Tab = "contacts" | "projects" | "deals" | "tasks" | "docs" | "estimates" | "notes";
 
 /** One company: details, its people, its pipeline, its paperwork, its notes. */
 export function CompanyPage() {
@@ -51,7 +52,7 @@ export function CompanyPage() {
         <CompanyDetails company={company} />
 
         <div className="mt-5 flex gap-1 border-b border-border">
-          {(["contacts", "projects", "deals", "tasks", "estimates", "notes"] as Tab[]).map((t) => (
+          {(["contacts", "projects", "deals", "tasks", "docs", "estimates", "notes"] as Tab[]).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -145,6 +146,8 @@ export function CompanyPage() {
           )}
 
           {tab === "tasks" && <CrmTasks link={{ companyId }} />}
+
+          {tab === "docs" && <DocsTab entityType="company" entityId={companyId} />}
 
           {tab === "estimates" && (
             estimates.length ? (

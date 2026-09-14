@@ -1800,6 +1800,9 @@ export type Meeting = typeof meetings.$inferSelect;
  * Documents — internal rich-text pages, optionally attached to a project.
  * (The "Docs" nav item.) Plain text/markdown body; no external editor deps.
  * ------------------------------------------------------------------ */
+/** Row 62: who can open a doc. "default" follows the project team (or everyone when unfiled); "restricted" = named people/roles only. */
+export const docAccess = pgEnum("doc_access", ["default", "restricted"]);
+
 export const documents = pgTable(
   "documents",
   {
@@ -1820,6 +1823,8 @@ export const documents = pgTable(
     cover: varchar("cover", { length: 64 }),
     /** Per-doc presentation: font family, font size, page width. */
     settings: jsonb("settings").$type<DocumentSettings>().notNull().default({}),
+    /** Row 62 */
+    access: docAccess("access").notNull().default("default"),
     createdById: uuid("created_by_id").references(() => users.id),
     updatedById: uuid("updated_by_id").references(() => users.id),
     ...timestamps,
@@ -1837,7 +1842,57 @@ export interface DocumentSettings {
   width?: "narrow" | "wide";
 }
 
+export const documentAccess = pgTable(
+  "document_access",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    documentId: uuid("document_id")
+      .notNull()
+      .references((): AnyPgColumn => documents.id, { onDelete: "cascade" }),
+    /** Exactly one of these is set. */
+    userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
+    role: varchar("role", { length: 16 }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("document_access_doc_idx").on(t.documentId)],
+);
+
+export const documentAccessRelations = relations(documentAccess, ({ one }) => ({
+  document: one(documents, { fields: [documentAccess.documentId], references: [documents.id] }),
+  user: one(users, { fields: [documentAccess.userId], references: [users.id] }),
+}));
+
+/** Row 61: a doc attached to a project, task, client or deal so it shows on that record's Docs tab. */
+export const docLinkEntity = pgEnum("doc_link_entity", ["project", "task", "company", "deal"]);
+
+export const documentLinks = pgTable(
+  "document_links",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    documentId: uuid("document_id")
+      .notNull()
+      .references((): AnyPgColumn => documents.id, { onDelete: "cascade" }),
+    entityType: docLinkEntity("entity_type").notNull(),
+    entityId: uuid("entity_id").notNull(),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex("document_links_uq").on(t.documentId, t.entityType, t.entityId), index("document_links_entity_idx").on(t.entityType, t.entityId)],
+);
+
+export const documentLinksRelations = relations(documentLinks, ({ one }) => ({
+  document: one(documents, { fields: [documentLinks.documentId], references: [documents.id] }),
+}));
+
 export const documentsRelations = relations(documents, ({ one, many }) => ({
+  links: many(documentLinks),
+  accessList: many(documentAccess),
   project: one(projects, { fields: [documents.projectId], references: [projects.id] }),
   parent: one(documents, {
     fields: [documents.parentId],

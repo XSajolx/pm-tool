@@ -18,6 +18,7 @@ import { fmtMoney, fmtShortDate } from "../lib/format.js";
 import { NotesPanel } from "../components/NotesPanel.js";
 import { CrmTasks } from "../components/CrmTasks.js";
 import { NewProposalDialog, PROPOSAL_STATUS } from "./ProposalsPage.js";
+import { DocsTab } from "../components/DocsTab.js";
 import { useEscape } from "../lib/useEscape.js";
 import { CrmField, input } from "./CompaniesPage.js";
 import { cn } from "../lib/utils.js";
@@ -413,6 +414,11 @@ function DealDrawer({ dealId, onClose }: { dealId: string; onClose: () => void }
             <div className="border-t border-border px-5 py-4">
               <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Tasks</p>
               <CrmTasks link={{ dealId }} compact />
+            </div>
+
+            <div className="border-t border-border px-5 py-4">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Docs</p>
+              <DocsTab entityType="deal" entityId={dealId} compact />
             </div>
 
             <div className="border-t border-border px-5 py-4">

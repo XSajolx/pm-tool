@@ -201,7 +201,10 @@ export function DocsPage() {
                     <div className="p-4">
                       <div className="flex items-start gap-2">
                         <DocIcon icon={d.icon} className="text-lg leading-none" />
-                        <p className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-900">{d.title}</p>
+                        <p className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-900">
+                          {d.title}
+                          {d.access === "restricted" && <span className="ml-1.5 text-xs text-slate-400" title="Restricted">🔒</span>}
+                        </p>
                         <div className="opacity-0 transition group-hover:opacity-100">
                           <ActionMenu
                             items={[
@@ -648,6 +651,12 @@ function DocSidePanel({
               ))}
           </select>
         </Section>
+        <Section title="Access">
+          <AccessSection doc={doc} />
+        </Section>
+        <Section title="Attached to">
+          <RelatedLinks doc={doc} />
+        </Section>
         <Section title="Subpages">
           {doc.children.length ? (
             <div className="mb-2 flex flex-col gap-0.5">
@@ -696,5 +705,158 @@ function DocSidePanel({
         </Section>
       </div>
     </aside>
+  );
+}
+
+/** Row 61: the records this doc is attached to; add a project, client or deal from here (tasks attach from the task panel). */
+function RelatedLinks({ doc }: { doc: Doc }) {
+  const qc = useQueryClient();
+  const [kind, setKind] = useState<"project" | "company" | "deal">("project");
+  const [pick, setPick] = useState("");
+  const { data: projects = [] } = useQuery({ queryKey: ["projects"], queryFn: () => api.getProjects(), enabled: kind === "project" });
+  const { data: companies = [] } = useQuery({ queryKey: ["companies", ""], queryFn: () => api.getCompanies(), enabled: kind === "company" });
+  const { data: deals = [] } = useQuery({ queryKey: ["deals"], queryFn: api.getDeals, enabled: kind === "deal" });
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ["document", doc.id] });
+    qc.invalidateQueries({ queryKey: ["documents"] });
+  };
+  const add = useMutation({ mutationFn: () => api.addDocLink(doc.id, { entityType: kind, entityId: pick }), onSuccess: () => { setPick(""); refresh(); } });
+  const remove = useMutation({ mutationFn: (linkId: string) => api.removeDocLink(doc.id, linkId), onSuccess: refresh });
+  const options = kind === "project" ? projects.map((p) => ({ id: p.id, label: p.name })) : kind === "company" ? companies.map((c) => ({ id: c.id, label: c.name })) : deals.map((d) => ({ id: d.id, label: d.title }));
+  const icon = { project: "📁", task: "✓", company: "🏢", deal: "💼" } as const;
+  const links = doc.links ?? [];
+  return (
+    <div>
+      {links.length ? (
+        <ul className="mb-2 space-y-1">
+          {links.map((l) => (
+            <li key={l.id} className="group flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-xs">
+              <span>{icon[l.entityType]}</span>
+              {l.entityType === "project" ? (
+                <Link to="/projects/$projectId" params={{ projectId: l.entityId }} className="min-w-0 flex-1 truncate text-slate-700 hover:text-indigo-700">{l.label}</Link>
+              ) : l.entityType === "task" ? (
+                <Link to="/t/$taskId" params={{ taskId: l.entityId }} className="min-w-0 flex-1 truncate text-slate-700 hover:text-indigo-700">{l.label}</Link>
+              ) : l.entityType === "company" ? (
+                <Link to="/crm/companies/$companyId" params={{ companyId: l.entityId }} className="min-w-0 flex-1 truncate text-slate-700 hover:text-indigo-700">{l.label}</Link>
+              ) : (
+                <Link to="/crm/deals" search={{ deal: l.entityId }} className="min-w-0 flex-1 truncate text-slate-700 hover:text-indigo-700">{l.label}</Link>
+              )}
+              <button type="button" onClick={() => remove.mutate(l.id)} className="invisible text-slate-400 hover:text-red-600 group-hover:visible" title="Detach">✕</button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mb-2 text-xs text-muted-foreground">{doc.project ? `Filed under ${doc.project.name}.` : "Not attached to any record."}</p>
+      )}
+      <div className="flex gap-1">
+        <select value={kind} onChange={(e) => { setKind(e.target.value as typeof kind); setPick(""); }} className="rounded-md border border-border bg-white px-1.5 py-1 text-xs">
+          <option value="project">Project</option>
+          <option value="company">Client</option>
+          <option value="deal">Deal</option>
+        </select>
+        <select value={pick} onChange={(e) => setPick(e.target.value)} className="min-w-0 flex-1 rounded-md border border-border bg-white px-1.5 py-1 text-xs">
+          <option value="">Choose…</option>
+          {options.map((o) => (
+            <option key={o.id} value={o.id}>{o.label}</option>
+          ))}
+        </select>
+        <button type="button" disabled={!pick || add.isPending} onClick={() => add.mutate()} className="rounded-md bg-indigo-600 px-2 py-1 text-xs font-medium text-white disabled:opacity-50">Add</button>
+      </div>
+    </div>
+  );
+}
+
+const ROLE_LABEL: Record<string, string> = { owner: "Owners", admin: "Admins", member: "Members", guest: "Guests" };
+
+/**
+ * Row 62: by default a doc follows its project's team (or everyone, when it
+ * isn't filed under a project). Restricted docs open only for named people
+ * and roles — plus the author and admins, who always can.
+ */
+function AccessSection({ doc }: { doc: Doc }) {
+  const qc = useQueryClient();
+  const { user, role } = useAuth();
+  const canEdit = doc.createdBy?.id === user?.id || role === "owner" || role === "admin";
+  const { data: members = [] } = useQuery({ queryKey: ["members"], queryFn: api.getMembers });
+  const [users, setUsers] = useState<Set<string>>(new Set(doc.accessUsers?.map((u) => u.id) ?? []));
+  const [roles, setRoles] = useState<Set<string>>(new Set(doc.accessRoles ?? []));
+  useEffect(() => {
+    setUsers(new Set(doc.accessUsers?.map((u) => u.id) ?? []));
+    setRoles(new Set(doc.accessRoles ?? []));
+  }, [doc.id, doc.accessUsers, doc.accessRoles]);
+  const save = useMutation({
+    mutationFn: (body: { access: "default" | "restricted"; userIds?: string[]; roles?: string[] }) => api.setDocAccess(doc.id, body),
+    onSuccess: (updated) => {
+      qc.setQueryData(["document", doc.id], updated);
+      qc.invalidateQueries({ queryKey: ["documents"] });
+    },
+  });
+  const restricted = doc.access === "restricted";
+  const commit = (u: Set<string>, r: Set<string>) => save.mutate({ access: "restricted", userIds: [...u], roles: [...r] });
+  return (
+    <div className="space-y-2 text-xs">
+      <label className="flex cursor-pointer items-start gap-2">
+        <input type="radio" name="doc-access" checked={!restricted} disabled={!canEdit} onChange={() => save.mutate({ access: "default" })} className="mt-0.5 accent-indigo-600" />
+        <span>
+          <span className="font-medium text-slate-800">{doc.project ? `Everyone on ${doc.project.name}` : "Everyone in the workspace"}</span>
+          <span className="block text-muted-foreground">{doc.project ? "Follows the project team automatically." : "File it under a project to limit it to that team."}</span>
+        </span>
+      </label>
+      <label className="flex cursor-pointer items-start gap-2">
+        <input type="radio" name="doc-access" checked={restricted} disabled={!canEdit} onChange={() => commit(users, roles)} className="mt-0.5 accent-indigo-600" />
+        <span>
+          <span className="font-medium text-slate-800">🔒 Restricted</span>
+          <span className="block text-muted-foreground">Only the people and roles below (plus you and admins).</span>
+        </span>
+      </label>
+      {restricted && (
+        <div className="ml-5 space-y-2 rounded-md border border-border bg-[#fbfbfa] p-2">
+          <div className="flex flex-wrap gap-1">
+            {(["owner", "admin", "member", "guest"] as const).map((rk) => (
+              <label key={rk} className={`cursor-pointer rounded-full border px-2 py-0.5 ${roles.has(rk) ? "border-indigo-300 bg-indigo-50 text-indigo-700" : "border-border text-slate-600"}`}>
+                <input
+                  type="checkbox"
+                  className="hidden"
+                  checked={roles.has(rk)}
+                  disabled={!canEdit}
+                  onChange={(e) => {
+                    const next = new Set(roles);
+                    if (e.target.checked) next.add(rk);
+                    else next.delete(rk);
+                    setRoles(next);
+                    commit(users, next);
+                  }}
+                />
+                {ROLE_LABEL[rk]}
+              </label>
+            ))}
+          </div>
+          <div className="max-h-40 overflow-y-auto">
+            {members
+              .filter((m) => m.id !== user?.id)
+              .map((m) => (
+                <label key={m.id} className="flex cursor-pointer items-center gap-2 py-0.5">
+                  <input
+                    type="checkbox"
+                    checked={users.has(m.id)}
+                    disabled={!canEdit}
+                    onChange={(e) => {
+                      const next = new Set(users);
+                      if (e.target.checked) next.add(m.id);
+                      else next.delete(m.id);
+                      setUsers(next);
+                      commit(next, roles);
+                    }}
+                    className="accent-indigo-600"
+                  />
+                  <span className="text-slate-700">{m.name}</span>
+                  <span className="text-[10px] text-muted-foreground">{m.role}</span>
+                </label>
+              ))}
+          </div>
+        </div>
+      )}
+      {!canEdit && <p className="text-[11px] text-muted-foreground">Only the author or an admin can change access.</p>}
+    </div>
   );
 }

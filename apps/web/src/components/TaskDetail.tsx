@@ -5,6 +5,7 @@ import { api, type Member, type Priority, type Status } from "../lib/api.js";
 import { Avatar, PRIORITY } from "./ui.js";
 import { TaskCollaboration } from "./TaskCollaboration.js";
 import { CrmLinkField, CycleField, MilestoneField, StageField, SubtasksSection, TagsField, TrackTimeButton } from "./TaskExtras.js";
+import { DocsTab } from "./DocsTab.js";
 import { useEscape } from "../lib/useEscape.js";
 import { useAuth } from "../lib/auth.js";
 
@@ -223,6 +224,10 @@ export function TaskDetail({ taskId, listId, spaceId, statuses, members, onClose
               <MilestoneField task={task} spaceId={spaceId} />
               <CycleField task={task} spaceId={spaceId} />
               <CrmLinkField task={task} />
+              <div className="grid grid-cols-[90px_1fr] items-start gap-2">
+                <span className="pt-1 text-xs font-medium text-muted-foreground">Docs</span>
+                <DocsTab entityType="task" entityId={task.id} compact />
+              </div>
             </div>
 
             {/* Description */}

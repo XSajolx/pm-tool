@@ -165,12 +165,16 @@ export interface DocSettings {
   width?: "narrow" | "wide";
 }
 
+export type DocAccess = "default" | "restricted";
+
 export interface DocSummary {
   id: string;
   title: string;
   icon: string | null;
   cover: string | null;
   parentId: string | null;
+  /** Row 62 */
+  access?: DocAccess;
   excerpt: string;
   project: { id: string; name: string } | null;
   updatedAt: string;
@@ -183,9 +187,23 @@ export interface DocRef {
   icon: string | null;
 }
 
+export type DocLinkEntity = "project" | "task" | "company" | "deal";
+export interface DocLink {
+  id: string;
+  entityType: DocLinkEntity;
+  entityId: string;
+  label: string;
+}
+
 export interface Doc {
   id: string;
   title: string;
+  /** Row 61: records this doc is attached to. */
+  links: DocLink[];
+  /** Row 62: who may open it. */
+  access: DocAccess;
+  accessUsers: { id: string; name: string }[];
+  accessRoles: string[];
   /** Plain text mirror of `content`; the only content for docs written before the block editor. */
   body: string;
   /** TipTap JSON, null for legacy plain-text docs. */
@@ -1452,10 +1470,14 @@ export const api = {
     request<{ id: string; created: boolean }>(`/chat/dm`, { method: "POST", body: JSON.stringify({ userIds }) }),
 
   // ---- Documents ----
-  getDocuments: (opts: { projectId?: string; q?: string } = {}) => {
+  getDocuments: (opts: { projectId?: string; q?: string; entityType?: DocLinkEntity; entityId?: string } = {}) => {
     const qs = new URLSearchParams();
     if (opts.projectId) qs.set("projectId", opts.projectId);
     if (opts.q) qs.set("q", opts.q);
+    if (opts.entityType && opts.entityId) {
+      qs.set("entityType", opts.entityType);
+      qs.set("entityId", opts.entityId);
+    }
     const query = qs.toString();
     return request<DocSummary[]>(`/documents${query ? "?" + query : ""}`);
   },
@@ -1466,6 +1488,13 @@ export const api = {
     request<Doc>(`/documents/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   duplicateDocument: (id: string) => request<Doc>(`/documents/${id}/duplicate`, { method: "POST" }),
   deleteDocument: (id: string) => request<{ id: string }>(`/documents/${id}`, { method: "DELETE" }),
+  /** Row 62: who can open the doc. */
+  setDocAccess: (docId: string, body: { access: DocAccess; userIds?: string[]; roles?: string[] }) =>
+    request<Doc>(`/documents/${docId}/access`, { method: "PATCH", body: JSON.stringify(body) }),
+  /** Row 61: attach / detach a doc from a record. */
+  addDocLink: (docId: string, body: { entityType: DocLinkEntity; entityId: string }) =>
+    request<Doc>(`/documents/${docId}/links`, { method: "POST", body: JSON.stringify(body) }),
+  removeDocLink: (docId: string, linkId: string) => request<Doc>(`/documents/${docId}/links/${linkId}`, { method: "DELETE" }),
 };
 
 export interface ChatMember {

@@ -8,6 +8,7 @@ import { fmtDuration, fmtMoney, fmtShortDate } from "../lib/format.js";
 import { PROJECT_STATUS } from "./ProjectsPage.js";
 import { NotFound } from "../components/NotFound.js";
 import { ProjectTeam } from "../components/ProjectTeam.js";
+import { DocsTab } from "../components/DocsTab.js";
 import { cn } from "../lib/utils.js";
 
 /** One project: headline numbers, its lists, who has logged time, recent entries. */
@@ -220,6 +221,13 @@ export function ProjectPage() {
             </ul>
           </section>
         </div>
+
+        <section className="mt-6 rounded-lg border border-border bg-white">
+          <h2 className="border-b border-border px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Docs</h2>
+          <div className="p-4">
+            <DocsTab entityType="project" entityId={project.id} />
+          </div>
+        </section>
 
         {project.description && (
           <section className="mt-6 rounded-lg border border-border bg-white p-4">

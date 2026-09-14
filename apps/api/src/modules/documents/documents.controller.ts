@@ -1,7 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UsePipes } from "@nestjs/common";
 import { z } from "zod";
 import { ZodValidationPipe } from "../../common/zod-validation.pipe.js";
-import { DocumentsService } from "./documents.service.js";
+import { DocumentsService, type DocLinkEntity } from "./documents.service.js";
 import { Auth, Roles } from "../auth/auth.decorators.js";
 import type { AuthContext } from "../auth/auth.types.js";
 
@@ -25,18 +25,64 @@ const schema = z.object({
   settings: settingsSchema.optional(),
 });
 
+const linkEntity = z.enum(["project", "task", "company", "deal"]);
+const linkSchema = z.object({ entityType: linkEntity, entityId: z.string().uuid() });
+const accessSchema = z.object({
+  access: z.enum(["default", "restricted"]),
+  userIds: z.array(z.string().uuid()).max(100).optional(),
+  roles: z.array(z.enum(["owner", "admin", "member", "guest"])).optional(),
+});
+
 @Controller("documents")
 export class DocumentsController {
   constructor(private readonly documents: DocumentsService) {}
 
   @Get()
-  list(@Auth() auth: AuthContext, @Query("projectId") projectId?: string, @Query("q") q?: string) {
-    return this.documents.list(auth.orgId, { projectId: projectId || undefined, q: q || undefined });
+  list(
+    @Auth() auth: AuthContext,
+    @Query("projectId") projectId?: string,
+    @Query("q") q?: string,
+    @Query("entityType") entityType?: string,
+    @Query("entityId") entityId?: string,
+  ) {
+    const type = linkEntity.safeParse(entityType);
+    return this.documents.list(
+      auth.orgId,
+      {
+        projectId: projectId || undefined,
+        q: q || undefined,
+        entityType: type.success ? type.data : undefined,
+        entityId: type.success && entityId ? entityId : undefined,
+      },
+      { userId: auth.userId, role: auth.role },
+    );
+  }
+
+  /** Row 62: who can open this doc. */
+  @Patch(":id/access")
+  @Roles("owner", "admin", "member")
+  @UsePipes(new ZodValidationPipe(accessSchema))
+  setAccess(@Auth() auth: AuthContext, @Param("id") id: string, @Body() dto: z.infer<typeof accessSchema>) {
+    return this.documents.setAccess(auth.orgId, { userId: auth.userId, role: auth.role }, id, dto);
+  }
+
+  /** Row 61: attach this doc to a project, task, client or deal. */
+  @Post(":id/links")
+  @Roles("owner", "admin", "member")
+  @UsePipes(new ZodValidationPipe(linkSchema))
+  addLink(@Auth() auth: AuthContext, @Param("id") id: string, @Body() dto: z.infer<typeof linkSchema>) {
+    return this.documents.addLink(auth.orgId, auth.userId, id, dto.entityType as DocLinkEntity, dto.entityId);
+  }
+
+  @Delete(":id/links/:linkId")
+  @Roles("owner", "admin", "member")
+  removeLink(@Auth() auth: AuthContext, @Param("id") id: string, @Param("linkId") linkId: string) {
+    return this.documents.removeLink(auth.orgId, id, linkId);
   }
 
   @Get(":id")
   get(@Auth() auth: AuthContext, @Param("id") id: string) {
-    return this.documents.get(auth.orgId, id);
+    return this.documents.get(auth.orgId, id, { userId: auth.userId, role: auth.role });
   }
 
   @Post()
