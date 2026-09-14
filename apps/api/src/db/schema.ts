@@ -114,6 +114,9 @@ export const organizations = pgTable(
     /** Row 110: standard week for people without their own numbers. Working days are 0-6 (Sun-Sat). */
     standardWeeklyHours: integer("standard_weekly_hours").notNull().default(40),
     workingDays: jsonb("working_days").$type<number[]>().notNull().default([1, 2, 3, 4, 5]),
+    /** Row 111: workspace-wide channel defaults per event type, and quiet hours (no email/push) for everyone. */
+    notificationDefaults: jsonb("notification_defaults").$type<Record<string, { inApp?: boolean; email?: boolean; push?: boolean }>>(),
+    quietHours: jsonb("quiet_hours").$type<{ enabled: boolean; start: string; end: string; weekends: boolean; timezone: string }>(),
     /** Row 107: how the four priority levels are named and coloured in this workspace. */
     priorityLabels: jsonb("priority_labels").$type<Partial<Record<"urgent" | "high" | "normal" | "low", { label: string; color: string }>>>(),
     ...timestamps,
@@ -801,6 +804,8 @@ export const notificationPreferences = pgTable(
     /** Row 76: `{ frequency: off|daily|weekly, hour, weekday, inApp, email }`. Null = off. */
     digest: jsonb("digest").$type<{ frequency?: "off" | "daily" | "weekly"; hour?: number; weekday?: number; inApp?: boolean; email?: boolean }>(),
     digestLastSentAt: timestamp("digest_last_sent_at", { withTimezone: true }),
+    /** Row 111: personal quiet hours; null = follow the workspace. */
+    quietHours: jsonb("quiet_hours").$type<{ enabled: boolean; start: string; end: string; weekends: boolean; timezone: string }>(),
     ...timestamps,
   },
   (t) => [uniqueIndex("notification_prefs_org_user_uq").on(t.organizationId, t.userId)],

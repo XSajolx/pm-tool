@@ -3,6 +3,7 @@ import { and, desc, eq, gt, inArray, isNotNull, isNull, notInArray, or, sql, typ
 import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
 import {
+  organizations,
   comments,
   documents,
   follows,
@@ -136,11 +137,50 @@ const LEGACY_FLAG_FOR_TYPE: Partial<Record<NotifType, keyof PreferenceFlags>> = 
 
 type StoredChannels = Record<string, Partial<ChannelPrefs>> | null | undefined;
 
-/** Defaults <- legacy booleans (in-app) <- stored matrix. */
-export function resolveChannels(row: (Partial<PreferenceFlags> & { channels?: StoredChannels }) | null | undefined): ChannelMatrix {
+/** Row 111: quiet hours - no email or push between start and end (local to the timezone); in-app still lands. */
+export interface QuietHours {
+  enabled: boolean;
+  /** "HH:MM" */
+  start: string;
+  end: string;
+  /** Treat all of Saturday and Sunday as quiet. */
+  weekends: boolean;
+  /** IANA zone, e.g. "Asia/Dhaka". */
+  timezone: string;
+}
+export const DEFAULT_QUIET_HOURS: QuietHours = { enabled: false, start: "20:00", end: "08:00", weekends: false, timezone: "Asia/Dhaka" };
+export function resolveQuietHours(...layers: (Partial<QuietHours> | null | undefined)[]): QuietHours {
+  let out = { ...DEFAULT_QUIET_HOURS };
+  for (const l of layers) if (l) out = { ...out, ...l };
+  return out;
+}
+/** Is `now` inside the quiet window? Handles windows that cross midnight (20:00 -> 08:00). */
+export function isQuietNow(q: QuietHours, now = new Date()) {
+  if (!q.enabled) return false;
+  let parts: { weekday: string; hour: string; minute: string };
+  try {
+    const fmt = new Intl.DateTimeFormat("en-US", { timeZone: q.timezone || "UTC", weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false });
+    const p = Object.fromEntries(fmt.formatToParts(now).map((x) => [x.type, x.value]));
+    parts = { weekday: p.weekday ?? "", hour: p.hour ?? "00", minute: p.minute ?? "00" };
+  } catch {
+    parts = { weekday: now.toUTCString().slice(0, 3), hour: String(now.getUTCHours()).padStart(2, "0"), minute: String(now.getUTCMinutes()).padStart(2, "0") };
+  }
+  if (q.weekends && (parts.weekday === "Sat" || parts.weekday === "Sun")) return true;
+  const mins = (Number(parts.hour) % 24) * 60 + Number(parts.minute);
+  const toMin = (hhmm: string) => {
+    const [h, m] = hhmm.split(":").map(Number);
+    return ((h ?? 0) % 24) * 60 + (m ?? 0);
+  };
+  const a = toMin(q.start), b = toMin(q.end);
+  if (a === b) return false;
+  return a < b ? mins >= a && mins < b : mins >= a || mins < b;
+}
+
+/** Defaults <- workspace defaults (row 111) <- legacy booleans (in-app) <- stored matrix. */
+export function resolveChannels(row: (Partial<PreferenceFlags> & { channels?: StoredChannels }) | null | undefined, orgDefaults?: StoredChannels): ChannelMatrix {
   const out = {} as ChannelMatrix;
   for (const type of NOTIF_TYPES) {
-    const base = { ...DEFAULT_CHANNELS[type] };
+    const base = { ...DEFAULT_CHANNELS[type], ...(orgDefaults?.[type] ?? {}) };
     const legacy = LEGACY_FLAG_FOR_TYPE[type];
     if (row && legacy && typeof row[legacy] === "boolean") base.inApp = row[legacy] as boolean;
     out[type] = { ...base, ...(row?.channels?.[type] ?? {}) };
@@ -386,11 +426,20 @@ export class NotificationsService {
     if (!values.length) return;
     const orgId = values[0]!.organizationId;
     const receiverIds = [...new Set(values.map((v) => v.receiverId))];
-    const prefRows = await this.db
-      .select()
-      .from(notificationPreferences)
-      .where(and(eq(notificationPreferences.organizationId, orgId), inArray(notificationPreferences.userId, receiverIds)));
-    const matrixFor = new Map(receiverIds.map((id) => [id, resolveChannels(prefRows.find((p) => p.userId === id))]));
+    const [prefRows, orgRow] = await Promise.all([
+      this.db
+        .select()
+        .from(notificationPreferences)
+        .where(and(eq(notificationPreferences.organizationId, orgId), inArray(notificationPreferences.userId, receiverIds))),
+      this.db.query.organizations.findFirst({ where: eq(organizations.id, orgId), columns: { notificationDefaults: true, quietHours: true } }),
+    ]);
+    const matrixFor = new Map(receiverIds.map((id) => [id, resolveChannels(prefRows.find((p) => p.userId === id), orgRow?.notificationDefaults)]));
+    // Row 111: quiet hours silence email + push (in-app still lands). Personal window beats the workspace one.
+    const now = new Date();
+    const quietFor = new Map(receiverIds.map((id) => {
+      const mine = prefRows.find((p) => p.userId === id)?.quietHours;
+      return [id, isQuietNow(resolveQuietHours(orgRow?.quietHours, mine), now)];
+    }));
     const channelsOf = (v: { receiverId: string; verb: string }): ChannelPrefs => {
       const type = TYPE_FOR_VERB[v.verb];
       return type ? matrixFor.get(v.receiverId)![type] : { inApp: true, email: false, push: false };
@@ -405,8 +454,8 @@ export class NotificationsService {
 
     // Side channels. Email needs the address; push is a socket event the web app
     // turns into a browser notification (no push server needed).
-    const wantEmail = values.filter((v) => channelsOf(v).email);
-    const wantPush = values.filter((v) => channelsOf(v).push);
+    const wantEmail = values.filter((v) => channelsOf(v).email && !quietFor.get(v.receiverId));
+    const wantPush = values.filter((v) => channelsOf(v).push && !quietFor.get(v.receiverId));
     if (wantEmail.length) {
       const people = await this.db
         .select({ id: users.id, email: users.email })
@@ -843,15 +892,44 @@ export class NotificationsService {
         eq(notificationPreferences.userId, userId),
       ),
     });
-    return { channels: resolveChannels(row), digest: resolveDigest(row?.digest), emailConfigured: this.mailer.configured };
+    const org = await this.db.query.organizations.findFirst({ where: eq(organizations.id, orgId), columns: { notificationDefaults: true, quietHours: true } });
+    return {
+      channels: resolveChannels(row, org?.notificationDefaults),
+      digest: resolveDigest(row?.digest),
+      emailConfigured: this.mailer.configured,
+      quietHours: row?.quietHours ?? null,
+      workspaceQuietHours: resolveQuietHours(org?.quietHours),
+    };
+  }
+
+  /* ---------------- Row 111: workspace defaults ---------------- */
+
+  async getWorkspaceDefaults(orgId: string) {
+    const org = await this.db.query.organizations.findFirst({ where: eq(organizations.id, orgId), columns: { notificationDefaults: true, quietHours: true } });
+    return { channels: resolveChannels(null, org?.notificationDefaults), quietHours: resolveQuietHours(org?.quietHours), emailConfigured: this.mailer.configured };
+  }
+
+  async updateWorkspaceDefaults(orgId: string, patch: { channels?: Partial<Record<NotifType, Partial<ChannelPrefs>>>; quietHours?: Partial<QuietHours> }) {
+    const org = await this.db.query.organizations.findFirst({ where: eq(organizations.id, orgId), columns: { notificationDefaults: true, quietHours: true } });
+    const current = resolveChannels(null, org?.notificationDefaults);
+    const next = { ...current } as ChannelMatrix;
+    for (const type of NOTIF_TYPES) if (patch.channels?.[type]) next[type] = { ...current[type], ...patch.channels[type] };
+    const quiet = resolveQuietHours(org?.quietHours, patch.quietHours);
+    await this.db.update(organizations).set({ notificationDefaults: next, quietHours: quiet, updatedAt: new Date() }).where(eq(organizations.id, orgId));
+    return { channels: next, quietHours: quiet, emailConfigured: this.mailer.configured };
   }
 
   /** Merge a partial matrix (`{ mention: { email: false } }`) into the stored one. */
-  async updatePreferences(orgId: string, userId: string, patch: Partial<Record<NotifType, Partial<ChannelPrefs>>> & { digest?: Partial<DigestPrefs> }) {
-    const current = await this.db.query.notificationPreferences.findFirst({
-      where: and(eq(notificationPreferences.organizationId, orgId), eq(notificationPreferences.userId, userId)),
-    });
-    const resolved = resolveChannels(current);
+  async updatePreferences(orgId: string, userId: string, patch: Partial<Record<NotifType, Partial<ChannelPrefs>>> & { digest?: Partial<DigestPrefs>; quietHours?: Partial<QuietHours> | null }) {
+    const [current, org] = await Promise.all([
+      this.db.query.notificationPreferences.findFirst({
+        where: and(eq(notificationPreferences.organizationId, orgId), eq(notificationPreferences.userId, userId)),
+      }),
+      this.db.query.organizations.findFirst({ where: eq(organizations.id, orgId), columns: { notificationDefaults: true, quietHours: true } }),
+    ]);
+    const resolved = resolveChannels(current, org?.notificationDefaults);
+    // Row 111: personal quiet hours (null clears the override so the workspace window applies).
+    const quietHours = patch.quietHours === undefined ? (current?.quietHours ?? null) : patch.quietHours === null ? null : resolveQuietHours(org?.quietHours, current?.quietHours, patch.quietHours);
     const next = { ...resolved } as ChannelMatrix;
     for (const type of NOTIF_TYPES) {
       if (patch[type]) next[type] = { ...resolved[type], ...patch[type] };
@@ -860,12 +938,12 @@ export class NotificationsService {
     const digest = resolveDigest({ ...(current?.digest ?? {}), ...(patch.digest ?? {}) });
     await this.db
       .insert(notificationPreferences)
-      .values({ organizationId: orgId, userId, ...DEFAULT_PREFERENCES, channels: next, digest })
+      .values({ organizationId: orgId, userId, ...DEFAULT_PREFERENCES, channels: next, digest, quietHours })
       .onConflictDoUpdate({
         target: [notificationPreferences.organizationId, notificationPreferences.userId],
-        set: { channels: next, digest, updatedAt: new Date() },
+        set: { channels: next, digest, quietHours, updatedAt: new Date() },
       });
-    return { channels: next, digest, emailConfigured: this.mailer.configured };
+    return { channels: next, digest, emailConfigured: this.mailer.configured, quietHours, workspaceQuietHours: resolveQuietHours(org?.quietHours) };
   }
 
   /**

@@ -17,6 +17,7 @@ import {
 import { relativeTime } from "../components/TaskCollaboration.js";
 import { PriorityFlag, StatusPill } from "../components/ui.js";
 import { cn } from "../lib/utils.js";
+import { QuietHoursForm } from "../components/QuietHoursForm.js";
 import { useToggleMute } from "../components/MuteButton.js";
 import { useToggleFollow } from "../components/FollowButton.js";
 
@@ -737,7 +738,7 @@ function MutedList() {
   );
 }
 
-const NOTIF_TYPE_ROWS: { key: NotifType; label: string }[] = [
+export const NOTIF_TYPE_ROWS: { key: NotifType; label: string }[] = [
   { key: "mention", label: "Mentions & assigned comments" },
   { key: "assigned", label: "Task assigned to me" },
   { key: "approvals", label: "Approvals & sign-offs" },
@@ -749,7 +750,7 @@ const NOTIF_TYPE_ROWS: { key: NotifType; label: string }[] = [
   { key: "chat", label: "Chat activity" },
   { key: "following", label: "Activity on things I follow" },
 ];
-const CHANNELS: { key: "inApp" | "email" | "push"; label: string }[] = [
+export const CHANNELS: { key: "inApp" | "email" | "push"; label: string }[] = [
   { key: "inApp", label: "In-app" },
   { key: "email", label: "Email" },
   { key: "push", label: "Push" },
@@ -815,6 +816,26 @@ function PreferencesPopover({ onClose }: { onClose: () => void }) {
             ))}
           </tbody>
         </table>
+        {/* Row 111: personal quiet hours (workspace window by default) */}
+        {prefs && (
+          <div className="mt-2 border-t border-border px-2 pt-2">
+            <div className="flex items-center justify-between">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Quiet hours</p>
+              {prefs.quietHours ? (
+                <button type="button" onClick={() => update.mutate({ quietHours: null })} className="text-[11px] text-indigo-700 hover:underline">Use workspace setting</button>
+              ) : (
+                <button type="button" onClick={() => update.mutate({ quietHours: { ...prefs.workspaceQuietHours, enabled: true } })} className="text-[11px] text-indigo-700 hover:underline">Set my own</button>
+              )}
+            </div>
+            {prefs.quietHours ? (
+              <div className="mt-1"><QuietHoursForm value={prefs.quietHours} onChange={(patch) => update.mutate({ quietHours: patch })} /></div>
+            ) : (
+              <p className="mt-1 text-xs text-muted-foreground">
+                {prefs.workspaceQuietHours.enabled ? `Workspace: ${prefs.workspaceQuietHours.start}–${prefs.workspaceQuietHours.end}${prefs.workspaceQuietHours.weekends ? " + weekends" : ""} (${prefs.workspaceQuietHours.timezone})` : "Workspace has no quiet hours."}
+              </p>
+            )}
+          </div>
+        )}
         <DigestSettings />
         <FollowingList />
         <MutedList />

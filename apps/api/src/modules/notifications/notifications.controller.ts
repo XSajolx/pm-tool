@@ -4,7 +4,7 @@ import { ZodValidationPipe } from "../../common/zod-validation.pipe.js";
 import { NOTIF_TYPES, NotificationsService, type InboxTab, type MutableEntity } from "./notifications.service.js";
 import { RemindersService } from "./reminders.service.js";
 import { DigestService } from "./digest.service.js";
-import { Auth } from "../auth/auth.decorators.js";
+import { Auth, Roles } from "../auth/auth.decorators.js";
 import type { AuthContext } from "../auth/auth.types.js";
 
 /** Row 73: `{ mention: { email: false }, reminders: { push: true } }` - any subset. */
@@ -17,9 +17,22 @@ const digestSchema = z.object({
   inApp: z.boolean().optional(),
   email: z.boolean().optional(),
 });
+/** Row 111 */
+const quietSchema = z.object({
+  enabled: z.boolean().optional(),
+  start: z.string().regex(/^\d{2}:\d{2}$/).optional(),
+  end: z.string().regex(/^\d{2}:\d{2}$/).optional(),
+  weekends: z.boolean().optional(),
+  timezone: z.string().min(1).max(64).optional(),
+});
 const preferencesSchema = z.object({
   ...(Object.fromEntries(NOTIF_TYPES.map((t) => [t, channelSchema.optional()])) as Record<(typeof NOTIF_TYPES)[number], z.ZodOptional<typeof channelSchema>>),
   digest: digestSchema.optional(),
+  quietHours: quietSchema.nullable().optional(),
+});
+const workspaceDefaultsSchema = z.object({
+  channels: z.object(Object.fromEntries(NOTIF_TYPES.map((t) => [t, channelSchema.optional()])) as Record<(typeof NOTIF_TYPES)[number], z.ZodOptional<typeof channelSchema>>).optional(),
+  quietHours: quietSchema.optional(),
 });
 
 const snoozeSchema = z.object({ until: z.string().datetime() });
@@ -118,6 +131,19 @@ export class NotificationsController {
     const parsed = mutableEntity.safeParse(entityType);
     if (!parsed.success) return { muted: false };
     return this.notifications.unmute(auth.userId, parsed.data as MutableEntity, entityId);
+  }
+
+  /** Row 111: what new members start with, and the workspace quiet window. */
+  @Get("workspace-defaults")
+  workspaceDefaults(@Auth() auth: AuthContext) {
+    return this.notifications.getWorkspaceDefaults(auth.orgId);
+  }
+
+  @Patch("workspace-defaults")
+  @Roles("owner", "admin")
+  @UsePipes(new ZodValidationPipe(workspaceDefaultsSchema))
+  updateWorkspaceDefaults(@Auth() auth: AuthContext, @Body() dto: z.infer<typeof workspaceDefaultsSchema>) {
+    return this.notifications.updateWorkspaceDefaults(auth.orgId, dto);
   }
 
   @Get("preferences")

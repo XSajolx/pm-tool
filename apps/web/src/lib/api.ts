@@ -650,10 +650,26 @@ export interface DigestSections {
   assignments: DigestItem[];
   mentions: DigestItem[];
 }
+/** Row 111 */
+export interface QuietHours {
+  enabled: boolean;
+  start: string;
+  end: string;
+  weekends: boolean;
+  timezone: string;
+}
 export interface NotificationPreferences {
   channels: Record<NotifType, ChannelPrefs>;
   digest: DigestPrefs;
   /** False when the server has no mail provider - email switches still save, but nothing goes out. */
+  emailConfigured: boolean;
+  /** Row 111: personal override; null = follow the workspace window. */
+  quietHours: QuietHours | null;
+  workspaceQuietHours: QuietHours;
+}
+export interface WorkspaceNotificationDefaults {
+  channels: Record<NotifType, ChannelPrefs>;
+  quietHours: QuietHours;
   emailConfigured: boolean;
 }
 
@@ -1480,7 +1496,11 @@ export const api = {
     request<{ muted: boolean }>(`/notifications/mutes/${entityType}/${entityId}`, { method: "DELETE" }),
   getNotificationPreferences: () =>
     request<NotificationPreferences>(`/notifications/preferences`),
-  updateNotificationPreferences: (patch: Partial<Record<NotifType, Partial<ChannelPrefs>>> & { digest?: Partial<DigestPrefs> }) =>
+  /** Row 111 */
+  getWorkspaceNotificationDefaults: () => request<WorkspaceNotificationDefaults>(`/notifications/workspace-defaults`),
+  updateWorkspaceNotificationDefaults: (patch: { channels?: Partial<Record<NotifType, Partial<ChannelPrefs>>>; quietHours?: Partial<QuietHours> }) =>
+    request<WorkspaceNotificationDefaults>(`/notifications/workspace-defaults`, { method: "PATCH", body: JSON.stringify(patch) }),
+  updateNotificationPreferences: (patch: Partial<Record<NotifType, Partial<ChannelPrefs>>> & { digest?: Partial<DigestPrefs>; quietHours?: Partial<QuietHours> | null }) =>
     request<NotificationPreferences>(`/notifications/preferences`, {
       method: "PATCH",
       body: JSON.stringify(patch),

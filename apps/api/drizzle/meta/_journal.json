@@ -414,6 +414,13 @@
       "when": 1789362418226,
       "tag": "0058_work_calendar",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1789362953203,
+      "tag": "0059_notification_defaults",
+      "breakpoints": true
     }
   ]
 }
