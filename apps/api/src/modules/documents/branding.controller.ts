@@ -9,6 +9,9 @@ import { Auth, Roles } from "../auth/auth.decorators.js";
 import type { AuthContext } from "../auth/auth.types.js";
 
 const schema = z.object({
+  /** Row 108: the workspace name is part of the brand. */
+  name: z.string().trim().min(1).max(255).optional(),
+  brandFaviconUrl: z.string().max(2000).nullable().optional(),
   brandColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
   brandLogoUrl: z.string().max(2000).nullable().optional(),
   brandFooter: z.string().max(255).nullable().optional(),
@@ -25,8 +28,8 @@ export class BrandingController {
 
   @Get()
   async get(@Auth() auth: AuthContext) {
-    const org = await this.db.query.organizations.findFirst({ where: eq(organizations.id, auth.orgId), columns: { name: true, brandColor: true, brandLogoUrl: true, brandFooter: true } });
-    return org ?? { name: "", brandColor: "#6366f1", brandLogoUrl: null, brandFooter: null };
+    const org = await this.db.query.organizations.findFirst({ where: eq(organizations.id, auth.orgId), columns: { name: true, brandColor: true, brandLogoUrl: true, brandFooter: true, brandFaviconUrl: true } });
+    return org ?? { name: "", brandColor: "#6366f1", brandLogoUrl: null, brandFooter: null, brandFaviconUrl: null };
   }
 
   @Patch()

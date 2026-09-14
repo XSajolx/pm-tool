@@ -379,6 +379,15 @@ export interface ActivityEntry {
   actor: { id: string; name: string; avatarUrl: string | null } | null;
 }
 
+/** Row 67 + 108: workspace brand. */
+export interface Branding {
+  name: string;
+  brandColor: string;
+  brandLogoUrl: string | null;
+  brandFooter: string | null;
+  brandFaviconUrl: string | null;
+}
+
 /** Row 104: a submitted week waiting on me. */
 export interface PendingTimesheet {
   id: string;
@@ -1931,9 +1940,9 @@ export const api = {
   getPriorities: () => request<Partial<Record<Priority, { label: string; color: string }>>>(`/branding/priorities`),
   updatePriorities: (body: Partial<Record<Priority, { label: string; color: string }>>) =>
     request<Partial<Record<Priority, { label: string; color: string }>>>(`/branding/priorities`, { method: "PATCH", body: JSON.stringify(body) }),
-  getBranding: () => request<{ name: string; brandColor: string; brandLogoUrl: string | null; brandFooter: string | null }>(`/branding`),
-  updateBranding: (body: Partial<{ brandColor: string; brandLogoUrl: string | null; brandFooter: string | null }>) =>
-    request<{ name: string; brandColor: string; brandLogoUrl: string | null; brandFooter: string | null }>(`/branding`, { method: "PATCH", body: JSON.stringify(body) }),
+  getBranding: () => request<Branding>(`/branding`),
+  updateBranding: (body: Partial<Omit<Branding, "name"> & { name: string }>) =>
+    request<Branding>(`/branding`, { method: "PATCH", body: JSON.stringify(body) }),
   /** Fetches an authenticated PDF and opens it in a new tab. */
   openDocPdf: async (docId: string) => {
     const token = await accessToken();

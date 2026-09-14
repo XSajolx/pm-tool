@@ -1,0 +1,1 @@
+ALTER TABLE "organizations" ADD COLUMN "brand_favicon_url" text;

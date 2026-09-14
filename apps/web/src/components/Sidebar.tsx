@@ -9,6 +9,7 @@ import { QuickAdd, useQuickAddShortcut } from "./QuickAdd.js";
 import { InviteDialog, NewSpaceDialog } from "./SidebarDialogs.js";
 import { cn } from "../lib/utils.js";
 import { applyPriorityConfig } from "./ui.js";
+import { applyBranding } from "../lib/brand.js";
 import { roleLabel } from "../lib/roles.js";
 
 export function Sidebar() {
@@ -66,6 +67,11 @@ export function Sidebar() {
   useEffect(() => {
     if (priorityCfg) applyPriorityConfig(priorityCfg);
   }, [priorityCfg]);
+  // Row 108: accent colour, favicon and tab title follow the workspace brand.
+  const { data: branding } = useQuery({ queryKey: ["branding"], queryFn: api.getBranding, staleTime: 5 * 60_000 });
+  useEffect(() => {
+    applyBranding(branding);
+  }, [branding]);
   const [orgMenu, setOrgMenu] = useState(false);
   const [userMenu, setUserMenu] = useState(false);
   const [spaceDialog, setSpaceDialog] = useState(false);
@@ -90,11 +96,15 @@ export function Sidebar() {
           onClick={() => setOrgMenu((o) => !o)}
           className="flex w-full items-center gap-2 px-3 py-3 text-left hover:bg-muted"
         >
-          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded bg-indigo-600 text-xs font-bold text-white">
-            {(activeOrg?.name ?? "?").slice(0, 2).toUpperCase()}
-          </span>
+          {branding?.brandLogoUrl ? (
+            <img src={branding.brandLogoUrl} alt="" className="h-6 w-6 shrink-0 rounded object-contain" />
+          ) : (
+            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded bg-indigo-600 text-xs font-bold text-white">
+              {(branding?.name ?? activeOrg?.name ?? "?").slice(0, 2).toUpperCase()}
+            </span>
+          )}
           <span className="truncate text-sm font-semibold">
-            {activeOrg?.name ?? "Workspace"}
+            {branding?.name ?? activeOrg?.name ?? "Workspace"}
           </span>
           <svg className="ml-auto h-4 w-4 shrink-0 text-slate-400" viewBox="0 0 24 24" fill="none">
             <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" />

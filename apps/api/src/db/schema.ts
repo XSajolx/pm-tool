@@ -101,6 +101,8 @@ export const organizations = pgTable(
     brandColor: varchar("brand_color", { length: 16 }).notNull().default("#6366f1"),
     brandLogoUrl: text("brand_logo_url"),
     brandFooter: varchar("brand_footer", { length: 255 }),
+    /** Row 108: browser-tab icon for the app (falls back to a generated initials icon in the accent colour). */
+    brandFaviconUrl: text("brand_favicon_url"),
     /** Row 80: Google Workspace domain - a verified Google sign-in on this domain auto-joins as member. */
     ssoDomain: varchar("sso_domain", { length: 255 }),
     /** Row 81: roles that must have 2FA enrolled before they can use the workspace. */

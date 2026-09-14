@@ -9,6 +9,7 @@ import { ASSIGNABLE_ROLES, PERMISSION_MATRIX, ROLE_DESCRIPTIONS, ROLE_LABELS, ty
 import type { ReminderSlot } from "../lib/api.js";
 import { supabase } from "../lib/supabase.js";
 import { PRIORITY, PRIORITY_DEFAULTS, PRIORITY_PALETTE, applyPriorityConfig } from "../components/ui.js";
+import { applyBranding } from "../lib/brand.js";
 import type { Priority } from "../lib/api.js";
 
 /**
@@ -914,17 +915,29 @@ function SnippetBody({ snippet, onSave }: { snippet: Snippet; onSave: (patch: { 
 function BrandingSettings({ canEdit }: { canEdit: boolean }) {
   const qc = useQueryClient();
   const { data } = useQuery({ queryKey: ["branding"], queryFn: api.getBranding });
-  const save = useMutation({ mutationFn: (body: Parameters<typeof api.updateBranding>[0]) => api.updateBranding(body), onSuccess: (b) => qc.setQueryData(["branding"], b) });
+  const { refreshMe } = useAuth();
+  const save = useMutation({
+    mutationFn: (body: Parameters<typeof api.updateBranding>[0]) => api.updateBranding(body),
+    onSuccess: (b, body) => {
+      qc.setQueryData(["branding"], b);
+      applyBranding(b);
+      if (body.name) void refreshMe();
+    },
+  });
   if (!data) return <p className="text-sm text-muted-foreground">Loading…</p>;
   const field = "w-full rounded-md border border-border px-3 py-1.5 text-sm outline-none focus:border-indigo-500 disabled:opacity-60";
   return (
     <div>
       <h1 className="text-lg font-semibold text-slate-900">Branding</h1>
-      <p className="mt-1 text-sm text-muted-foreground">Your colour, logo and footer appear on exported PDFs and on pages clients open from share links.</p>
+      <p className="mt-1 text-sm text-muted-foreground">Name, accent colour, logo and favicon shape the app itself; the colour, logo and footer also appear on PDFs and on pages clients open from share links.</p>
       <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2">
         <div className="space-y-3">
           <label className="block text-xs font-medium text-slate-600">
-            Brand colour
+            Workspace name
+            <input defaultValue={data.name} disabled={!canEdit} onBlur={(e) => e.target.value.trim() && e.target.value.trim() !== data.name && save.mutate({ name: e.target.value.trim() })} className={`${field} mt-1`} />
+          </label>
+          <label className="block text-xs font-medium text-slate-600">
+            Accent colour <span className="font-normal text-muted-foreground">(buttons, links, active items)</span>
             <div className="mt-1 flex items-center gap-2">
               <input type="color" value={data.brandColor} disabled={!canEdit} onChange={(e) => save.mutate({ brandColor: e.target.value })} className="h-9 w-12 cursor-pointer rounded border border-border" />
               <input defaultValue={data.brandColor} disabled={!canEdit} onBlur={(e) => /^#[0-9a-fA-F]{6}$/.test(e.target.value.trim()) && save.mutate({ brandColor: e.target.value.trim() })} className={field} />
@@ -933,6 +946,10 @@ function BrandingSettings({ canEdit }: { canEdit: boolean }) {
           <label className="block text-xs font-medium text-slate-600">
             Logo URL
             <input defaultValue={data.brandLogoUrl ?? ""} disabled={!canEdit} onBlur={(e) => (e.target.value.trim() || null) !== (data.brandLogoUrl ?? null) && save.mutate({ brandLogoUrl: e.target.value.trim() || null })} placeholder="https://…/logo.png" className={`${field} mt-1`} />
+          </label>
+          <label className="block text-xs font-medium text-slate-600">
+            Favicon URL <span className="font-normal text-muted-foreground">(browser tab; blank = initials in your colour)</span>
+            <input defaultValue={data.brandFaviconUrl ?? ""} disabled={!canEdit} onBlur={(e) => (e.target.value.trim() || null) !== (data.brandFaviconUrl ?? null) && save.mutate({ brandFaviconUrl: e.target.value.trim() || null })} placeholder="https://…/favicon.png" className={`${field} mt-1`} />
           </label>
           <label className="block text-xs font-medium text-slate-600">
             Footer line
