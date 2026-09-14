@@ -165,7 +165,17 @@ export interface DocSettings {
   width?: "narrow" | "wide";
 }
 
+/** Row 66: reusable content, embedded by reference. */
+export interface Snippet {
+  id: string;
+  name: string;
+  content: Record<string, unknown> | null;
+  body: string;
+  updatedAt: string;
+}
+
 export type DocAccess = "default" | "restricted";
+export type DocReviewStatus = "draft" | "in_review" | "approved";
 
 export interface DocSummary {
   id: string;
@@ -175,6 +185,9 @@ export interface DocSummary {
   parentId: string | null;
   /** Row 62 */
   access?: DocAccess;
+  /** Row 63 */
+  reviewStatus?: DocReviewStatus;
+  approver?: { id: string; name: string } | null;
   excerpt: string;
   project: { id: string; name: string } | null;
   updatedAt: string;
@@ -204,6 +217,17 @@ export interface Doc {
   access: DocAccess;
   accessUsers: { id: string; name: string }[];
   accessRoles: string[];
+  /** Row 65: share link token (null = not shared). */
+  shareToken: string | null;
+  sharedAt: string | null;
+  /** Row 63: sign-off. */
+  reviewStatus: DocReviewStatus;
+  approverId: string | null;
+  approver: { id: string; name: string } | null;
+  reviewRequestedBy: { id: string; name: string } | null;
+  reviewRequestedAt: string | null;
+  approvedAt: string | null;
+  reviewNote: string | null;
   /** Plain text mirror of `content`; the only content for docs written before the block editor. */
   body: string;
   /** TipTap JSON, null for legacy plain-text docs. */
@@ -1488,6 +1512,40 @@ export const api = {
     request<Doc>(`/documents/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   duplicateDocument: (id: string) => request<Doc>(`/documents/${id}/duplicate`, { method: "POST" }),
   deleteDocument: (id: string) => request<{ id: string }>(`/documents/${id}`, { method: "DELETE" }),
+  /** Row 67: branding + PDF export. */
+  getBranding: () => request<{ name: string; brandColor: string; brandLogoUrl: string | null; brandFooter: string | null }>(`/branding`),
+  updateBranding: (body: Partial<{ brandColor: string; brandLogoUrl: string | null; brandFooter: string | null }>) =>
+    request<{ name: string; brandColor: string; brandLogoUrl: string | null; brandFooter: string | null }>(`/branding`, { method: "PATCH", body: JSON.stringify(body) }),
+  /** Fetches an authenticated PDF and opens it in a new tab. */
+  openDocPdf: async (docId: string) => {
+    const token = await accessToken();
+    const res = await fetch(`${API_URL}/api/documents/${docId}/pdf`, {
+      headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), ...(activeOrgId ? { "x-org-id": activeOrgId } : {}) },
+    });
+    if (!res.ok) throw new ApiError(res.status, `API ${res.status}: ${await res.text()}`);
+    const url = URL.createObjectURL(await res.blob());
+    window.open(url, "_blank", "noopener");
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  },
+  publicDocPdfUrl: (token: string) => `${API_URL}/api/public/docs/${token}/pdf`,
+  /** Row 66: snippets. */
+  getSnippets: () => request<Snippet[]>(`/snippets`),
+  getSnippet: (id: string) => request<Snippet>(`/snippets/${id}`),
+  createSnippet: (body: { name: string; content?: Record<string, unknown> | null; body?: string }) =>
+    request<Snippet>(`/snippets`, { method: "POST", body: JSON.stringify(body) }),
+  updateSnippet: (id: string, body: Partial<{ name: string; content: Record<string, unknown> | null; body: string }>) =>
+    request<Snippet>(`/snippets/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  deleteSnippet: (id: string) => request<{ id: string }>(`/snippets/${id}`, { method: "DELETE" }),
+  /** Row 65: share link + public read. */
+  enableDocShare: (docId: string) => request<Doc>(`/documents/${docId}/share`, { method: "POST" }),
+  disableDocShare: (docId: string) => request<Doc>(`/documents/${docId}/share`, { method: "DELETE" }),
+  getPublicDoc: (token: string) =>
+    publicRequest<{ title: string; icon: string | null; settings: DocSettings; content: Record<string, unknown> | null; body: string; updatedAt: string; project: string | null; organization: string | null; reviewStatus: DocReviewStatus }>(`/public/docs/${token}`),
+  /** Row 63: review & sign-off. */
+  requestDocReview: (docId: string, body: { approverId: string; note?: string }) =>
+    request<Doc>(`/documents/${docId}/review`, { method: "POST", body: JSON.stringify(body) }),
+  decideDocReview: (docId: string, body: { approve: boolean; note?: string }) =>
+    request<Doc>(`/documents/${docId}/review/decision`, { method: "POST", body: JSON.stringify(body) }),
   /** Row 62: who can open the doc. */
   setDocAccess: (docId: string, body: { access: DocAccess; userIds?: string[]; roles?: string[] }) =>
     request<Doc>(`/documents/${docId}/access`, { method: "PATCH", body: JSON.stringify(body) }),

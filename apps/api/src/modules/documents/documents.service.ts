@@ -5,6 +5,12 @@ import type { DB } from "../../db/index.js";
 import { companies, deals, documentAccess, documentLinks, documents, projectMembers, projects, tasks, type DocumentSettings } from "../../db/schema.js";
 import type { Role } from "../auth/auth.types.js";
 import { ChatEventsService } from "../chat/chat-events.service.js";
+import { NotificationsService } from "../notifications/notifications.service.js";
+import { randomBytes } from "node:crypto";
+import { expandSnippets, snippetIds, stripInternal, textOf, toLines, type PmNode } from "./doc-content.js";
+import { renderDocPdf } from "../crm/pdf.js";
+import { organizations } from "../../db/schema.js";
+import { SnippetsService } from "./snippets.service.js";
 
 export type DocLinkEntity = "project" | "task" | "company" | "deal";
 
@@ -31,7 +37,18 @@ export class DocumentsService {
   constructor(
     @Inject(DRIZZLE) private readonly db: DB,
     private readonly chatEvents: ChatEventsService,
+    private readonly notifications: NotificationsService,
+    private readonly snippets: SnippetsService,
   ) {}
+
+  /** Row 65 + 66: what leaves the team — internal blocks gone, snippets expanded. */
+  async exportContent(orgId: string, content: Record<string, unknown> | null) {
+    if (!content) return null;
+    const stripped = stripInternal(content as PmNode);
+    const ids = [...snippetIds(stripped)];
+    const lookup = await this.snippets.contentsFor(orgId, ids);
+    return expandSnippets(stripped, lookup);
+  }
 
   /**
    * Every live doc in the org (the client builds the page tree from `parentId`).
@@ -61,7 +78,7 @@ export class DocumentsService {
         ...(scope ? [scope] : []),
         ...(q ? [or(ilike(documents.title, `%${q}%`), ilike(documents.body, `%${q}%`))] : []),
       ),
-      with: { project: true, updatedBy: true, accessList: true },
+      with: { project: true, updatedBy: true, accessList: true, approver: { columns: { id: true, name: true } } },
       orderBy: desc(documents.updatedAt),
     });
     const ctx = viewer ? await this.viewerContext(orgId, viewer) : null;
@@ -74,6 +91,8 @@ export class DocumentsService {
       cover: d.cover,
       parentId: d.parentId,
       access: d.access,
+      reviewStatus: d.reviewStatus,
+      approver: d.approver ? { id: d.approver.id, name: d.approver.name } : null,
       excerpt: d.body.replace(/\s+/g, " ").trim().slice(0, 160),
       project: d.project ? { id: d.project.id, name: d.project.name } : null,
       updatedAt: d.updatedAt,
@@ -89,6 +108,8 @@ export class DocumentsService {
         createdBy: true,
         updatedBy: true,
         accessList: { with: { user: { columns: { id: true, name: true } } } },
+        approver: { columns: { id: true, name: true } },
+        reviewRequestedBy: { columns: { id: true, name: true } },
         parent: { columns: { id: true, title: true, icon: true } },
         children: {
           columns: { id: true, title: true, icon: true, updatedAt: true },
@@ -103,10 +124,12 @@ export class DocumentsService {
       if (!this.canSee(row, ctx)) throw new ForbiddenException("You don't have access to this document");
     }
     const links = await this.linksFor(orgId, id);
-    const { accessList, ...rest } = row;
+    const { accessList, approver, reviewRequestedBy, ...rest } = row;
     return {
       ...rest,
       links,
+      approver: approver ? { id: approver.id, name: approver.name } : null,
+      reviewRequestedBy: reviewRequestedBy ? { id: reviewRequestedBy.id, name: reviewRequestedBy.name } : null,
       accessUsers: accessList.filter((a) => a.user).map((a) => ({ id: a.user!.id, name: a.user!.name })),
       accessRoles: accessList.map((a) => a.role).filter((x): x is string => Boolean(x)),
       project: row.project ? { id: row.project.id, name: row.project.name } : null,
@@ -152,10 +175,130 @@ export class DocumentsService {
       await this.assertNotDescendant(orgId, id, dto.parentId);
     }
     const settings = dto.settings ? { ...current.settings, ...dto.settings } : undefined;
+    // Row 63: an approved doc that changes is no longer the approved version.
+    const contentChanged = (dto.content !== undefined && JSON.stringify(dto.content) !== JSON.stringify(current.content)) || (dto.body !== undefined && dto.body !== current.body) || (dto.title !== undefined && dto.title !== current.title);
+    const reopen = current.reviewStatus === "approved" && contentChanged ? { reviewStatus: "draft" as const, reviewNote: "Edited after approval — needs sign-off again." } : {};
     await this.db
       .update(documents)
-      .set({ ...dto, settings, updatedById: userId, updatedAt: new Date() })
+      .set({ ...dto, settings, ...reopen, updatedById: userId, updatedAt: new Date() })
       .where(eq(documents.id, id));
+    return this.get(orgId, id);
+  }
+
+  /* ---------------- Row 67: branded PDF ---------------- */
+
+  /** The doc as a branded PDF: internal blocks stripped, snippets expanded, org colour band + footer. */
+  async pdf(orgId: string, id: string, viewer?: Viewer) {
+    const doc = await this.get(orgId, id, viewer);
+    return this.renderPdfFor(orgId, doc);
+  }
+
+  async publicPdf(token: string) {
+    const row = await this.db.query.documents.findFirst({ where: and(eq(documents.shareToken, token), isNull(documents.archivedAt)) });
+    if (!row) throw new NotFoundException("This link is not valid");
+    return this.renderPdfFor(row.organizationId, { title: row.title, content: row.content, body: row.body, updatedAt: row.updatedAt, reviewStatus: row.reviewStatus, projectId: row.projectId });
+  }
+
+  private async renderPdfFor(orgId: string, doc: { title: string; content: Record<string, unknown> | null; body: string; updatedAt: Date; reviewStatus: string; projectId: string | null }) {
+    const org = await this.db.query.organizations.findFirst({ where: eq(organizations.id, orgId), columns: { name: true, brandColor: true, brandFooter: true } });
+    const project = doc.projectId ? await this.db.query.projects.findFirst({ where: eq(projects.id, doc.projectId), columns: { name: true } }) : null;
+    const content = await this.exportContent(orgId, doc.content);
+    const lines = content ? toLines(content as PmNode) : doc.body.split(/\r?\n/).map((t) => ({ text: t, style: t ? ("p" as const) : ("blank" as const) }));
+    const bytes = renderDocPdf({
+      title: doc.title || "Untitled",
+      subtitle: [project?.name, doc.reviewStatus === "approved" ? "Approved" : null, `Updated ${doc.updatedAt.toISOString().slice(0, 10)}`].filter(Boolean).join("  ·  "),
+      lines,
+      brand: { color: org?.brandColor ?? "#6366f1", orgName: org?.name ?? "", footer: org?.brandFooter ?? null },
+    });
+    const filename = `${(doc.title || "document").replace(/[^\w.-]+/g, "_").slice(0, 80)}.pdf`;
+    return { bytes, filename };
+  }
+
+  /* ---------------- Row 65: share link (internal blocks stripped) ---------------- */
+
+  async enableShare(orgId: string, actor: Viewer, id: string) {
+    const doc = await this.get(orgId, id, actor);
+    if (doc.shareToken) return doc;
+    await this.db.update(documents).set({ shareToken: randomBytes(20).toString("hex"), sharedAt: new Date(), updatedAt: new Date() }).where(eq(documents.id, id));
+    return this.get(orgId, id);
+  }
+
+  async disableShare(orgId: string, actor: Viewer, id: string) {
+    await this.get(orgId, id, actor);
+    await this.db.update(documents).set({ shareToken: null, sharedAt: null, updatedAt: new Date() }).where(eq(documents.id, id));
+    return this.get(orgId, id);
+  }
+
+  /** What a client sees from a share link: the doc without internal-only blocks. */
+  async publicByToken(token: string) {
+    const row = await this.db.query.documents.findFirst({
+      where: and(eq(documents.shareToken, token), isNull(documents.archivedAt)),
+      with: { project: { columns: { name: true } }, organization: { columns: { name: true } } },
+    });
+    if (!row) throw new NotFoundException("This link is not valid");
+    const content = await this.exportContent(row.organizationId, row.content);
+    return {
+      title: row.title,
+      icon: row.icon,
+      settings: row.settings,
+      content,
+      body: content ? textOf(content) : row.body,
+      updatedAt: row.updatedAt,
+      project: row.project?.name ?? null,
+      organization: row.organization?.name ?? null,
+      reviewStatus: row.reviewStatus,
+    };
+  }
+
+  /* ---------------- Row 63: review & sign-off ---------------- */
+
+  /** Ask a named approver to sign the doc off; they get an inbox item. */
+  async requestReview(orgId: string, actor: Viewer, id: string, approverId: string, note?: string) {
+    const doc = await this.get(orgId, id, actor);
+    const patch = { reviewStatus: "in_review" as const, approverId, reviewRequestedById: actor.userId, reviewRequestedAt: new Date(), approvedAt: null, reviewNote: note?.trim() || null, updatedAt: new Date() };
+    await this.db.update(documents).set(patch).where(eq(documents.id, id));
+    await this.notifications.notifyDirect({
+      orgId,
+      receiverId: approverId,
+      actorId: actor.userId,
+      entityType: "document",
+      entityId: id,
+      verb: "doc_review_requested",
+      title: `Review requested: ${doc.title}`,
+      body: note?.trim() || "Please review and sign off",
+      data: { documentId: id },
+    });
+    return this.get(orgId, id);
+  }
+
+  /** The approver (or an admin) approves, or sends it back to Draft with a note. */
+  async decideReview(orgId: string, actor: Viewer, id: string, approve: boolean, note?: string) {
+    const doc = await this.get(orgId, id, actor);
+    const admin = actor.role === "owner" || actor.role === "admin";
+    if (doc.approverId !== actor.userId && !admin) throw new ForbiddenException("Only the named approver can sign this off");
+    if (doc.reviewStatus !== "in_review") throw new BadRequestException("This doc isn't waiting for review");
+    const now = new Date();
+    await this.db
+      .update(documents)
+      .set(approve ? { reviewStatus: "approved", approvedAt: now, approverId: actor.userId, reviewNote: note?.trim() || null, updatedAt: now } : { reviewStatus: "draft", approvedAt: null, reviewNote: note?.trim() || "Sent back for changes", updatedAt: now })
+      .where(eq(documents.id, id));
+    const receivers = new Set([doc.reviewRequestedBy?.id, doc.createdBy?.id].filter((x): x is string => Boolean(x) && x !== actor.userId));
+    for (const receiverId of receivers) {
+      await this.notifications.notifyDirect({
+        orgId,
+        receiverId,
+        actorId: actor.userId,
+        entityType: "document",
+        entityId: id,
+        verb: approve ? "doc_approved" : "doc_rejected",
+        title: `${approve ? "Approved" : "Sent back"}: ${doc.title}`,
+        body: note?.trim() || (approve ? "Signed off" : "Needs changes"),
+        data: { documentId: id },
+      });
+    }
+    if (approve && doc.projectId) {
+      await this.chatEvents.postProjectEvent(orgId, doc.projectId, actor.userId, { type: "doc_shared", text: `approved the doc “${doc.title}”`, link: `/docs/${id}`, entityId: id });
+    }
     return this.get(orgId, id);
   }
 

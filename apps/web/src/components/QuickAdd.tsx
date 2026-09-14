@@ -18,6 +18,7 @@ export function QuickAdd({
   onClose,
   initialText,
   source,
+  docSource,
   onCreated,
 }: {
   open: boolean;
@@ -26,6 +27,8 @@ export function QuickAdd({
   initialText?: string;
   /** Row 47: the chat message this task comes from — stored on the task and quoted in its description. */
   source?: { messageId: string; channelId: string; channelName: string; authorName: string; body: string };
+  /** Row 64: a doc selection this task comes from — quoted in the description and linked back to the doc. */
+  docSource?: { docId: string; title: string; selection: string };
   onCreated?: (task: { id: string; title: string; reference: string | null }) => void;
 }) {
   const qc = useQueryClient();
@@ -93,8 +96,14 @@ export function QuickAdd({
         priority: parsed.priority,
         assigneeIds: matchedMembers.map((m) => m.id),
         sourceMessageId: source?.messageId,
-        description: source ? `From ${source.channelName} — ${source.authorName} wrote:\n> ${source.body.replace(/\n/g, "\n> ")}` : undefined,
+        description: source
+          ? `From ${source.channelName} — ${source.authorName} wrote:\n> ${source.body.replace(/\n/g, "\n> ")}`
+          : docSource
+            ? `From doc “${docSource.title}”:\n> ${docSource.selection.replace(/\n/g, "\n> ")}`
+            : undefined,
       });
+      // Row 64: the task appears on the doc's "Attached to" list and the doc on the task's Docs field.
+      if (docSource) await api.addDocLink(docSource.docId, { entityType: "task", entityId: task.id }).catch(() => undefined);
       for (const name of parsed.tags) {
         const existing = tags.find((t) => t.name.toLowerCase() === name.toLowerCase()) ?? (await api.createTag({ name }));
         await api.addTaskTag(task.id, existing.id);
@@ -129,6 +138,15 @@ export function QuickAdd({
             if (canSubmit) create.mutate();
           }}
         >
+          {docSource && (
+            <div className="flex items-start gap-2 border-b border-border bg-[#fbfbfa] px-4 py-2 text-xs text-slate-600">
+              <span>📄</span>
+              <span className="min-w-0">
+                From <span className="font-medium text-slate-800">{docSource.title}</span>:{" "}
+                <span className="line-clamp-2 text-muted-foreground">{docSource.selection}</span>
+              </span>
+            </div>
+          )}
           {source && (
             <div className="flex items-start gap-2 border-b border-border bg-[#fbfbfa] px-4 py-2 text-xs text-slate-600">
               <span>💬</span>

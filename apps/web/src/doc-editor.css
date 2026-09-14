@@ -57,6 +57,10 @@
 .doc-prose .callout-success::before { content: "✅"; }
 .doc-prose .callout-note { background: hsl(210 40% 96%); border-color: hsl(214 32% 86%); }
 .doc-prose .callout-note::before { content: "📝"; }
+/* Row 65: internal-only — visibly "team eyes only"; never reaches a client. */
+.doc-prose .callout-internal { background: repeating-linear-gradient(135deg, #f8fafc 0 10px, #f1f5f9 10px 20px); border: 1px dashed #94a3b8; color: #334155; }
+.doc-prose .callout-internal::before { content: "🔒"; }
+.doc-prose .callout-internal::after { content: "Internal — hidden from clients"; position: absolute; right: 0.75em; top: 0.45em; font-size: 0.65em; letter-spacing: 0.04em; text-transform: uppercase; color: #64748b; }
 
 /* Toggle list */
 .doc-prose .toggle { display: flex; align-items: flex-start; gap: 0.25em; }
@@ -96,3 +100,14 @@
 .bubble-select { height: 26px; border: 0; border-radius: 5px; background: transparent; font-size: 12px; color: hsl(222 47% 25%); outline: none; }
 .bubble-sep { width: 1px; height: 18px; background: hsl(214 32% 88%); margin: 0 3px; }
 .bubble-swatch { width: 14px; height: 14px; border-radius: 999px; border: 1px solid rgba(0, 0, 0, 0.12); cursor: pointer; }
+
+/* Row 66: embedded snippets */
+.doc-prose .snippet-block { position: relative; margin: 0.75em 0; border: 1px solid #c7d2fe; border-left: 3px solid #6366f1; border-radius: 8px; background: #fafbff; padding: 0.4em 0.75em 0.5em; }
+.doc-prose .snippet-block .doc-editor { margin: 0; }
+.doc-prose .snippet-head, .doc-prose .snippet-pick { display: flex; align-items: center; gap: 0.5em; font-size: 0.72em; color: #4f46e5; text-transform: uppercase; letter-spacing: 0.04em; }
+.doc-prose .snippet-actions { margin-left: auto; display: flex; gap: 0.25em; }
+.doc-prose .snippet-head button, .doc-prose .snippet-pick button { font-size: 1em; text-transform: none; letter-spacing: 0; color: #64748b; border: 1px solid #e2e8f0; border-radius: 4px; padding: 0 0.4em; background: white; }
+.doc-prose .snippet-head button:hover, .doc-prose .snippet-pick button:hover { color: #0f172a; }
+.doc-prose .snippet-pick select { font-size: 1em; text-transform: none; letter-spacing: 0; border: 1px solid #e2e8f0; border-radius: 4px; padding: 0.1em 0.4em; background: white; color: #0f172a; }
+.doc-prose .snippet-loading { font-size: 0.85em; color: #94a3b8; }
+.doc-prose .snippet-block.ProseMirror-selectednode { outline: 2px solid #6366f1; }

@@ -56,13 +56,15 @@ function findInsertedNode(doc: import("@tiptap/pm/model").Node, from: number, ty
 /* ------------------------------------------------------------------ *
  * Callout / banner
  * ------------------------------------------------------------------ */
-export type CalloutVariant = "info" | "warning" | "success" | "note";
+export type CalloutVariant = "info" | "warning" | "success" | "note" | "internal";
 
 export const CALLOUTS: Record<CalloutVariant, { label: string; emoji: string }> = {
   info: { label: "Info banner", emoji: "💡" },
   warning: { label: "Warning banner", emoji: "⚠️" },
   success: { label: "Success banner", emoji: "✅" },
   note: { label: "Note banner", emoji: "📝" },
+  /** Row 65: team-only — stripped from share links and PDF exports. */
+  internal: { label: "Internal note", emoji: "🔒" },
 };
 
 declare module "@tiptap/core" {

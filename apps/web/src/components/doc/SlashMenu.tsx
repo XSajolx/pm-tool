@@ -40,6 +40,7 @@ export const SLASH_ITEMS: SlashItem[] = [
   })),
   { id: "code", label: "Code block", hint: "Monospace with copy button", icon: "</>", group: "Blocks", run: (e) => e.chain().focus().setCodeBlock().run() },
   { id: "divider", label: "Divider", hint: "Horizontal rule", icon: "—", group: "Blocks", keywords: "hr line", run: (e) => e.chain().focus().setHorizontalRule().run() },
+  { id: "snippet", label: "Snippet", hint: "Reusable block that stays in sync", icon: "⟲", group: "Blocks", keywords: "reuse boilerplate template terms", run: (e) => e.chain().focus().insertSnippet(null).run() },
 ];
 
 export function filterSlashItems(query: string) {

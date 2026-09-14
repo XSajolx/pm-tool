@@ -204,6 +204,7 @@ export function DocsPage() {
                         <p className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-900">
                           {d.title}
                           {d.access === "restricted" && <span className="ml-1.5 text-xs text-slate-400" title="Restricted">🔒</span>}
+                          {d.reviewStatus && d.reviewStatus !== "draft" && <ReviewBadge status={d.reviewStatus} small />}
                         </p>
                         <div className="opacity-0 transition group-hover:opacity-100">
                           <ActionMenu
@@ -355,6 +356,7 @@ export function DocPage() {
           )}
           <span className="text-muted-foreground">/</span>
           <span className="truncate text-sm font-semibold text-slate-800">{doc.title}</span>
+          <ReviewBadge status={doc.reviewStatus} />
           <select
             value={doc.projectId ?? ""}
             onChange={(e) => save.mutate({ projectId: e.target.value || null })}
@@ -370,6 +372,15 @@ export function DocPage() {
           <span className="ml-auto text-xs text-muted-foreground">
             {save.isPending || dirty ? "Saving…" : `Edited ${relativeTime(doc.updatedAt)} by ${doc.updatedBy?.name ?? "someone"}`}
           </span>
+          <button
+            type="button"
+            onClick={() => void api.openDocPdf(doc.id).catch((e: Error) => window.alert(e.message))}
+            className="rounded-md border border-border px-2.5 py-1 text-xs text-slate-600 hover:bg-muted"
+            title="Export a branded PDF (internal notes stripped)"
+          >
+            PDF
+          </button>
+          <ShareButton doc={doc} />
           <button
             type="button"
             onClick={() => setPanelOpen((o) => !o)}
@@ -418,6 +429,7 @@ export function DocPage() {
             <div className="mt-4">
               <DocEditor
                 docId={doc.id}
+                title={doc.title}
                 content={doc.content}
                 body={doc.body}
                 settings={settings}
@@ -651,6 +663,9 @@ function DocSidePanel({
               ))}
           </select>
         </Section>
+        <Section title="Review & sign-off">
+          <ReviewSection doc={doc} />
+        </Section>
         <Section title="Access">
           <AccessSection doc={doc} />
         </Section>
@@ -857,6 +872,153 @@ function AccessSection({ doc }: { doc: Doc }) {
         </div>
       )}
       {!canEdit && <p className="text-[11px] text-muted-foreground">Only the author or an admin can change access.</p>}
+    </div>
+  );
+}
+
+const REVIEW: Record<"draft" | "in_review" | "approved", { label: string; cls: string }> = {
+  draft: { label: "Draft", cls: "bg-slate-100 text-slate-600" },
+  in_review: { label: "In review", cls: "bg-amber-50 text-amber-800" },
+  approved: { label: "Approved", cls: "bg-emerald-50 text-emerald-700" },
+};
+
+function ReviewBadge({ status, small }: { status?: "draft" | "in_review" | "approved"; small?: boolean }) {
+  const st = REVIEW[status ?? "draft"];
+  return <span className={`${small ? "ml-1.5 px-1.5 text-[10px]" : "px-2 py-0.5 text-[11px]"} rounded-full font-medium ${st.cls}`}>{st.label}</span>;
+}
+
+/**
+ * Row 63: Draft → In review → Approved. The author asks a named approver;
+ * the approver signs off or sends it back with a note. Any edit to an
+ * approved doc drops it back to Draft so "approved" always means this text.
+ */
+function ReviewSection({ doc }: { doc: Doc }) {
+  const qc = useQueryClient();
+  const { user, role } = useAuth();
+  const { data: members = [] } = useQuery({ queryKey: ["members"], queryFn: api.getMembers });
+  const [approverId, setApproverId] = useState(doc.approverId ?? "");
+  const [note, setNote] = useState("");
+  useEffect(() => setApproverId(doc.approverId ?? ""), [doc.id, doc.approverId]);
+  const done = (updated: Doc) => {
+    qc.setQueryData(["document", doc.id], updated);
+    qc.invalidateQueries({ queryKey: ["documents"] });
+    setNote("");
+  };
+  const request = useMutation({ mutationFn: () => api.requestDocReview(doc.id, { approverId, note: note.trim() || undefined }), onSuccess: done });
+  const decide = useMutation({ mutationFn: (approve: boolean) => api.decideDocReview(doc.id, { approve, note: note.trim() || undefined }), onSuccess: done });
+  const isApprover = doc.approverId === user?.id || role === "owner" || role === "admin";
+  const st = REVIEW[doc.reviewStatus ?? "draft"];
+  return (
+    <div className="space-y-2 text-xs">
+      <div className="flex items-center gap-2">
+        <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${st.cls}`}>{st.label}</span>
+        {doc.reviewStatus === "approved" && doc.approvedAt && (
+          <span className="text-muted-foreground">
+            by {doc.approver?.name ?? "someone"} · {relativeTime(doc.approvedAt)}
+          </span>
+        )}
+        {doc.reviewStatus === "in_review" && doc.reviewRequestedAt && (
+          <span className="text-muted-foreground">
+            waiting on {doc.approver?.name ?? "approver"} · asked {relativeTime(doc.reviewRequestedAt)}
+          </span>
+        )}
+      </div>
+      {doc.reviewNote && <p className="rounded-md border border-border bg-[#fbfbfa] px-2 py-1 text-slate-700">“{doc.reviewNote}”</p>}
+
+      {doc.reviewStatus === "in_review" && isApprover ? (
+        <div className="space-y-1.5">
+          <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="Note (optional)…" className="w-full resize-none rounded-md border border-border px-2 py-1 outline-none focus:border-indigo-400" />
+          <div className="flex gap-2">
+            <button type="button" onClick={() => decide.mutate(true)} disabled={decide.isPending} className="rounded-md bg-emerald-600 px-2.5 py-1 font-medium text-white hover:bg-emerald-700 disabled:opacity-50">
+              ✓ Approve
+            </button>
+            <button type="button" onClick={() => decide.mutate(false)} disabled={decide.isPending} className="rounded-md border border-border px-2.5 py-1 font-medium text-slate-700 hover:bg-muted disabled:opacity-50">
+              Send back
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-1.5">
+          <select value={approverId} onChange={(e) => setApproverId(e.target.value)} className="w-full rounded-md border border-border bg-white px-2 py-1">
+            <option value="">Choose an approver…</option>
+            {members
+              .filter((m) => m.id !== user?.id)
+              .map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}
+                </option>
+              ))}
+          </select>
+          <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="What should they look at? (optional)" className="w-full resize-none rounded-md border border-border px-2 py-1 outline-none focus:border-indigo-400" />
+          <button type="button" onClick={() => request.mutate()} disabled={!approverId || request.isPending} className="rounded-md bg-indigo-600 px-2.5 py-1 font-medium text-white hover:bg-indigo-700 disabled:opacity-50">
+            {doc.reviewStatus === "in_review" ? "Re-request sign-off" : doc.reviewStatus === "approved" ? "Request sign-off again" : "Request sign-off"}
+          </button>
+          <p className="text-[11px] text-muted-foreground">The approver gets an inbox item; editing an approved doc drops it back to Draft.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Row 65: a public read-only link. Internal-only blocks (🔒) are stripped server-side. */
+function ShareButton({ doc }: { doc: Doc }) {
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const done = (updated: Doc) => qc.setQueryData(["document", doc.id], updated);
+  const enable = useMutation({ mutationFn: () => api.enableDocShare(doc.id), onSuccess: done });
+  const disable = useMutation({ mutationFn: () => api.disableDocShare(doc.id), onSuccess: done });
+  const link = doc.shareToken ? `${window.location.origin}${import.meta.env.BASE_URL.replace(/\/$/, "")}/d/${doc.shareToken}` : null;
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={`rounded-md border px-2.5 py-1 text-xs transition ${doc.shareToken ? "border-emerald-300 bg-emerald-50 text-emerald-700" : "border-border text-slate-600 hover:bg-muted"}`}
+        title="Share a read-only link"
+      >
+        {doc.shareToken ? "🔗 Shared" : "Share"}
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 top-full z-30 mt-1 w-80 rounded-md border border-border bg-white p-3 text-xs shadow-lg">
+            <p className="font-semibold text-slate-800">Share with a client</p>
+            <p className="mt-0.5 text-muted-foreground">Anyone with the link can read this doc. 🔒 Internal notes are never shown.</p>
+            {link ? (
+              <>
+                <div className="mt-2 flex items-center gap-1">
+                  <input readOnly value={link} onFocus={(e) => e.target.select()} className="min-w-0 flex-1 rounded border border-border bg-[#fbfbfa] px-1.5 py-1 text-[11px]" />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void navigator.clipboard?.writeText(link).then(() => {
+                        setCopied(true);
+                        setTimeout(() => setCopied(false), 1500);
+                      });
+                    }}
+                    className="rounded border border-border px-2 py-1 hover:bg-muted"
+                  >
+                    {copied ? "Copied" : "Copy"}
+                  </button>
+                </div>
+                <div className="mt-2 flex items-center justify-between">
+                  <a href={link} target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline">
+                    Open preview ↗
+                  </a>
+                  <button type="button" onClick={() => disable.mutate()} className="text-red-600 hover:underline">
+                    Turn off sharing
+                  </button>
+                </div>
+              </>
+            ) : (
+              <button type="button" onClick={() => enable.mutate()} disabled={enable.isPending} className="mt-2 rounded-md bg-indigo-600 px-3 py-1.5 font-medium text-white hover:bg-indigo-700 disabled:opacity-50">
+                Create share link
+              </button>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }

@@ -30,6 +30,7 @@ import { MeetingsPage } from "./views/MeetingsPage.js";
 import { ProposalsPage } from "./views/ProposalsPage.js";
 import { ProposalPage } from "./views/ProposalPage.js";
 import { PublicProposalPage } from "./views/PublicProposalPage.js";
+import { PublicDocPage } from "./views/PublicDocPage.js";
 import { SettingsPage } from "./views/SettingsPage.js";
 import { MyWorkPage } from "./views/MyWorkPage.js";
 import { DocsPage, DocPage } from "./views/DocsPage.js";
@@ -54,7 +55,7 @@ function Protected() {
   const { pathname } = useLocation();
 
   // Client-facing pages (proposal links, rows 58-59) live outside the login gate.
-  if (pathname.startsWith("/p/")) return <Outlet />;
+  if (pathname.startsWith("/p/") || pathname.startsWith("/d/")) return <Outlet />;
 
   if (loading) return <Splash />;
   if (!session) return <AuthPage />;
@@ -187,6 +188,7 @@ const meetingsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/crm
 const proposalsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/crm/proposals", component: ProposalsPage });
 const proposalRoute = createRoute({ getParentRoute: () => rootRoute, path: "/crm/proposals/$proposalId", component: ProposalPage });
 const publicProposalRoute = createRoute({ getParentRoute: () => rootRoute, path: "/p/$token", component: PublicProposalPage });
+const publicDocRoute = createRoute({ getParentRoute: () => rootRoute, path: "/d/$token", component: PublicDocPage });
 const settingsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/settings", component: SettingsPage });
 const myWorkRoute = createRoute({ getParentRoute: () => rootRoute, path: "/my-work", component: MyWorkPage });
 
@@ -212,6 +214,7 @@ const routeTree = rootRoute.addChildren([
   proposalsRoute,
   proposalRoute,
   publicProposalRoute,
+  publicDocRoute,
   taskOpenRoute,
   docsRoute,
   docRoute,

@@ -22,9 +22,14 @@ import TextAlign from "@tiptap/extension-text-align";
 import type { DocSettings } from "../../lib/api.js";
 import { Callout, CodeBlockWithCopy, Toggle, ToggleContent, ToggleSummary } from "./extensions.js";
 import { SlashMenu, filterSlashItems, readSlashState, runSlashItem, type SlashState } from "./SlashMenu.js";
+import { QuickAdd } from "../QuickAdd.js";
+import { SnippetBlock } from "./SnippetBlock.js";
+import { api } from "../../lib/api.js";
 
 export interface DocEditorProps {
   docId: string;
+  /** Row 64: the doc title, quoted when a selection becomes a task. */
+  title?: string;
   /** TipTap JSON, or null for docs that only have plain `body` text. */
   content: Record<string, unknown> | null;
   body: string;
@@ -33,8 +38,45 @@ export interface DocEditorProps {
   onDirtyChange?: (dirty: boolean) => void;
 }
 
+/** The block set a doc can contain — shared with read-only renderers (share page, row 65). */
+export function docExtensions(opts: { placeholder?: boolean } = {}) {
+  return [
+    StarterKit.configure({ codeBlock: false, heading: { levels: [1, 2, 3] } }),
+    CodeBlockWithCopy,
+    Underline,
+    Highlight,
+    Link.configure({ openOnClick: !opts.placeholder, autolink: true, defaultProtocol: "https" }),
+    ...(opts.placeholder
+      ? [
+          Placeholder.configure({
+            placeholder: ({ node }) => {
+              if (node.type.name === "heading") return "Heading";
+              if (node.type.name === "toggleSummary") return "Toggle title";
+              return "Type '/' for blocks, or just start writing…";
+            },
+            includeChildren: true,
+          }),
+        ]
+      : []),
+    TaskList,
+    TaskItem.configure({ nested: true }),
+    Table.configure({ resizable: Boolean(opts.placeholder) }),
+    TableRow,
+    TableHeader,
+    TableCell,
+    TextStyle,
+    Color,
+    TextAlign.configure({ types: ["heading", "paragraph"] }),
+    Callout,
+    Toggle,
+    ToggleSummary,
+    ToggleContent,
+    SnippetBlock,
+  ];
+}
+
 /** Legacy plain-text docs become one paragraph per line. */
-function bodyToContent(body: string): Record<string, unknown> {
+export function bodyToContent(body: string): Record<string, unknown> {
   const lines = body.split(/\r?\n/);
   return {
     type: "doc",
@@ -44,8 +86,9 @@ function bodyToContent(body: string): Record<string, unknown> {
 
 const SAVE_DELAY_MS = 800;
 
-export function DocEditor({ docId, content, body, settings, onSave, onDirtyChange }: DocEditorProps) {
+export function DocEditor({ docId, title, content, body, settings, onSave, onDirtyChange }: DocEditorProps) {
   const [slash, setSlash] = useState<SlashState | null>(null);
+  const [taskFrom, setTaskFrom] = useState<string | null>(null);
   const slashRef = useRef<SlashState | null>(null);
   slashRef.current = slash;
   const saveTimer = useRef<number | null>(null);
@@ -64,34 +107,7 @@ export function DocEditor({ docId, content, body, settings, onSave, onDirtyChang
 
   const editor = useEditor(
     {
-      extensions: [
-        StarterKit.configure({ codeBlock: false, heading: { levels: [1, 2, 3] } }),
-        CodeBlockWithCopy,
-        Underline,
-        Highlight,
-        Link.configure({ openOnClick: false, autolink: true, defaultProtocol: "https" }),
-        Placeholder.configure({
-          placeholder: ({ node }) => {
-            if (node.type.name === "heading") return "Heading";
-            if (node.type.name === "toggleSummary") return "Toggle title";
-            return "Type '/' for blocks, or just start writing…";
-          },
-          includeChildren: true,
-        }),
-        TaskList,
-        TaskItem.configure({ nested: true }),
-        Table.configure({ resizable: true }),
-        TableRow,
-        TableHeader,
-        TableCell,
-        TextStyle,
-        Color,
-        TextAlign.configure({ types: ["heading", "paragraph"] }),
-        Callout,
-        Toggle,
-        ToggleSummary,
-        ToggleContent,
-      ],
+      extensions: docExtensions({ placeholder: true }),
       content: content ?? (body ? bodyToContent(body) : undefined),
       editorProps: {
         attributes: { class: "doc-prose", spellcheck: "true" },
@@ -157,8 +173,34 @@ export function DocEditor({ docId, content, body, settings, onSave, onDirtyChang
   return (
     <div className={`doc-editor doc-font-${font} doc-size-${size}`}>
       <BubbleMenu editor={editor} tippyOptions={{ duration: 100, maxWidth: "none" }} shouldShow={({ editor, from, to }) => from !== to && !editor.isActive("codeBlock")}>
-        <SelectionToolbar editor={editor} />
+        <SelectionToolbar
+          editor={editor}
+          onSaveSnippet={async () => {
+            const name = window.prompt("Name this snippet (e.g. Payment terms)");
+            if (!name?.trim()) return;
+            const { from, to } = editor.state.selection;
+            const slice = editor.state.selection.content();
+            const blocks = slice.content.toJSON() as Record<string, unknown>[];
+            const body = editor.state.doc.textBetween(from, to, "\n");
+            const snippet = await api.createSnippet({ name: name.trim(), content: { type: "doc", content: blocks }, body });
+            editor.chain().focus().deleteRange({ from, to }).insertContentAt(from, { type: "snippetBlock", attrs: { snippetId: snippet.id } }).run();
+          }}
+          onMakeTask={() => {
+            const { from, to } = editor.state.selection;
+            const text = editor.state.doc.textBetween(from, to, "\n").trim();
+            if (text) setTaskFrom(text);
+          }}
+        />
       </BubbleMenu>
+      {taskFrom && (
+        <QuickAdd
+          open
+          onClose={() => setTaskFrom(null)}
+          initialText={taskFrom.split("\n")[0]!.slice(0, 140)}
+          docSource={{ docId, title: title ?? "Untitled", selection: taskFrom }}
+          onCreated={() => setTaskFrom(null)}
+        />
+      )}
       <BubbleMenu
         editor={editor}
         pluginKey="tableMenu"
@@ -187,7 +229,7 @@ export function DocEditor({ docId, content, body, settings, onSave, onDirtyChang
  * ------------------------------------------------------------------ */
 const TEXT_COLORS = ["#0f172a", "#dc2626", "#ea580c", "#ca8a04", "#16a34a", "#2563eb", "#7c3aed", "#db2777"];
 
-function SelectionToolbar({ editor }: { editor: Editor }) {
+function SelectionToolbar({ editor, onMakeTask, onSaveSnippet }: { editor: Editor; onMakeTask?: () => void; onSaveSnippet?: () => void }) {
   const [linkOpen, setLinkOpen] = useState(false);
   const [linkValue, setLinkValue] = useState("");
 
@@ -297,6 +339,13 @@ function SelectionToolbar({ editor }: { editor: Editor }) {
       <Btn active={editor.isActive({ textAlign: "left" })} label="⇤" title="Align left" onClick={() => editor.chain().focus().setTextAlign("left").run()} />
       <Btn active={editor.isActive({ textAlign: "center" })} label="↔" title="Align centre" onClick={() => editor.chain().focus().setTextAlign("center").run()} />
       <Btn active={editor.isActive({ textAlign: "right" })} label="⇥" title="Align right" onClick={() => editor.chain().focus().setTextAlign("right").run()} />
+      {onMakeTask && (
+        <>
+          <span className="bubble-sep" />
+          <Btn label="✓ Task" title="Turn this selection into a task (row 64)" onClick={onMakeTask} className="font-medium text-emerald-700" />
+        </>
+      )}
+      {onSaveSnippet && <Btn label="⟲ Snippet" title="Save this selection as a reusable snippet (row 66)" onClick={onSaveSnippet} />}
     </div>
   );
 }

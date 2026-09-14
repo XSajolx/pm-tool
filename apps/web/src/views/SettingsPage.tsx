@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, type DealStageRow, type ProposalTemplate, type StageTemplate, type Status, type Tag, type TaskTemplate } from "../lib/api.js";
+import { api, type DealStageRow, type ProposalTemplate, type Snippet, type StageTemplate, type Status, type Tag, type TaskTemplate } from "../lib/api.js";
 import { ProposalSectionsEditor } from "../components/ProposalSections.js";
+import { DocEditor } from "../components/doc/DocEditor.js";
 import { useAuth } from "../lib/auth.js";
 import { PRIORITY } from "../components/ui.js";
 import type { Priority } from "../lib/api.js";
@@ -10,7 +11,7 @@ import type { Priority } from "../lib/api.js";
  * Workspace settings. Sections are added as the roadmap lands; each one is a
  * self-contained panel that owns its own queries.
  */
-type Section = "statuses" | "priorities" | "stages" | "tags" | "templates" | "dealstages" | "proposals";
+type Section = "statuses" | "priorities" | "stages" | "tags" | "templates" | "dealstages" | "proposals" | "snippets" | "branding";
 
 const SECTIONS: { id: Section; label: string; hint: string }[] = [
   { id: "statuses", label: "Task statuses", hint: "Per space: names, colours, order, done state" },
@@ -20,6 +21,8 @@ const SECTIONS: { id: Section; label: string; hint: string }[] = [
   { id: "templates", label: "Task list templates", hint: "Saved task sets to kick off new projects" },
   { id: "dealstages", label: "Deal stages", hint: "Pipeline columns: rename, reorder, mark won/lost" },
   { id: "proposals", label: "Proposal templates", hint: "Fixed sections every proposal starts from" },
+  { id: "snippets", label: "Snippets", hint: "Reusable doc content that stays in sync" },
+  { id: "branding", label: "Branding", hint: "Colour, logo and footer on PDFs and client pages" },
 ];
 
 export function SettingsPage() {
@@ -59,6 +62,8 @@ export function SettingsPage() {
           {section === "templates" && <TaskTemplateSettings canEdit={canEdit} />}
           {section === "dealstages" && <DealStageSettings canEdit={canEdit} />}
           {section === "proposals" && <ProposalTemplateSettings canEdit={canEdit} />}
+          {section === "snippets" && <SnippetSettings canEdit={canEdit} />}
+          {section === "branding" && <BrandingSettings canEdit={canEdit} />}
         </div>
       </div>
     </div>
@@ -763,5 +768,127 @@ function ProposalTemplateRow({ template, open, canEdit, onToggle, onSave, onDele
         </div>
       )}
     </li>
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * Snippets (row 66)
+ * ------------------------------------------------------------------ */
+function SnippetSettings({ canEdit }: { canEdit: boolean }) {
+  const qc = useQueryClient();
+  const { data: snippets = [] } = useQuery({ queryKey: ["snippets"], queryFn: api.getSnippets });
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [name, setName] = useState("");
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ["snippets"] });
+    qc.invalidateQueries({ queryKey: ["snippet"] });
+  };
+  const create = useMutation({
+    mutationFn: () => api.createSnippet({ name, content: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Write the reusable text here…" }] }] } }),
+    onSuccess: (s) => {
+      setName("");
+      setOpenId(s.id);
+      refresh();
+    },
+  });
+  const update = useMutation({ mutationFn: ({ id, body }: { id: string; body: Parameters<typeof api.updateSnippet>[1] }) => api.updateSnippet(id, body), onSuccess: refresh });
+  const remove = useMutation({ mutationFn: (id: string) => api.deleteSnippet(id), onSuccess: refresh });
+  return (
+    <div>
+      <h1 className="text-lg font-semibold text-slate-900">Snippets</h1>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Boilerplate you reuse across docs — scope wording, terms, team bios. Insert one with <code>/snippet</code> or select text in a doc and press “⟲ Snippet”. Edits here update every doc that embeds it.
+      </p>
+      <ul className="mt-5 space-y-2">
+        {snippets.map((sn) => (
+          <li key={sn.id} className="rounded-lg border border-border bg-white">
+            <div className="flex items-center gap-3 px-3 py-2">
+              <button type="button" onClick={() => setOpenId(openId === sn.id ? null : sn.id)} className="text-xs text-slate-400">{openId === sn.id ? "▾" : "▸"}</button>
+              <InlineName value={sn.name} disabled={!canEdit && false} onCommit={(v) => update.mutate({ id: sn.id, body: { name: v } })} />
+              <span className="truncate text-xs text-muted-foreground">{sn.body.replace(/\s+/g, " ").slice(0, 80)}</span>
+              {canEdit && (
+                <button type="button" onClick={() => window.confirm(`Delete “${sn.name}”? Docs embedding it will show it as missing.`) && remove.mutate(sn.id)} className="ml-auto text-xs text-slate-400 hover:text-red-600">
+                  Delete
+                </button>
+              )}
+            </div>
+            {openId === sn.id && (
+              <div className="border-t border-border bg-[#fbfbfa] px-4 py-3">
+                <SnippetBody snippet={sn} onSave={(patch) => update.mutate({ id: sn.id, body: patch })} />
+              </div>
+            )}
+          </li>
+        ))}
+        {snippets.length === 0 && <li className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-sm text-muted-foreground">No snippets yet.</li>}
+      </ul>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (name.trim()) create.mutate();
+        }}
+        className="mt-3 flex gap-2"
+      >
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="New snippet, e.g. Payment terms" className="flex-1 rounded-md border border-border px-3 py-1.5 text-sm outline-none focus:border-indigo-500" />
+        <button type="submit" disabled={!name.trim() || create.isPending} className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50">
+          Add snippet
+        </button>
+      </form>
+    </div>
+  );
+}
+
+function SnippetBody({ snippet, onSave }: { snippet: Snippet; onSave: (patch: { content: Record<string, unknown>; body: string }) => void }) {
+  return <DocEditor docId={`snippet-${snippet.id}`} title={snippet.name} content={snippet.content} body={snippet.body} settings={{}} onSave={onSave} />;
+}
+
+/* ------------------------------------------------------------------ *
+ * Branding (row 67)
+ * ------------------------------------------------------------------ */
+function BrandingSettings({ canEdit }: { canEdit: boolean }) {
+  const qc = useQueryClient();
+  const { data } = useQuery({ queryKey: ["branding"], queryFn: api.getBranding });
+  const save = useMutation({ mutationFn: (body: Parameters<typeof api.updateBranding>[0]) => api.updateBranding(body), onSuccess: (b) => qc.setQueryData(["branding"], b) });
+  if (!data) return <p className="text-sm text-muted-foreground">Loading…</p>;
+  const field = "w-full rounded-md border border-border px-3 py-1.5 text-sm outline-none focus:border-indigo-500 disabled:opacity-60";
+  return (
+    <div>
+      <h1 className="text-lg font-semibold text-slate-900">Branding</h1>
+      <p className="mt-1 text-sm text-muted-foreground">Your colour, logo and footer appear on exported PDFs and on pages clients open from share links.</p>
+      <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2">
+        <div className="space-y-3">
+          <label className="block text-xs font-medium text-slate-600">
+            Brand colour
+            <div className="mt-1 flex items-center gap-2">
+              <input type="color" value={data.brandColor} disabled={!canEdit} onChange={(e) => save.mutate({ brandColor: e.target.value })} className="h-9 w-12 cursor-pointer rounded border border-border" />
+              <input defaultValue={data.brandColor} disabled={!canEdit} onBlur={(e) => /^#[0-9a-fA-F]{6}$/.test(e.target.value.trim()) && save.mutate({ brandColor: e.target.value.trim() })} className={field} />
+            </div>
+          </label>
+          <label className="block text-xs font-medium text-slate-600">
+            Logo URL
+            <input defaultValue={data.brandLogoUrl ?? ""} disabled={!canEdit} onBlur={(e) => (e.target.value.trim() || null) !== (data.brandLogoUrl ?? null) && save.mutate({ brandLogoUrl: e.target.value.trim() || null })} placeholder="https://…/logo.png" className={`${field} mt-1`} />
+          </label>
+          <label className="block text-xs font-medium text-slate-600">
+            Footer line
+            <input defaultValue={data.brandFooter ?? ""} disabled={!canEdit} onBlur={(e) => (e.target.value.trim() || null) !== (data.brandFooter ?? null) && save.mutate({ brandFooter: e.target.value.trim() || null })} placeholder="4S Digital · hello@4s.digital · +880 …" className={`${field} mt-1`} />
+          </label>
+        </div>
+        <div className="overflow-hidden rounded-lg border border-border bg-white shadow-sm">
+          <div className="flex items-center gap-3 px-4 py-4 text-white" style={{ background: data.brandColor }}>
+            {data.brandLogoUrl ? <img src={data.brandLogoUrl} alt="" className="h-8 w-8 rounded bg-white/90 object-contain p-0.5" /> : <span className="flex h-8 w-8 items-center justify-center rounded bg-white/20 text-sm font-bold">{data.name.slice(0, 1)}</span>}
+            <div>
+              <p className="text-sm font-semibold">Project brief</p>
+              <p className="text-[11px] opacity-80">{data.name} · Updated today</p>
+            </div>
+          </div>
+          <div className="space-y-1.5 px-4 py-3 text-xs text-slate-600">
+            <p className="font-semibold text-slate-800">Scope</p>
+            <p>What the PDF body looks like, with your colour on the header band and callouts.</p>
+            <div className="mt-2 border-t pt-1.5 text-[10px] text-slate-400" style={{ borderColor: data.brandColor }}>
+              {data.brandFooter || data.name} · Page 1 of 1
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }

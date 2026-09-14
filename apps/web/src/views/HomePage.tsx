@@ -21,6 +21,9 @@ const VERB_LABEL: Record<string, string> = {
   mentioned: "mentioned you",
   posted: "posted",
   follow_up: "— follow-up due",
+  doc_review_requested: "asked you to review",
+  doc_approved: "approved",
+  doc_rejected: "sent back",
   proposal_viewed: "— proposal viewed",
   proposal_accepted: "— proposal accepted 🎉",
   proposal_declined: "— proposal declined",
@@ -272,6 +275,8 @@ function NotificationList({
                       if (!n.readAt) markRead.mutate(n.id);
                       if (n.entityType === "task") {
                         navigate({ to: "/t/$taskId", params: { taskId: n.entityId } });
+                      } else if (n.entityType === "document") {
+                        navigate({ to: "/docs/$docId", params: { docId: n.entityId } });
                       } else if (n.entityType === "proposal") {
                         navigate({ to: "/crm/proposals/$proposalId", params: { proposalId: n.entityId } });
                       } else if (n.entityType === "deal") {

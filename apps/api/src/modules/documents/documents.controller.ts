@@ -1,4 +1,5 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UsePipes } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res, UsePipes } from "@nestjs/common";
+import type { Response } from "express";
 import { z } from "zod";
 import { ZodValidationPipe } from "../../common/zod-validation.pipe.js";
 import { DocumentsService, type DocLinkEntity } from "./documents.service.js";
@@ -27,6 +28,8 @@ const schema = z.object({
 
 const linkEntity = z.enum(["project", "task", "company", "deal"]);
 const linkSchema = z.object({ entityType: linkEntity, entityId: z.string().uuid() });
+const reviewRequestSchema = z.object({ approverId: z.string().uuid(), note: z.string().max(2000).optional() });
+const reviewDecisionSchema = z.object({ approve: z.boolean(), note: z.string().max(2000).optional() });
 const accessSchema = z.object({
   access: z.enum(["default", "restricted"]),
   userIds: z.array(z.string().uuid()).max(100).optional(),
@@ -56,6 +59,43 @@ export class DocumentsController {
       },
       { userId: auth.userId, role: auth.role },
     );
+  }
+
+  /** Row 67: branded PDF export (internal blocks stripped, snippets expanded). */
+  @Get(":id/pdf")
+  async pdf(@Auth() auth: AuthContext, @Param("id") id: string, @Res() res: Response) {
+    const { bytes, filename } = await this.documents.pdf(auth.orgId, id, { userId: auth.userId, role: auth.role });
+    res.setHeader("content-type", "application/pdf");
+    res.setHeader("content-disposition", `inline; filename="${filename}"`);
+    res.send(bytes);
+  }
+
+  /** Row 65: public read-only link. Internal-only blocks never leave the team. */
+  @Post(":id/share")
+  @Roles("owner", "admin", "member")
+  enableShare(@Auth() auth: AuthContext, @Param("id") id: string) {
+    return this.documents.enableShare(auth.orgId, { userId: auth.userId, role: auth.role }, id);
+  }
+
+  @Delete(":id/share")
+  @Roles("owner", "admin", "member")
+  disableShare(@Auth() auth: AuthContext, @Param("id") id: string) {
+    return this.documents.disableShare(auth.orgId, { userId: auth.userId, role: auth.role }, id);
+  }
+
+  /** Row 63: ask someone to sign the doc off. */
+  @Post(":id/review")
+  @Roles("owner", "admin", "member")
+  @UsePipes(new ZodValidationPipe(reviewRequestSchema))
+  requestReview(@Auth() auth: AuthContext, @Param("id") id: string, @Body() dto: z.infer<typeof reviewRequestSchema>) {
+    return this.documents.requestReview(auth.orgId, { userId: auth.userId, role: auth.role }, id, dto.approverId, dto.note);
+  }
+
+  @Post(":id/review/decision")
+  @Roles("owner", "admin", "member")
+  @UsePipes(new ZodValidationPipe(reviewDecisionSchema))
+  decideReview(@Auth() auth: AuthContext, @Param("id") id: string, @Body() dto: z.infer<typeof reviewDecisionSchema>) {
+    return this.documents.decideReview(auth.orgId, { userId: auth.userId, role: auth.role }, id, dto.approve, dto.note);
   }
 
   /** Row 62: who can open this doc. */

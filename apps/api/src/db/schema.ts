@@ -95,6 +95,10 @@ export const organizations = pgTable(
     ownerId: uuid("owner_id")
       .notNull()
       .references(() => users.id),
+    /** Row 67: branding on exports and client pages. */
+    brandColor: varchar("brand_color", { length: 16 }).notNull().default("#6366f1"),
+    brandLogoUrl: text("brand_logo_url"),
+    brandFooter: varchar("brand_footer", { length: 255 }),
     ...timestamps,
   },
   (t) => [uniqueIndex("organizations_slug_uq").on(t.slug)],
@@ -1802,6 +1806,8 @@ export type Meeting = typeof meetings.$inferSelect;
  * ------------------------------------------------------------------ */
 /** Row 62: who can open a doc. "default" follows the project team (or everyone when unfiled); "restricted" = named people/roles only. */
 export const docAccess = pgEnum("doc_access", ["default", "restricted"]);
+/** Row 63: Draft → In review → Approved; editing an approved doc drops it back to Draft. */
+export const docReviewStatus = pgEnum("doc_review_status", ["draft", "in_review", "approved"]);
 
 export const documents = pgTable(
   "documents",
@@ -1825,6 +1831,16 @@ export const documents = pgTable(
     settings: jsonb("settings").$type<DocumentSettings>().notNull().default({}),
     /** Row 62 */
     access: docAccess("access").notNull().default("default"),
+    /** Row 65: public read-only link (internal-only blocks stripped). Null = not shared. */
+    shareToken: varchar("share_token", { length: 64 }),
+    sharedAt: timestamp("shared_at", { withTimezone: true }),
+    /** Row 63: sign-off. */
+    reviewStatus: docReviewStatus("review_status").notNull().default("draft"),
+    approverId: uuid("approver_id").references(() => users.id, { onDelete: "set null" }),
+    reviewRequestedById: uuid("review_requested_by_id").references(() => users.id, { onDelete: "set null" }),
+    reviewRequestedAt: timestamp("review_requested_at", { withTimezone: true }),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    reviewNote: text("review_note"),
     createdById: uuid("created_by_id").references(() => users.id),
     updatedById: uuid("updated_by_id").references(() => users.id),
     ...timestamps,
@@ -1865,6 +1881,28 @@ export const documentAccessRelations = relations(documentAccess, ({ one }) => ({
   user: one(users, { fields: [documentAccess.userId], references: [users.id] }),
 }));
 
+/**
+ * Row 66: reusable content. A doc embeds a snippet by id, so editing the
+ * snippet updates every doc that uses it.
+ */
+export const snippets = pgTable(
+  "snippets",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 160 }).notNull(),
+    /** TipTap JSON (a `doc` node whose content is the snippet's blocks). */
+    content: jsonb("content").$type<Record<string, unknown>>(),
+    body: text("body").notNull().default(""),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    updatedById: uuid("updated_by_id").references(() => users.id, { onDelete: "set null" }),
+    ...timestamps,
+  },
+  (t) => [index("snippets_org_idx").on(t.organizationId)],
+);
+
 /** Row 61: a doc attached to a project, task, client or deal so it shows on that record's Docs tab. */
 export const docLinkEntity = pgEnum("doc_link_entity", ["project", "task", "company", "deal"]);
 
@@ -1891,8 +1929,11 @@ export const documentLinksRelations = relations(documentLinks, ({ one }) => ({
 }));
 
 export const documentsRelations = relations(documents, ({ one, many }) => ({
+  organization: one(organizations, { fields: [documents.organizationId], references: [organizations.id] }),
   links: many(documentLinks),
   accessList: many(documentAccess),
+  approver: one(users, { fields: [documents.approverId], references: [users.id], relationName: "document_approver" }),
+  reviewRequestedBy: one(users, { fields: [documents.reviewRequestedById], references: [users.id], relationName: "document_review_requester" }),
   project: one(projects, { fields: [documents.projectId], references: [projects.id] }),
   parent: one(documents, {
     fields: [documents.parentId],
