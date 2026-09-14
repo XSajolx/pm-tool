@@ -3,9 +3,14 @@ import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api.js";
 import { CrmField, input } from "./CompaniesPage.js";
+import { CustomFieldsPanel } from "../components/CustomFieldsPanel.js";
 
 /** People. Each optionally belongs to a company; one per company can be primary. */
 export function ContactsPage() {
+  // Row 114: contacts have no page of their own, so fields expand under the row.
+  const [openId, setOpenId] = useState<string | null>(null);
+  const { data: contactDefs = [] } = useQuery({ queryKey: ["custom-field-defs", "contact"], queryFn: () => api.getCustomFieldDefs("contact") });
+  const hasContactFields = contactDefs.length > 0;
   const [q, setQ] = useState("");
   const [creating, setCreating] = useState(false);
   const { data: contacts = [], isLoading } = useQuery({
@@ -41,10 +46,12 @@ export function ContactsPage() {
                   <th className="px-4 py-2 text-left font-medium">Title</th>
                   <th className="px-4 py-2 text-left font-medium">Email</th>
                   <th className="px-4 py-2 text-left font-medium">Phone</th>
+                  <th className="w-16 px-2 py-2" />
                 </tr>
               </thead>
               <tbody>
                 {contacts.map((c) => (
+                  <>
                   <tr key={c.id} className="border-t border-border hover:bg-[#fbfbfa]">
                     <td className="px-4 py-2.5">
                       <span className="font-medium text-slate-800">{c.fullName}</span>
@@ -58,7 +65,23 @@ export function ContactsPage() {
                     <td className="px-4 py-2.5 text-slate-600">{c.title ?? "—"}</td>
                     <td className="px-4 py-2.5 text-slate-600">{c.email ?? "—"}</td>
                     <td className="px-4 py-2.5 text-slate-600">{c.phone ?? "—"}</td>
+                    <td className="px-2 py-2.5 text-right">
+                      {hasContactFields && (
+                        <button type="button" onClick={() => setOpenId(openId === c.id ? null : c.id)} className="text-xs text-indigo-700 hover:underline" title="Custom fields">
+                          {openId === c.id ? "Hide" : "Fields"}
+                        </button>
+                      )}
+                    </td>
                   </tr>
+                  {openId === c.id && (
+                    <tr key={`${c.id}-fields`} className="bg-[#fbfbfa]">
+                      <td colSpan={6} className="px-6 py-3">
+                        {/* Row 114 */}
+                        <CustomFieldsPanel entityType="contact" entityId={c.id} layout="grid" />
+                      </td>
+                    </tr>
+                  )}
+                  </>
                 ))}
               </tbody>
             </table>

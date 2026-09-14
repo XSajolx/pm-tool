@@ -43,17 +43,6 @@ export const taskPriority = pgEnum("task_priority", [
   "low",
 ]);
 
-export const customFieldType = pgEnum("custom_field_type", [
-  "text",
-  "number",
-  "date",
-  "checkbox",
-  "url",
-  "select",
-  "multi_select",
-  "user",
-]);
-
 /* ------------------------------------------------------------------ *
  * Reusable column bundles
  * ------------------------------------------------------------------ */
@@ -408,47 +397,6 @@ export const attachmentsRelations = relations(attachments, ({ one }) => ({
  * Custom fields (schema + values)
  * ------------------------------------------------------------------ */
 
-export const customFields = pgTable(
-  "custom_fields",
-  {
-    id: uuid("id").defaultRandom().primaryKey(),
-    organizationId: uuid("organization_id")
-      .notNull()
-      .references(() => organizations.id, { onDelete: "cascade" }),
-    spaceId: uuid("space_id")
-      .notNull()
-      .references(() => spaces.id, { onDelete: "cascade" }),
-    name: varchar("name", { length: 128 }).notNull(),
-    type: customFieldType("type").notNull(),
-    /** For select/multi_select: the option list. Shape: [{id,label,color}]. */
-    config: jsonb("config").$type<Record<string, unknown>>(),
-    position: doublePrecision("position").notNull().default(0),
-    ...timestamps,
-  },
-  (t) => [index("custom_fields_space_idx").on(t.spaceId)],
-);
-
-/** One row per (task, field). `value` is jsonb so a single table holds every
- *  field type — text, number, date, option ids, user ids. */
-export const customFieldValues = pgTable(
-  "custom_field_values",
-  {
-    id: uuid("id").defaultRandom().primaryKey(),
-    organizationId: uuid("organization_id")
-      .notNull()
-      .references(() => organizations.id, { onDelete: "cascade" }),
-    taskId: uuid("task_id")
-      .notNull()
-      .references(() => tasks.id, { onDelete: "cascade" }),
-    fieldId: uuid("field_id")
-      .notNull()
-      .references(() => customFields.id, { onDelete: "cascade" }),
-    value: jsonb("value"),
-    ...timestamps,
-  },
-  (t) => [uniqueIndex("custom_field_values_task_field_uq").on(t.taskId, t.fieldId)],
-);
-
 /* ------------------------------------------------------------------ *
  * Activity log (audit trail feeding notifications & "recent activity")
  * ------------------------------------------------------------------ */
@@ -530,7 +478,6 @@ export const tasksRelations = relations(tasks, ({ one, many }) => ({
   taskTags: many(taskTags),
   comments: many(comments),
   attachments: many(attachments),
-  customFieldValues: many(customFieldValues),
 }));
 
 export const taskTagsRelations = relations(taskTags, ({ one }) => ({
@@ -575,7 +522,6 @@ export type Task = typeof tasks.$inferSelect;
 export type NewTask = typeof tasks.$inferInsert;
 export type Comment = typeof comments.$inferSelect;
 export type Attachment = typeof attachments.$inferSelect;
-export type CustomField = typeof customFields.$inferSelect;
 
 /* ================================================================== *
  * CHAT  (channels + direct messages, real-time via WS gateway)
@@ -1329,6 +1275,54 @@ export const integrations = pgTable(
 
 export const integrationsRelations = relations(integrations, ({ one }) => ({
   connectedBy: one(users, { fields: [integrations.connectedById], references: [users.id] }),
+}));
+
+/**
+ * Row 114: custom fields. A definition per (entity type, name); values stored
+ * as JSON so one table serves text, number, date, select, checkbox, url, user.
+ */
+export const customFieldDefs = pgTable(
+  "custom_field_defs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    /** task | project | contact */
+    entityType: varchar("entity_type", { length: 16 }).notNull(),
+    name: varchar("name", { length: 80 }).notNull(),
+    /** text | number | date | select | checkbox | url | user */
+    type: varchar("type", { length: 16 }).notNull(),
+    /** For select: the allowed options. */
+    options: jsonb("options").$type<string[]>(),
+    position: doublePrecision("position").notNull().default(0),
+    required: boolean("required").notNull().default(false),
+    ...timestamps,
+  },
+  (t) => [index("custom_field_defs_org_entity_idx").on(t.organizationId, t.entityType)],
+);
+
+export const customFieldValues = pgTable(
+  "custom_field_entries",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    fieldId: uuid("field_id")
+      .notNull()
+      .references(() => customFieldDefs.id, { onDelete: "cascade" }),
+    entityId: uuid("entity_id").notNull(),
+    value: jsonb("value"),
+    updatedById: uuid("updated_by_id").references(() => users.id, { onDelete: "set null" }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex("custom_field_entries_field_entity_uq").on(t.fieldId, t.entityId), index("custom_field_entries_entity_idx").on(t.entityId)],
+);
+
+export const customFieldDefsRelations = relations(customFieldDefs, ({ many }) => ({ values: many(customFieldValues) }));
+export const customFieldValuesRelations = relations(customFieldValues, ({ one }) => ({
+  field: one(customFieldDefs, { fields: [customFieldValues.fieldId], references: [customFieldDefs.id] }),
 }));
 
 /** Row 110: company holidays and closures. A day off on a working day lowers everyone's expected hours that week. */

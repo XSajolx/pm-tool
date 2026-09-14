@@ -894,6 +894,31 @@ export interface Timesheet {
   workingDays?: number[];
 }
 
+/** Row 114 */
+export type CustomFieldEntity = "task" | "project" | "contact";
+export type CustomFieldType = "text" | "number" | "date" | "select" | "checkbox" | "url" | "user";
+export interface CustomFieldDef {
+  id: string;
+  entityType: CustomFieldEntity;
+  name: string;
+  type: CustomFieldType;
+  options: string[] | null;
+  required: boolean;
+  position: number;
+}
+export interface CustomFieldWithValue {
+  id: string;
+  name: string;
+  type: CustomFieldType;
+  options: string[] | null;
+  required: boolean;
+  value: unknown;
+}
+export interface CustomFieldValues {
+  fields: CustomFieldWithValue[];
+  users: Record<string, string>;
+}
+
 /** Row 112 */
 export type IntegrationProvider = "google_drive" | "dropbox";
 export interface IntegrationStatus {
@@ -1735,6 +1760,18 @@ export const api = {
     request<TimesheetSubmission>(`/time/timesheet/submissions/${id}/reopen`, { method: "POST", body: JSON.stringify({ reason }) }),
   getTimesheetEvents: (id: string) =>
     request<{ id: string; kind: string; note: string | null; createdAt: string; actor: { id: string; name: string } | null }[]>(`/time/timesheet/submissions/${id}/events`),
+  /** Row 114 */
+  getCustomFieldDefs: (entityType?: CustomFieldEntity) => request<CustomFieldDef[]>(`/custom-fields${entityType ? `?entityType=${entityType}` : ""}`),
+  createCustomField: (body: { entityType: CustomFieldEntity; name: string; type: CustomFieldType; options?: string[]; required?: boolean }) =>
+    request<CustomFieldDef>(`/custom-fields`, { method: "POST", body: JSON.stringify(body) }),
+  updateCustomField: (id: string, body: { name?: string; options?: string[]; required?: boolean }) =>
+    request<CustomFieldDef>(`/custom-fields/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  reorderCustomFields: (entityType: CustomFieldEntity, ids: string[]) =>
+    request<CustomFieldDef[]>(`/custom-fields/reorder`, { method: "POST", body: JSON.stringify({ entityType, ids }) }),
+  archiveCustomField: (id: string) => request<{ id: string }>(`/custom-fields/${id}`, { method: "DELETE" }),
+  getCustomFieldValues: (entityType: CustomFieldEntity, entityId: string) => request<CustomFieldValues>(`/custom-fields/values/${entityType}/${entityId}`),
+  setCustomFieldValues: (entityType: CustomFieldEntity, entityId: string, values: Record<string, unknown>) =>
+    request<CustomFieldValues>(`/custom-fields/values/${entityType}/${entityId}`, { method: "PUT", body: JSON.stringify({ values }) }),
   /** Row 112 */
   getIntegrations: () => request<IntegrationStatus[]>(`/integrations`),
   startIntegration: (provider: IntegrationProvider) => request<{ url: string }>(`/integrations/${provider}/start`, { method: "POST" }),

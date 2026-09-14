@@ -13,6 +13,7 @@ import { MuteButton } from "../components/MuteButton.js";
 import { FollowButton } from "../components/FollowButton.js";
 import { MilestoneTimeline } from "../components/MilestoneTimeline.js";
 import { ProjectActivityFeed } from "../components/ProjectActivityFeed.js";
+import { CustomFieldsPanel } from "../components/CustomFieldsPanel.js";
 import { cn } from "../lib/utils.js";
 
 /** One project: headline numbers, its lists, who has logged time, recent entries. */
@@ -197,6 +198,8 @@ export function ProjectPage() {
         </div>
 
         <ProjectDetails project={project} canManage={canManage} onSaved={refresh} />
+        {/* Row 114 */}
+        <CustomFieldsPanel entityType="project" entityId={project.id} canEdit={canManage} layout="grid" className="mt-3 rounded-lg border border-border bg-white p-4" />
         <ProjectTeam projectId={project.id} canManage={canManage} />
         <ProjectStages projectId={project.id} canManage={canManage} />
         <ProjectMilestones projectId={project.id} canManage={canManage} startDate={project.startDate} endDate={project.endDate} />

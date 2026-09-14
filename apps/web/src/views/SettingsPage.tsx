@@ -13,13 +13,14 @@ import { applyBranding } from "../lib/brand.js";
 import { WorkCalendarSettings } from "../components/WorkCalendarSettings.js";
 import { NotificationDefaultsSettings } from "../components/NotificationDefaultsSettings.js";
 import { ConnectionsSettings } from "../components/ConnectionsSettings.js";
+import { CustomFieldSettings } from "../components/CustomFieldSettings.js";
 import type { Priority } from "../lib/api.js";
 
 /**
  * Workspace settings. Sections are added as the roadmap lands; each one is a
  * self-contained panel that owns its own queries.
  */
-type Section = "people" | "workhours" | "notifications" | "connections" | "timecodes" | "statuses" | "priorities" | "stages" | "tags" | "templates" | "dealstages" | "proposals" | "snippets" | "branding" | "dockit" | "sso" | "security";
+type Section = "people" | "workhours" | "notifications" | "connections" | "fields" | "timecodes" | "statuses" | "priorities" | "stages" | "tags" | "templates" | "dealstages" | "proposals" | "snippets" | "branding" | "dockit" | "sso" | "security";
 
 const SECTIONS: { id: Section; label: string; hint: string }[] = [
   { id: "people", label: "People & roles", hint: "Who's in the workspace and what each role can do" },
@@ -31,6 +32,7 @@ const SECTIONS: { id: Section; label: string; hint: string }[] = [
   { id: "priorities", label: "Priorities", hint: "The four priority levels" },
   { id: "stages", label: "Stage templates", hint: "Default stage sequences for new projects" },
   { id: "tags", label: "Tags", hint: "Workspace tags: rename, recolour, merge, retire" },
+  { id: "fields", label: "Custom fields", hint: "Extra fields on tasks, projects and contacts" },
   { id: "templates", label: "Task list templates", hint: "Saved task sets to kick off new projects" },
   { id: "dealstages", label: "Deal stages", hint: "Pipeline columns: rename, reorder, mark won/lost" },
   { id: "proposals", label: "Proposal templates", hint: "Fixed sections every proposal starts from" },
@@ -79,6 +81,7 @@ export function SettingsPage() {
           {section === "workhours" && <WorkCalendarSettings canEdit={canEdit} />}
           {section === "notifications" && <NotificationDefaultsSettings canEdit={canEdit} />}
           {section === "connections" && <ConnectionsSettings canEdit={canEdit} />}
+          {section === "fields" && <CustomFieldSettings canEdit={canEdit} />}
           {section === "timecodes" && <TimeCodeSettings canEdit={canEdit} />}
           {section === "priorities" && <PrioritySettings canEdit={canEdit} />}
           {section === "stages" && <StageTemplateSettings canEdit={canEdit} />}

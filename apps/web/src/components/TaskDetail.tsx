@@ -6,6 +6,7 @@ import { Avatar, PRIORITY } from "./ui.js";
 import { TaskCollaboration } from "./TaskCollaboration.js";
 import { CrmLinkField, CycleField, MilestoneField, StageField, SubtasksSection, TagsField, TrackTimeButton } from "./TaskExtras.js";
 import { DocsTab } from "./DocsTab.js";
+import { CustomFieldsPanel } from "./CustomFieldsPanel.js";
 import { useEscape } from "../lib/useEscape.js";
 import { useAuth } from "../lib/auth.js";
 import { fmtDuration } from "../lib/format.js";
@@ -182,6 +183,9 @@ export function TaskDetail({ taskId, listId, spaceId, statuses, members, onClose
                   <LoggedVsEstimate loggedSeconds={task.loggedSeconds ?? 0} estimateMinutes={task.timeEstimateMinutes} />
                 </div>
               </Field>
+
+              {/* Row 114 */}
+              <CustomFieldsPanel entityType="task" entityId={task.id} />
 
               <Field label="Assignees">
                 <div className="flex flex-wrap items-center gap-1.5">

@@ -22,6 +22,7 @@ import { DocumentsModule } from "./modules/documents/documents.module.js";
 import { FilesModule } from "./modules/files/files.module.js";
 import { InboundModule } from "./modules/inbound/inbound.module.js";
 import { IntegrationsModule } from "./modules/integrations/integrations.module.js";
+import { CustomFieldsModule } from "./modules/custom-fields/custom-fields.module.js";
 
 @Module({
   imports: [
@@ -47,6 +48,7 @@ import { IntegrationsModule } from "./modules/integrations/integrations.module.j
     DocumentsModule,
     InboundModule,
     IntegrationsModule,
+    CustomFieldsModule,
   ],
   controllers: [HealthController],
 })
