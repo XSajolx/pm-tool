@@ -2,7 +2,7 @@ import { useState, type FormEvent, type InputHTMLAttributes } from "react";
 import { useAuth } from "../lib/auth.js";
 import { supabaseConfigured } from "../lib/supabase.js";
 
-type Mode = "signin" | "signup";
+type Mode = "signin" | "signup" | "forgot";
 
 const FEATURES = [
   "List, Board and Table views",
@@ -16,7 +16,7 @@ const FEATURES = [
  * token. Both modes share one panel so switching keeps whatever was typed.
  */
 export function AuthPage() {
-  const { signIn, signUp } = useAuth();
+  const { signIn, signUp, resetPassword } = useAuth();
   const [mode, setMode] = useState<Mode>("signin");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -35,6 +35,11 @@ export function AuthPage() {
     try {
       if (mode === "signin") {
         await signIn(email.trim(), password);
+      } else if (mode === "forgot") {
+        // Row 79: self-service reset - the link lands on /reset-password.
+        await resetPassword(email.trim());
+        setNotice("If that address has an account, a reset link is on its way. It expires in an hour.");
+        setMode("signin");
       } else {
         const { needsEmailConfirm } = await signUp(name.trim(), email.trim(), password);
         if (needsEmailConfirm) {
@@ -99,12 +104,14 @@ export function AuthPage() {
         <div className="w-full max-w-[380px]">
           <div className="mb-7">
             <h2 className="text-[22px] font-semibold tracking-tight text-slate-900">
-              {mode === "signin" ? "Welcome back" : "Create your account"}
+              {mode === "signin" ? "Welcome back" : mode === "forgot" ? "Reset your password" : "Create your account"}
             </h2>
             <p className="mt-1.5 text-sm text-muted-foreground">
               {mode === "signin"
                 ? "Sign in to continue to your workspace."
-                : "It takes less than a minute to get started."}
+                : mode === "forgot"
+                  ? "Enter your work email and we'll send you a link to choose a new password."
+                  : "It takes less than a minute to get started."}
             </p>
           </div>
 
@@ -129,16 +136,33 @@ export function AuthPage() {
               autoComplete="email"
               required
             />
-            <Field
-              label="Password"
-              value={password}
-              onValueChange={setPassword}
-              type="password"
-              placeholder={mode === "signup" ? "At least 6 characters" : "Your password"}
-              autoComplete={mode === "signin" ? "current-password" : "new-password"}
-              required
-              minLength={6}
-            />
+            {mode !== "forgot" && (
+              <Field
+                label="Password"
+                value={password}
+                onValueChange={setPassword}
+                type="password"
+                placeholder={mode === "signup" ? "At least 6 characters" : "Your password"}
+                autoComplete={mode === "signin" ? "current-password" : "new-password"}
+                required
+                minLength={6}
+              />
+            )}
+            {mode === "signin" && (
+              <div className="-mt-1 text-right">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode("forgot");
+                    setError(null);
+                    setNotice(null);
+                  }}
+                  className="text-[12px] font-medium text-indigo-600 hover:text-indigo-700"
+                >
+                  Forgot password?
+                </button>
+              </div>
+            )}
 
             {error && (
               <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-[13px] text-red-700">
@@ -156,12 +180,12 @@ export function AuthPage() {
               disabled={busy}
               className="mt-1 w-full rounded-md bg-indigo-600 py-2.5 text-sm font-medium text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {busy ? "Please wait…" : mode === "signin" ? "Sign in" : "Create account"}
+              {busy ? "Please wait…" : mode === "signin" ? "Sign in" : mode === "forgot" ? "Email me a reset link" : "Create account"}
             </button>
           </form>
 
           <p className="mt-6 text-center text-sm text-muted-foreground">
-            {mode === "signin" ? "New to 4S Digital?" : "Already have an account?"}{" "}
+            {mode === "signin" ? "New to 4S Digital?" : mode === "forgot" ? "Remembered it?" : "Already have an account?"}{" "}
             <button
               type="button"
               className="font-medium text-indigo-600 hover:text-indigo-700"
@@ -171,7 +195,7 @@ export function AuthPage() {
                 setNotice(null);
               }}
             >
-              {mode === "signin" ? "Create an account" : "Sign in"}
+              {mode === "signin" ? "Create an account" : mode === "forgot" ? "Back to sign in" : "Sign in"}
             </button>
           </p>
         </div>

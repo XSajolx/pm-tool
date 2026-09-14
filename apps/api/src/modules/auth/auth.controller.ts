@@ -1,11 +1,14 @@
-import { Body, Controller, Get, Post, UsePipes } from "@nestjs/common";
+import { Body, Controller, Get, Post, Query, UsePipes } from "@nestjs/common";
 import { z } from "zod";
 import { ZodValidationPipe } from "../../common/zod-validation.pipe.js";
 import { AuthService } from "./auth.service.js";
-import { Auth, NoOrg } from "./auth.decorators.js";
+import { SignInService } from "./sign-in.service.js";
+import { Auth, NoOrg, Public } from "./auth.decorators.js";
 import type { AuthContext } from "./auth.types.js";
 
 const createOrgSchema = z.object({ name: z.string().min(1).max(255) });
+/** Row 79 */
+const signInSchema = z.object({ email: z.string().email().max(320), password: z.string().min(1).max(200) });
 type CreateOrgDto = z.infer<typeof createOrgSchema>;
 
 /**
@@ -15,7 +18,30 @@ type CreateOrgDto = z.infer<typeof createOrgSchema>;
  */
 @Controller("auth")
 export class AuthController {
-  constructor(private readonly auth: AuthService) {}
+  constructor(
+    private readonly auth: AuthService,
+    private readonly signInService: SignInService,
+  ) {}
+
+  /**
+   * Row 79: password sign-in with lockout. Proxies to Supabase so the lock
+   * counter lives server-side; returns the session for the browser to adopt.
+   */
+  @Public()
+  @NoOrg()
+  @Post("sign-in")
+  @UsePipes(new ZodValidationPipe(signInSchema))
+  signIn(@Body() dto: z.infer<typeof signInSchema>) {
+    return this.signInService.signIn(dto.email, dto.password);
+  }
+
+  /** Row 79: lets the form say "locked until…" before the user types a password. */
+  @Public()
+  @NoOrg()
+  @Get("sign-in/status")
+  signInStatus(@Query("email") email?: string) {
+    return email ? this.signInService.status(email) : { locked: false, lockedUntil: null };
+  }
 
   /**
    * The client's first call after a session appears. Returns the provisioned user

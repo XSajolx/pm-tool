@@ -10,7 +10,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import type { Session } from "@supabase/supabase-js";
 import { supabase, supabaseConfigured } from "./supabase.js";
-import { api, API_CONFIGURED, setActiveOrg, getActiveOrg, type AuthedUser, type Membership, ApiError } from "./api.js";
+import { api, API_CONFIGURED, API_URL, setActiveOrg, getActiveOrg, type AuthedUser, type Membership, ApiError } from "./api.js";
 
 interface AuthState {
   /** null while we're still restoring a persisted session. */
@@ -23,6 +23,10 @@ interface AuthState {
   loading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (name: string, email: string, password: string) => Promise<{ needsEmailConfirm: boolean }>;
+  /** Row 79: e-mail a reset link; the link lands on /reset-password. */
+  resetPassword: (email: string) => Promise<void>;
+  /** Row 79: set a new password for the current (recovery or normal) session. */
+  updatePassword: (password: string) => Promise<void>;
   signOut: () => Promise<void>;
   switchOrg: (orgId: string) => void;
   createOrganization: (name: string) => Promise<void>;
@@ -141,8 +145,45 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [session, loadMe]);
 
+  // Row 79: sign in through our API so repeated failures lock the address
+  // server-side; the API hands back the Supabase session for the browser to
+  // adopt. If the API is unreachable (static preview), fall back to Supabase.
   const signIn = useCallback(async (email: string, password: string) => {
+    let viaApi: Response | null = null;
+    if (API_CONFIGURED) {
+      try {
+        viaApi = await fetch(`${API_URL}/api/auth/sign-in`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password }),
+        });
+      } catch {
+        viaApi = null;
+      }
+    }
+    if (viaApi) {
+      const body = (await viaApi.json().catch(() => ({}))) as { access_token?: string; refresh_token?: string; message?: string | string[] };
+      if (!viaApi.ok || !body.access_token || !body.refresh_token) {
+        const msg = Array.isArray(body.message) ? body.message.join(", ") : body.message;
+        throw new Error(msg || "Sign-in failed");
+      }
+      const { error } = await supabase.auth.setSession({ access_token: body.access_token, refresh_token: body.refresh_token });
+      if (error) throw new Error(error.message);
+      return;
+    }
     const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) throw new Error(error.message);
+  }, []);
+
+  const resetPassword = useCallback(async (email: string) => {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}${import.meta.env.BASE_URL}reset-password`,
+    });
+    if (error) throw new Error(error.message);
+  }, []);
+
+  const updatePassword = useCallback(async (password: string) => {
+    const { error } = await supabase.auth.updateUser({ password });
     if (error) throw new Error(error.message);
   }, []);
 
@@ -198,6 +239,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loading,
       signIn,
       signUp,
+      resetPassword,
+      updatePassword,
       signOut,
       switchOrg,
       createOrganization,
@@ -210,6 +253,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loading,
       signIn,
       signUp,
+      resetPassword,
+      updatePassword,
       signOut,
       switchOrg,
       createOrganization,

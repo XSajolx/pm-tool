@@ -3,6 +3,7 @@ import { APP_GUARD } from "@nestjs/core";
 import { AuthController } from "./auth.controller.js";
 import { AuthService } from "./auth.service.js";
 import { TokenService } from "./token.service.js";
+import { SignInService } from "./sign-in.service.js";
 import { AuthGuard } from "./auth.guard.js";
 import { OrgGuard } from "./org.guard.js";
 import { RolesGuard } from "./roles.guard.js";
@@ -18,6 +19,7 @@ import { RolesGuard } from "./roles.guard.js";
   providers: [
     AuthService,
     TokenService,
+    SignInService,
     { provide: APP_GUARD, useClass: AuthGuard },
     { provide: APP_GUARD, useClass: OrgGuard },
     { provide: APP_GUARD, useClass: RolesGuard },

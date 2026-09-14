@@ -124,6 +124,7 @@ export class InboundEmailService {
     }
 
     const task = await this.tasksService.create(orgId, actorId, { listId: list.id, title: cleanSubject.slice(0, 500), description: `${header}\n\n${body}` });
+    if (!task) throw new BadRequestException("Task could not be created");
     await this.saveAttachments(orgId, actorId, task.id, mail.attachments ?? []);
     this.logger.log(`inbound mail -> task ${task.id} in project ${project.id}`);
     return { kind: "task" as const, taskId: task.id, projectId: project.id };

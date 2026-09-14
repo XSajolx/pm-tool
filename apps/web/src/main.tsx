@@ -13,6 +13,7 @@ import {
 import { Sidebar } from "./components/Sidebar.js";
 import { WorkspacePage } from "./views/WorkspacePage.js";
 import { ChatPage } from "./views/ChatPage.js";
+import { ResetPasswordPage } from "./views/ResetPasswordPage.js";
 import { HomePage } from "./views/HomePage.js";
 import { IntakePage } from "./views/IntakePage.js";
 import { ProjectsPage } from "./views/ProjectsPage.js";
@@ -55,7 +56,7 @@ function Protected() {
   const { pathname } = useLocation();
 
   // Client-facing pages (proposal links, rows 58-59) live outside the login gate.
-  if (pathname.startsWith("/p/") || pathname.startsWith("/d/")) return <Outlet />;
+  if (pathname.startsWith("/p/") || pathname.startsWith("/d/") || pathname === "/reset-password") return <Outlet />;
 
   if (loading) return <Splash />;
   if (!session) return <AuthPage />;
@@ -189,6 +190,7 @@ const proposalsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/cr
 const proposalRoute = createRoute({ getParentRoute: () => rootRoute, path: "/crm/proposals/$proposalId", component: ProposalPage });
 const publicProposalRoute = createRoute({ getParentRoute: () => rootRoute, path: "/p/$token", component: PublicProposalPage });
 const publicDocRoute = createRoute({ getParentRoute: () => rootRoute, path: "/d/$token", component: PublicDocPage });
+const resetPasswordRoute = createRoute({ getParentRoute: () => rootRoute, path: "/reset-password", component: ResetPasswordPage });
 const settingsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/settings", component: SettingsPage });
 const myWorkRoute = createRoute({ getParentRoute: () => rootRoute, path: "/my-work", component: MyWorkPage });
 
@@ -215,6 +217,7 @@ const routeTree = rootRoute.addChildren([
   proposalRoute,
   publicProposalRoute,
   publicDocRoute,
+  resetPasswordRoute,
   taskOpenRoute,
   docsRoute,
   docRoute,

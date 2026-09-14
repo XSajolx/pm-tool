@@ -2172,3 +2172,15 @@ export const follows = pgTable(
 );
 
 export type Follow = typeof follows.$inferSelect;
+
+/* ------------------------------------------------------------------ *
+ * Sign-in attempts (row 79) - brute-force lockout. One row per e-mail;
+ * five wrong passwords lock the address for fifteen minutes. Sign-in goes
+ * through our API (which proxies to Supabase) so the lock is enforceable.
+ * ------------------------------------------------------------------ */
+export const signInAttempts = pgTable("sign_in_attempts", {
+  email: varchar("email", { length: 320 }).primaryKey(),
+  failedCount: integer("failed_count").notNull().default(0),
+  lockedUntil: timestamp("locked_until", { withTimezone: true }),
+  lastFailedAt: timestamp("last_failed_at", { withTimezone: true }),
+});
