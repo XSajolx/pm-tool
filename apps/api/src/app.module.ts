@@ -27,6 +27,7 @@ import { ExportModule } from "./modules/export/export.module.js";
 import { PortalModule } from "./modules/portal/portal.module.js";
 import { SearchModule } from "./modules/search/search.module.js";
 import { LinkedFilesModule } from "./modules/linked-files/linked-files.module.js";
+import { TrashModule } from "./modules/trash/trash.module.js";
 
 @Module({
   imports: [
@@ -57,6 +58,7 @@ import { LinkedFilesModule } from "./modules/linked-files/linked-files.module.js
     PortalModule,
     SearchModule,
     LinkedFilesModule,
+    TrashModule,
   ],
   controllers: [HealthController],
 })

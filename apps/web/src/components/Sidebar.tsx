@@ -220,6 +220,7 @@ export function Sidebar() {
 
       <nav className="px-2 pt-2">
         <NavLink to="/settings" label="Settings" icon={gearIcon} />
+        <NavLink to="/trash" label="Trash" icon={gearIcon} />
       </nav>
 
       {/* Spaces */}

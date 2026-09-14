@@ -496,6 +496,19 @@ export interface PortalProject {
   docs: { id: string; title: string; icon: string | null; updatedAt: string; reviewStatus: string; shareToken: string | null; clientApprovedAt?: string | null; clientApprovedBy?: string | null; clientDecision?: "approved" | "changes_requested" | null }[];
   generatedAt: string;
 }
+/** Row 125 */
+export type TrashType = "task" | "document" | "project";
+export interface TrashItem {
+  type: TrashType;
+  id: string;
+  title: string;
+  context: string | null;
+  deletedAt: string;
+  deletedBy: string | null;
+  expiresAt: string;
+  daysLeft: number;
+}
+
 /** Row 124 */
 export type LinkedEntity = "task" | "document" | "project" | "contact" | "company";
 export interface LinkedFile {
@@ -1885,6 +1898,11 @@ export const api = {
     request<TimesheetSubmission>(`/time/timesheet/submissions/${id}/reopen`, { method: "POST", body: JSON.stringify({ reason }) }),
   getTimesheetEvents: (id: string) =>
     request<{ id: string; kind: string; note: string | null; createdAt: string; actor: { id: string; name: string } | null }[]>(`/time/timesheet/submissions/${id}/events`),
+  /** Row 125 */
+  getTrash: () => request<TrashItem[]>(`/trash`),
+  restoreFromTrash: (type: TrashType, id: string) => request<{ restored: boolean }>(`/trash/${type}/${id}/restore`, { method: "POST" }),
+  purgeFromTrash: (type: TrashType, id: string) => request<{ purged: boolean }>(`/trash/${type}/${id}`, { method: "DELETE" }),
+  trashProject: (id: string) => request<{ id: string; trashed: boolean }>(`/projects/${id}/trash`, { method: "POST" }),
   /** Row 124 */
   getLinkedFiles: (entityType: LinkedEntity, entityId: string) => request<LinkedFile[]>(`/linked-files?entityType=${entityType}&entityId=${entityId}`),
   addLinkedFile: (body: { entityType: LinkedEntity; entityId: string; url: string; name?: string | null }) => request<LinkedFile[]>(`/linked-files`, { method: "POST", body: JSON.stringify(body) }),

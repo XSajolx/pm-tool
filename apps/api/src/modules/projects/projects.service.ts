@@ -399,6 +399,14 @@ export class ProjectsService {
     return row!;
   }
 
+  /** Row 125: soft-delete. The project (and everything under it) disappears everywhere until restored from the Trash. */
+  async trash(orgId: string, userId: string, id: string) {
+    const rows = await this.db.update(projects).set({ archivedAt: new Date(), updatedAt: new Date() }).where(and(eq(projects.id, id), eq(projects.organizationId, orgId))).returning({ id: projects.id });
+    if (!rows.length) throw new NotFoundException("Project not found");
+    await this.activity.record({ orgId, actorId: userId, entityType: "project", entityId: id, action: "trashed" });
+    return { id, trashed: true };
+  }
+
   async archive(orgId: string, userId: string, id: string) {
     await this.update(orgId, userId, id, { status: "archived" });
     await this.activity.record({ orgId, actorId: userId, entityType: "project", entityId: id, action: "archived" });

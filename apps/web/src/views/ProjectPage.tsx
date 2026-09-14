@@ -1,4 +1,4 @@
-import { Link, useParams } from "@tanstack/react-router";
+import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api, type Milestone, type Project, type ProjectStatus, type Stage } from "../lib/api.js";
@@ -22,6 +22,9 @@ import { cn } from "../lib/utils.js";
 export function ProjectPage() {
   const { projectId } = useParams({ from: "/projects/$projectId" });
   const qc = useQueryClient();
+  // Row 125: soft-delete; restorable from Trash for 30 days. (Hooks stay above the early returns.)
+  const navigate = useNavigate();
+  const trash = useMutation({ mutationFn: () => api.trashProject(projectId), onSuccess: () => { qc.invalidateQueries({ queryKey: ["projects"] }); navigate({ to: "/trash" }); } });
   const { role, user } = useAuth();
   const isAdmin = role === "owner" || role === "admin";
 
@@ -118,6 +121,18 @@ export function ProjectPage() {
           >
             ▶ Start timer
           </button>
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={() => trash.mutate()}
+              disabled={trash.isPending}
+              className="rounded-md border border-border px-2 py-1.5 text-xs text-slate-500 hover:border-red-300 hover:text-red-600 disabled:opacity-50"
+              title="Move this project to the Trash (restorable for 30 days)"
+              data-testid="project-trash"
+            >
+              Move to trash
+            </button>
+          )}
         </div>
       </div>
 

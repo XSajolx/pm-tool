@@ -43,6 +43,7 @@ import { DashboardsPage } from "./views/DashboardsPage.js";
 import { OverviewPage } from "./views/OverviewPage.js";
 import { PortalPreviewPage } from "./views/PortalPreviewPage.js";
 import { PortalPage } from "./views/PortalPage.js";
+import { TrashPage } from "./views/TrashPage.js";
 import { TaskOpenPage } from "./views/TaskOpenPage.js";
 import { SpaceOverviewPage } from "./views/SpaceOverviewPage.js";
 import { AuthPage } from "./views/AuthPage.js";
@@ -201,6 +202,7 @@ const dashboardsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/d
 const overviewRoute = createRoute({ getParentRoute: () => rootRoute, path: "/overview", component: OverviewPage });
 const portalPreviewRoute = createRoute({ getParentRoute: () => rootRoute, path: "/portal/preview/$projectId", component: PortalPreviewPage });
 const portalRoute = createRoute({ getParentRoute: () => rootRoute, path: "/portal/$token", component: PortalPage });
+const trashRoute = createRoute({ getParentRoute: () => rootRoute, path: "/trash", component: TrashPage });
 const spaceRoute = createRoute({ getParentRoute: () => rootRoute, path: "/s/$spaceId", component: SpaceOverviewPage });
 const chatIndexRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -301,6 +303,7 @@ const routeTree = rootRoute.addChildren([
   overviewRoute,
   portalPreviewRoute,
   portalRoute,
+  trashRoute,
   spaceRoute,
   settingsRoute,
   myWorkRoute,

@@ -78,6 +78,13 @@ export class ProjectsController {
     return this.projects.archive(auth.orgId, auth.userId, id);
   }
 
+  /** Row 125: move to the Trash (restorable for 30 days). */
+  @Post(":id/trash")
+  @Roles("owner", "admin")
+  trash(@Auth() auth: AuthContext, @Param("id") id: string) {
+    return this.projects.trash(auth.orgId, auth.userId, id);
+  }
+
   /** Row 102: everything that happened on this project, newest first. */
   @Get(":id/activity")
   async activity(@Auth() auth: AuthContext, @Param("id") id: string, @Query("limit") limit?: string) {
