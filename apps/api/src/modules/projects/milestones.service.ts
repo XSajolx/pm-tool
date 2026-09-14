@@ -2,7 +2,7 @@ import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundEx
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
-import { milestones, projects, statuses, tasks, users } from "../../db/schema.js";
+import { milestones, organizations, projects, statuses, tasks, users } from "../../db/schema.js";
 import { ActivityService } from "../activity/activity.service.js";
 import { ChatEventsService } from "../chat/chat-events.service.js";
 import { NotificationsService, pendingApproval } from "../notifications/notifications.service.js";
@@ -21,6 +21,8 @@ export interface MilestoneWrite {
  * to. "Reached" is set explicitly by the PM; task progress is shown alongside
  * but never flips the milestone on its own.
  */
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 @Injectable()
 export class MilestonesService {
   constructor(
@@ -113,7 +115,71 @@ export class MilestonesService {
       orderBy: [asc(milestones.targetDate), asc(milestones.createdAt)],
     });
     const progress = await this.progressFor(rows.map((r) => r.id));
-    return rows.map((r) => ({ ...r, progress: progress.get(r.id) ?? { total: 0, done: 0 } }));
+    const days = await this.riskDays(orgId);
+    const horizon = Date.now() + days * DAY_MS;
+    return rows.map((r) => {
+      const pr = progress.get(r.id) ?? { total: 0, done: 0 };
+      // Row 106: within the risk window (or past it) with linked work still open.
+      const atRisk = !r.reachedAt && !!r.targetDate && r.targetDate.getTime() <= horizon && pr.done < pr.total;
+      return { ...r, progress: pr, atRisk };
+    });
+  }
+
+  /* ---------------- Row 106: at-risk alerts ---------------- */
+
+  async riskDays(orgId: string) {
+    const org = await this.db.query.organizations.findFirst({ where: eq(organizations.id, orgId), columns: { milestoneRiskDays: true } });
+    return org?.milestoneRiskDays ?? 7;
+  }
+
+  async setRiskDays(orgId: string, days: number) {
+    const clean = Math.max(1, Math.min(90, Math.round(days)));
+    await this.db.update(organizations).set({ milestoneRiskDays: clean }).where(eq(organizations.id, orgId));
+    return { days: clean };
+  }
+
+  /**
+   * Every unreached milestone whose target is within the risk window (or already
+   * past) while tasks linked to it are still open. Optionally limited to the
+   * projects the viewer can see.
+   */
+  async atRisk(orgId: string, visible?: Set<string> | null) {
+    const days = await this.riskDays(orgId);
+    const now = Date.now();
+    const horizon = new Date(now + days * DAY_MS);
+    const rows = await this.db
+      .select({
+        id: milestones.id,
+        name: milestones.name,
+        targetDate: milestones.targetDate,
+        projectId: milestones.projectId,
+        projectName: projects.name,
+        projectColor: projects.color,
+        leadId: projects.leadId,
+        createdById: milestones.createdById,
+        openTasks: sql<number>`(select count(*) from tasks t left join statuses s on s.id = t.status_id where t.milestone_id = ${milestones.id} and t.archived_at is null and coalesce(s.category::text, '') <> 'done')::int`,
+        totalTasks: sql<number>`(select count(*) from tasks t where t.milestone_id = ${milestones.id} and t.archived_at is null)::int`,
+      })
+      .from(milestones)
+      .innerJoin(projects, eq(projects.id, milestones.projectId))
+      .where(and(eq(milestones.organizationId, orgId), isNull(milestones.reachedAt), isNull(milestones.archivedAt), isNull(projects.archivedAt), sql`${milestones.targetDate} <= ${horizon.toISOString()}::timestamptz`))
+      .orderBy(asc(milestones.targetDate));
+    return {
+      days,
+      items: rows
+        .filter((m) => m.openTasks > 0 && (!visible || visible.has(m.projectId)))
+        .map((m) => ({
+          id: m.id,
+          name: m.name,
+          targetDate: m.targetDate!.toISOString(),
+          daysLeft: Math.ceil((m.targetDate!.getTime() - now) / DAY_MS),
+          openTasks: m.openTasks,
+          totalTasks: m.totalTasks,
+          project: { id: m.projectId, name: m.projectName, color: m.projectColor },
+          leadId: m.leadId,
+          createdById: m.createdById,
+        })),
+    };
   }
 
   /** Milestones of the project that owns `spaceId` (task pickers). */

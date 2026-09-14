@@ -512,6 +512,19 @@ export interface Milestone {
   signoffApproverId: string | null;
   signoffNote: string | null;
   progress: { total: number; done: number };
+  /** Row 106: inside the risk window with open linked tasks. */
+  atRisk?: boolean;
+}
+export interface AtRiskMilestone {
+  id: string;
+  name: string;
+  targetDate: string;
+  daysLeft: number;
+  openTasks: number;
+  totalTasks: number;
+  project: { id: string; name: string; color: string | null };
+  leadId: string | null;
+  createdById: string | null;
 }
 export type MilestoneWrite = Partial<{
   name: string;
@@ -1535,6 +1548,10 @@ export const api = {
   getProjectLists: (projectId: string) => request<{ id: string; name: string }[]>(`/task-templates/project-lists/${projectId}`),
   // ---- Milestones ----
   getMilestones: (projectId: string) => request<Milestone[]>(`/projects/${projectId}/milestones`),
+  /** Row 106 */
+  getAtRiskMilestones: () => request<{ days: number; items: AtRiskMilestone[] }>(`/milestones/at-risk`),
+  getMilestoneRisk: () => request<{ days: number }>(`/milestones/risk-settings`),
+  setMilestoneRisk: (days: number) => request<{ days: number }>(`/milestones/risk-settings`, { method: "PATCH", body: JSON.stringify({ days }) }),
   getMilestonesForSpace: (spaceId: string) => request<Milestone[]>(`/milestones?spaceId=${encodeURIComponent(spaceId)}`),
   createMilestone: (projectId: string, body: MilestoneWrite & { name: string }) =>
     request<Milestone>(`/projects/${projectId}/milestones`, { method: "POST", body: JSON.stringify(body) }),

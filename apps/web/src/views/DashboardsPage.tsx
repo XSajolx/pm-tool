@@ -6,6 +6,7 @@ import { fmtDuration, fmtMoney, fmtShortDate } from "../lib/format.js";
 import { cn } from "../lib/utils.js";
 import { TeamWorkloadWidget } from "../components/TeamWorkloadWidget.js";
 import { PendingApprovalsWidget } from "../components/PendingApprovalsWidget.js";
+import { AtRiskMilestones } from "../components/AtRiskMilestones.js";
 
 /**
  * A view over everything else. Nothing here has its own storage — every tile is
@@ -44,6 +45,10 @@ export function DashboardsPage() {
       </div>
 
       <div className="flex-1 overflow-y-auto p-6">
+        {/* Row 106 */}
+        <div className="mb-6 empty:hidden">
+          <AtRiskMilestones />
+        </div>
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
           <Tile label="Active projects" value={String(active.length)} hint={overBudget.length ? `${overBudget.length} over budget` : "all within budget"} warn={overBudget.length > 0} to="/projects" />
           <Tile label="Open pipeline" value={fmtMoney(pipeline)} hint={`${fmtMoney(weighted)} weighted`} to="/crm/deals" />

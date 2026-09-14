@@ -785,6 +785,9 @@ function ProjectMilestones({ projectId, canManage, startDate, endDate }: { proje
                     {overdue ? " · past target" : ""}
                     {" · "}
                     {m.progress.done}/{m.progress.total} tasks done
+                    {m.atRisk && (
+                      <span className="ml-1.5 rounded-full bg-red-50 px-1.5 py-0.5 text-[10px] font-medium text-red-700" title="Target within the risk window and linked tasks still open">⚠ At risk</span>
+                    )}
                   </p>
                 </div>
                 {!m.reachedAt && m.signoffStatus === "pending" && (

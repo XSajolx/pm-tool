@@ -1,8 +1,8 @@
 import { Inject, Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from "@nestjs/common";
-import { and, eq, gte, inArray, isNull, lt, lte } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull, lt, lte, sql } from "drizzle-orm";
 import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
-import { milestones, projects, reminders, taskAssignees, tasks } from "../../db/schema.js";
+import { milestones, organizations, projects, reminders, taskAssignees, tasks } from "../../db/schema.js";
 import { NotificationsService } from "./notifications.service.js";
 
 /** How far ahead "due soon" looks. */
@@ -10,7 +10,7 @@ const DUE_SOON_MS = 24 * 60 * 60 * 1000;
 /** Don't nag about things that went overdue ages ago (e.g. old seed data). */
 const OVERDUE_LOOKBACK_MS = 14 * 24 * 60 * 60 * 1000;
 
-type Kind = "due_soon" | "overdue";
+type Kind = "due_soon" | "overdue" | "at_risk";
 
 /**
  * Row 72: due-date reminders for tasks and milestones. A sweep runs every few
@@ -46,6 +46,7 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
     try {
       sent += await this.sweepTasks();
       sent += await this.sweepMilestones();
+      sent += await this.sweepMilestoneRisk();
       if (sent) this.logger.log(`sent ${sent} due-date reminder(s)`);
     } catch (err) {
       this.logger.warn(`reminder sweep failed: ${(err as Error).message}`);
@@ -131,6 +132,60 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
         data: { projectId: m.projectId, milestoneId: m.id, dueAt: due.toISOString(), kind },
       });
       sent++;
+    }
+    return sent;
+  }
+
+  /**
+   * Row 106: a milestone inside the org's risk window (default 7 days) that still
+   * has open linked tasks is flagged once, to the project lead and whoever set
+   * the milestone. A moved target date earns a fresh alert.
+   */
+  private async sweepMilestoneRisk() {
+    const now = new Date();
+    const floor = new Date(now.getTime() - OVERDUE_LOOKBACK_MS);
+    const rows = await this.db
+      .select({
+        m: milestones,
+        leadId: projects.leadId,
+        projectName: projects.name,
+        riskDays: organizations.milestoneRiskDays,
+        openTasks: sql<number>`(select count(*) from tasks t left join statuses s on s.id = t.status_id where t.milestone_id = ${milestones.id} and t.archived_at is null and coalesce(s.category::text, '') <> 'done')::int`,
+      })
+      .from(milestones)
+      .innerJoin(projects, eq(projects.id, milestones.projectId))
+      .innerJoin(organizations, eq(organizations.id, milestones.organizationId))
+      .where(
+        and(
+          isNull(milestones.reachedAt),
+          isNull(milestones.archivedAt),
+          isNull(projects.archivedAt),
+          gte(milestones.targetDate, floor),
+          sql`${milestones.targetDate} <= now() + (${organizations.milestoneRiskDays} || ' days')::interval`,
+        ),
+      )
+      .limit(500);
+    let sent = 0;
+    for (const { m, leadId, projectName, riskDays, openTasks } of rows) {
+      if (!openTasks) continue;
+      const due = m.targetDate!;
+      const daysLeft = Math.ceil((due.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
+      const receivers = [...new Set([leadId, m.createdById].filter((x): x is string => Boolean(x)))];
+      for (const receiverId of receivers) {
+        const fresh = await this.claim(m.organizationId, receiverId, "milestone", m.id, "at_risk", due);
+        if (!fresh) continue;
+        await this.notifications.notifyDirect({
+          orgId: m.organizationId,
+          receiverId,
+          entityType: "milestone",
+          entityId: m.id,
+          verb: "milestone_at_risk",
+          title: `Milestone at risk: ${m.name}`,
+          body: `${projectName} - ${daysLeft < 0 ? `${-daysLeft}d past target` : daysLeft === 0 ? "due today" : `due in ${daysLeft}d`} with ${openTasks} open task${openTasks === 1 ? "" : "s"} (window: ${riskDays}d)`,
+          data: { projectId: m.projectId, milestoneId: m.id, dueAt: due.toISOString(), kind: "at_risk", openTasks },
+        });
+        sent++;
+      }
     }
     return sent;
   }

@@ -36,6 +36,7 @@ const VERB_LABEL: Record<string, string> = {
   doc_superseded: "superseded this with",
   due_soon: "— due soon",
   overdue: "— overdue",
+  milestone_at_risk: "— milestone at risk",
   doc_review_requested: "asked you to review",
   milestone_signoff_requested: "asked you to sign off",
   milestone_approved: "signed off",

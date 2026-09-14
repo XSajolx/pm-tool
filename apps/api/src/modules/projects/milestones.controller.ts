@@ -17,6 +17,8 @@ const milestoneSchema = z.object({
 /** Row 75 */
 const signoffRequestSchema = z.object({ approverId: z.string().uuid().optional() });
 const signoffDecisionSchema = z.object({ approve: z.boolean(), note: z.string().max(2000).optional() });
+/** Row 106 */
+const riskSchema = z.object({ days: z.number().int().min(1).max(90) });
 
 @Controller()
 export class MilestonesController {
@@ -29,6 +31,25 @@ export class MilestonesController {
   async list(@Auth() auth: AuthContext, @Param("projectId") projectId: string) {
     await this.access.assertProject(auth.orgId, auth, projectId);
     return this.milestones.listForProject(auth.orgId, projectId);
+  }
+
+  /** Row 106: milestones due within the risk window with open linked tasks. */
+  @Get("milestones/at-risk")
+  async atRisk(@Auth() auth: AuthContext) {
+    const visible = await this.access.visibleProjectIds(auth.orgId, auth);
+    return this.milestones.atRisk(auth.orgId, visible);
+  }
+
+  @Get("milestones/risk-settings")
+  async riskSettings(@Auth() auth: AuthContext) {
+    return { days: await this.milestones.riskDays(auth.orgId) };
+  }
+
+  @Patch("milestones/risk-settings")
+  @Roles("owner", "admin")
+  @UsePipes(new ZodValidationPipe(riskSchema))
+  setRiskSettings(@Auth() auth: AuthContext, @Body() dto: z.infer<typeof riskSchema>) {
+    return this.milestones.setRiskDays(auth.orgId, dto.days);
   }
 
   @Get("milestones")

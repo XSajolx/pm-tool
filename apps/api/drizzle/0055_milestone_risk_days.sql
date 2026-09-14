@@ -1,0 +1,1 @@
+ALTER TABLE "organizations" ADD COLUMN "milestone_risk_days" integer DEFAULT 7 NOT NULL;

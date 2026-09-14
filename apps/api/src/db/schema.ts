@@ -107,6 +107,8 @@ export const organizations = pgTable(
     mfaRequiredRoles: jsonb("mfa_required_roles").$type<string[]>().notNull().default([]),
     /** Row 94: when to nudge people whose week is incomplete. Weekday 0-6 (Sun-Sat), local hour. Null = defaults (Fri 16:00, Mon 09:00). */
     timesheetReminders: jsonb("timesheet_reminders").$type<{ weekday: number; hour: number; week: "current" | "previous" }[]>(),
+    /** Row 106: a milestone this many days out with open linked tasks is "at risk". */
+    milestoneRiskDays: integer("milestone_risk_days").notNull().default(7),
     ...timestamps,
   },
   (t) => [uniqueIndex("organizations_slug_uq").on(t.slug)],

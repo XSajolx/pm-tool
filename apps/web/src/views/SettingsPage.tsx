@@ -1045,6 +1045,30 @@ function TimeCodeSettings({ canEdit }: { canEdit: boolean }) {
       )}
       {(create.isError || update.isError) && <p className="mt-2 text-xs text-red-600">{((create.error ?? update.error) as Error).message}</p>}
       <TimesheetReminderSettings canEdit={canEdit} />
+      <MilestoneRiskSettings canEdit={canEdit} />
+    </div>
+  );
+}
+
+/** Row 106: how many days before a milestone's target it counts as at risk (when linked tasks are open). */
+function MilestoneRiskSettings({ canEdit }: { canEdit: boolean }) {
+  const qc = useQueryClient();
+  const { data } = useQuery({ queryKey: ["milestone-risk"], queryFn: api.getMilestoneRisk });
+  const [days, setDays] = useState<number | null>(null);
+  const save = useMutation({ mutationFn: (d: number) => api.setMilestoneRisk(d), onSuccess: (r) => { qc.setQueryData(["milestone-risk"], r); qc.invalidateQueries({ queryKey: ["milestones-at-risk"] }); setDays(null); } });
+  const value = days ?? data?.days ?? 7;
+  return (
+    <div className="mt-8 max-w-xl">
+      <h2 className="text-sm font-semibold text-slate-800">Milestone at-risk window</h2>
+      <p className="mt-1 text-xs text-muted-foreground">A milestone due within this many days that still has open linked tasks is flagged on the dashboard and sent to the project lead's inbox once.</p>
+      <form onSubmit={(e) => { e.preventDefault(); save.mutate(value); }} className="mt-3 flex items-center gap-2 text-sm">
+        <input type="number" min={1} max={90} value={value} disabled={!canEdit} onChange={(e) => setDays(Number(e.target.value) || 1)} className="w-20 rounded-md border border-border bg-white px-2.5 py-1.5 text-sm outline-none focus:border-indigo-500 disabled:opacity-60" aria-label="Days before target" />
+        <span className="text-slate-600">days before the target date</span>
+        {canEdit && days != null && days !== data?.days && (
+          <button type="submit" disabled={save.isPending} className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50">Save</button>
+        )}
+      </form>
+      {save.isError && <p className="mt-2 text-xs text-red-600">{(save.error as Error).message}</p>}
     </div>
   );
 }
