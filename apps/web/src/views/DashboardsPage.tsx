@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api.js";
 import { fmtDuration, fmtMoney, fmtShortDate } from "../lib/format.js";
 import { cn } from "../lib/utils.js";
+import { TeamWorkloadWidget } from "../components/TeamWorkloadWidget.js";
 
 /**
  * A view over everything else. Nothing here has its own storage — every tile is
@@ -128,6 +129,11 @@ export function DashboardsPage() {
               </p>
             )}
           </Panel>
+        </div>
+
+        {/* Row 103 */}
+        <div className="mt-6">
+          <TeamWorkloadWidget />
         </div>
 
         {overdue.length > 0 && (

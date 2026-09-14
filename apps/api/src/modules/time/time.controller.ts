@@ -256,6 +256,13 @@ export class TimeController {
     return this.time.decideTimesheet(auth.orgId, this.actor(auth), id, dto.approve, dto.note);
   }
 
+  /** Row 103: hours this week per person, project vs internal vs leave, against expected. Members see only themselves. */
+  @Get("workload")
+  workload(@Auth() auth: AuthContext, @Query("week") week?: string) {
+    const manager = auth.role === "owner" || auth.role === "admin";
+    return this.time.workload(auth.orgId, week ?? new Date().toISOString(), manager ? undefined : auth.userId);
+  }
+
   /** Row 97: week-by-person status board (project managers). */
   @Get("timesheet/board")
   @Roles("owner", "admin")

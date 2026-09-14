@@ -379,6 +379,23 @@ export interface ActivityEntry {
   actor: { id: string; name: string; avatarUrl: string | null } | null;
 }
 
+/** Row 103: hours this week per person. */
+export interface WorkloadPerson {
+  userId: string;
+  name: string;
+  avatarUrl: string | null;
+  expected: number;
+  projectHours: number;
+  internalHours: number;
+  leaveHours: number;
+  totalHours: number;
+  projects: { id: string; name: string; color: string | null; seconds: number; hours: number }[];
+}
+export interface TeamWorkload {
+  weekStart: string;
+  people: WorkloadPerson[];
+}
+
 /** Row 102: one project's feed, with the entity each row is about. */
 export interface ProjectActivityEntry extends ActivityEntry {
   entityType: string;
@@ -1599,6 +1616,8 @@ export const api = {
     request<{ id: string; status: string }>(`/time/leave/${id}/decision`, { method: "POST", body: JSON.stringify(body) }),
   cancelLeave: (id: string) => request<{ id: string; status: string }>(`/time/leave/${id}`, { method: "DELETE" }),
   /** Row 97 */
+  /** Row 103 */
+  getWorkload: (week: string) => request<TeamWorkload>(`/time/workload?week=${encodeURIComponent(week)}`),
   getTimesheetBoard: (week: string) => request<TimesheetBoard>(`/time/timesheet/board?week=${encodeURIComponent(week)}`),
   nudgeTimesheet: (userId: string, week: string) => request<{ nudged: string }>(`/time/timesheet/board/nudge`, { method: "POST", body: JSON.stringify({ userId, week }) }),
   /** Row 94 */

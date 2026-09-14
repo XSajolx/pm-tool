@@ -593,6 +593,66 @@ export class TimeService {
     return { weekStart: weekStart.toISOString(), people };
   }
 
+  /**
+   * Row 103: each teammate's hours this week split project / internal / leave,
+   * against their expected hours - the numbers behind the workload widget.
+   */
+  async workload(orgId: string, weekOf: string, onlyUserId?: string) {
+    const weekStart = startOfWeek(new Date(weekOf));
+    const weekEnd = new Date(weekStart.getTime() + 7 * DAY_MS);
+    const members = await this.db.query.memberships.findMany({ where: eq(memberships.organizationId, orgId), with: { user: { columns: { id: true, name: true, avatarUrl: true } } } });
+    const active = members.filter((m) => !accessEnded(m) && m.role !== "guest" && (!onlyUserId || m.userId === onlyUserId));
+    const ids = active.map((m) => m.userId);
+    if (!ids.length) return { weekStart: weekStart.toISOString(), people: [] };
+    const rows = await this.db
+      .select({
+        userId: timeEntries.userId,
+        projectId: timeEntries.projectId,
+        projectName: projects.name,
+        projectColor: projects.color,
+        kind: projects.kind,
+        source: timeEntries.source,
+        seconds: sql<number>`coalesce(sum(case when ${timeEntries.endedAt} is null then extract(epoch from (now() - ${timeEntries.startedAt})) else ${timeEntries.durationSeconds} end), 0)::int`,
+      })
+      .from(timeEntries)
+      .leftJoin(projects, eq(projects.id, timeEntries.projectId))
+      .where(and(eq(timeEntries.organizationId, orgId), inArray(timeEntries.userId, ids), gte(timeEntries.startedAt, weekStart), lt(timeEntries.startedAt, weekEnd), isNull(timeEntries.archivedAt)))
+      .groupBy(timeEntries.userId, timeEntries.projectId, projects.name, projects.color, projects.kind, timeEntries.source);
+    const byUser = new Map<string, typeof rows>();
+    for (const row of rows) byUser.set(row.userId, [...(byUser.get(row.userId) ?? []), row]);
+    const h = (sec: number) => Math.round((sec / 3600) * 10) / 10;
+    const people = active.map((m) => {
+      const mine = byUser.get(m.userId) ?? [];
+      let project = 0, internal = 0, leave = 0;
+      const projectsMap = new Map<string, { id: string; name: string; color: string | null; seconds: number }>();
+      for (const row of mine) {
+        if (row.source === "leave") leave += row.seconds;
+        else if (row.kind === "internal") internal += row.seconds;
+        else {
+          project += row.seconds;
+          const key = row.projectId ?? "none";
+          const cur = projectsMap.get(key) ?? { id: key, name: row.projectName ?? "No project", color: row.projectColor ?? null, seconds: 0 };
+          cur.seconds += row.seconds;
+          projectsMap.set(key, cur);
+        }
+      }
+      const total = project + internal + leave;
+      return {
+        userId: m.userId,
+        name: m.user.name,
+        avatarUrl: m.user.avatarUrl,
+        expected: m.weeklyCapacityHours,
+        projectHours: h(project),
+        internalHours: h(internal),
+        leaveHours: h(leave),
+        totalHours: h(total),
+        projects: [...projectsMap.values()].sort((a, b) => b.seconds - a.seconds).map((x) => ({ ...x, hours: h(x.seconds) })),
+      };
+    });
+    people.sort((a, b) => b.totalHours / Math.max(1, b.expected) - a.totalHours / Math.max(1, a.expected) || a.name.localeCompare(b.name));
+    return { weekStart: weekStart.toISOString(), people };
+  }
+
   /** Row 97: chase one person about one week. */
   async nudge(orgId: string, actor: Actor, userId: string, weekOf: string) {
     const weekStart = startOfWeek(new Date(weekOf));
