@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Query } from "@nestjs/common";
 import { ChatService } from "./chat.service.js";
 import { ChatGateway } from "./chat.gateway.js";
 import { Auth, Roles } from "../auth/auth.decorators.js";
@@ -120,6 +120,20 @@ export class ChatController {
   @Post("channels/:id/leave")
   leave(@Auth() auth: AuthContext, @Param("id") id: string) {
     return this.chat.leave(auth.orgId, id, auth.userId);
+  }
+
+  /** Row 49: search my channels. q + optional from/in/has=file/after/before. */
+  @Get("search")
+  search(
+    @Auth() auth: AuthContext,
+    @Query("q") q?: string,
+    @Query("from") from?: string,
+    @Query("in") channelId?: string,
+    @Query("has") has?: string,
+    @Query("after") after?: string,
+    @Query("before") before?: string,
+  ) {
+    return this.chat.search(auth.orgId, auth.userId, { q, from, in: channelId, hasFile: has === "file", after, before });
   }
 
   /** All named channels with a joined flag — the "browse" list. */

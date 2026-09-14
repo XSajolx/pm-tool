@@ -841,6 +841,17 @@ export const api = {
   addChannelMembers: (id: string, userIds: string[]) =>
     request<ChatMember[]>(`/chat/channels/${id}/members`, { method: "POST", body: JSON.stringify({ userIds }) }),
   leaveChannel: (id: string) => request<{ id: string; left: boolean }>(`/chat/channels/${id}/leave`, { method: "POST" }),
+  /** Row 49: search across my channels. */
+  searchMessages: (f: { q?: string; from?: string; in?: string; hasFile?: boolean; after?: string; before?: string }) => {
+    const qs = new URLSearchParams();
+    if (f.q) qs.set("q", f.q);
+    if (f.from) qs.set("from", f.from);
+    if (f.in) qs.set("in", f.in);
+    if (f.hasFile) qs.set("has", "file");
+    if (f.after) qs.set("after", f.after);
+    if (f.before) qs.set("before", f.before);
+    return request<(ChatMessage & { channel: { id: string; name: string | null; type: "channel" | "dm" } })[]>(`/chat/search?${qs.toString()}`);
+  },
   /** Row 46: pins + bookmarks. */
   togglePin: (channelId: string, messageId: string) =>
     request<{ messageId: string; pinnedAt: string | null }>(`/chat/channels/${channelId}/messages/${messageId}/pin`, { method: "POST" }),

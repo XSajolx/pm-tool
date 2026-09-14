@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type Attachment, type ChannelBookmark, type ChannelNotify, type ChatChannel, type ChatMember, type ChatMessage, type ReactionGroup } from "../lib/api.js";
@@ -49,6 +49,19 @@ export function ChatPage() {
     }
   }, [channelId, channels, navigate]);
 
+  const [searchOpen, setSearchOpen] = useState(false);
+  // Ctrl/Cmd+K opens search from anywhere on the chat page.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setSearchOpen(true);
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
+
   const projectChannels = channels.filter((c) => c.type === "channel" && c.projectId && !c.project?.archived);
   const namedChannels = channels.filter((c) => c.type === "channel" && !c.projectId);
   const dmChannels = channels.filter((c) => c.type === "dm");
@@ -57,7 +70,17 @@ export function ChatPage() {
     <div className="flex h-screen flex-1 overflow-hidden">
       {/* Channel list */}
       <div className="flex w-60 shrink-0 flex-col border-r border-border bg-[#fbfbfa]">
-        <div className="border-b border-border px-4 py-3 text-sm font-semibold">Chat</div>
+        <div className="flex items-center border-b border-border px-4 py-3 text-sm font-semibold">
+          Chat
+          <button
+            type="button"
+            onClick={() => setSearchOpen((v) => !v)}
+            className={cn("ml-auto rounded-md border border-border px-2 py-0.5 text-[11px] font-normal text-slate-500 hover:bg-muted", searchOpen && "bg-indigo-50 text-indigo-700")}
+            title="Search messages (Ctrl+K)"
+          >
+            🔍 Search <kbd className="ml-1 rounded border border-border px-1 text-[9px]">⌘K</kbd>
+          </button>
+        </div>
         <ChatActions onOpen={(id) => navigate({ to: "/chat/$channelId", params: { channelId: id } })} />
         <div className="flex-1 overflow-y-auto px-2 py-2">
           {projectChannels.length > 0 && (
@@ -91,6 +114,8 @@ export function ChatPage() {
           Select a channel
         </div>
       )}
+
+      {searchOpen && <SearchPanel channels={channels} meId={meId} onClose={() => setSearchOpen(false)} />}
     </div>
   );
 }
@@ -1217,5 +1242,191 @@ function PinsPanel({ channelId, meId, members, onUnpin, onClose }: { channelId: 
         )}
       </div>
     </aside>
+  );
+}
+
+/* ---------------- Row 49: search ---------------- */
+
+type SearchFilters = { q: string; from: string; in: string; hasFile: boolean; after: string; before: string };
+const EMPTY_FILTERS: SearchFilters = { q: "", from: "", in: "", hasFile: false, after: "", before: "" };
+
+/**
+ * Pull `from:name in:channel has:file after:2026-09-01 before:2026-09-30`
+ * tokens out of the query box and resolve them against my people/channels.
+ */
+function parseSearchTokens(input: string, members: ChatMember[], channels: ChatChannel[], meId: string): SearchFilters {
+  const f: SearchFilters = { ...EMPTY_FILTERS };
+  const rest: string[] = [];
+  for (const word of input.split(/\s+/)) {
+    const m = /^(from|in|has|after|before):(.+)$/i.exec(word);
+    if (!m) {
+      if (word) rest.push(word);
+      continue;
+    }
+    const key = m[1]!.toLowerCase();
+    const val = m[2]!.replace(/^[@#]/, "").toLowerCase();
+    if (key === "from") {
+      const who = val === "me" ? members.find((x) => x.id === meId) : members.find((x) => x.name.toLowerCase().startsWith(val) || x.name.toLowerCase().split(" ").some((p) => p.startsWith(val)));
+      if (who) f.from = who.id;
+    } else if (key === "in") {
+      const ch = channels.find((c) => c.type === "channel" && (c.name ?? "").toLowerCase().startsWith(val)) ?? channels.find((c) => c.type === "dm" && channelLabel(c, meId).toLowerCase().includes(val));
+      if (ch) f.in = ch.id;
+    } else if (key === "has") {
+      if (val.startsWith("file") || val.startsWith("attach") || val.startsWith("image")) f.hasFile = true;
+    } else if (key === "after" || key === "before") {
+      if (/^\d{4}-\d{2}-\d{2}$/.test(val)) f[key] = val;
+    }
+  }
+  f.q = rest.join(" ");
+  return f;
+}
+
+function SearchPanel({ channels, meId, onClose }: { channels: ChatChannel[]; meId: string; onClose: () => void }) {
+  const navigate = useNavigate();
+  const [input, setInput] = useState("");
+  const [chips, setChips] = useState<Omit<SearchFilters, "q">>({ from: "", in: "", hasFile: false, after: "", before: "" });
+  const [debounced, setDebounced] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(input), 250);
+    return () => clearTimeout(t);
+  }, [input]);
+
+  const members = useMemo(() => {
+    const map = new Map<string, ChatMember>();
+    for (const c of channels) for (const m of c.members) map.set(m.id, m);
+    return [...map.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }, [channels]);
+
+  const tokens = useMemo(() => parseSearchTokens(debounced, members, channels, meId), [debounced, members, channels, meId]);
+  const filters: SearchFilters = {
+    q: tokens.q,
+    from: chips.from || tokens.from,
+    in: chips.in || tokens.in,
+    hasFile: chips.hasFile || tokens.hasFile,
+    after: chips.after || tokens.after,
+    before: chips.before || tokens.before,
+  };
+  const active = Boolean(filters.q || filters.from || filters.in || filters.hasFile || filters.after || filters.before);
+
+  const { data: results = [], isFetching } = useQuery({
+    queryKey: ["chat-search", filters],
+    queryFn: () => api.searchMessages(filters),
+    enabled: active,
+    placeholderData: (prev) => prev,
+  });
+
+  const sel = "rounded-md border border-border bg-white px-1.5 py-1 text-[11px] text-slate-700";
+
+  return (
+    <aside className="flex w-96 shrink-0 flex-col border-l border-border bg-[#fbfbfa]">
+      <header className="flex items-center justify-between border-b border-border px-4 py-3">
+        <span className="text-sm font-semibold">Search</span>
+        <button onClick={onClose} className="rounded p-1 text-slate-400 hover:bg-muted" aria-label="Close search">
+          ✕
+        </button>
+      </header>
+      <div className="space-y-2 border-b border-border px-4 py-3">
+        <div className="flex items-center gap-2 rounded-lg border border-border bg-white px-3 py-2 focus-within:ring-2 focus-within:ring-indigo-500/30">
+          <span className="text-slate-400">🔍</span>
+          <input
+            ref={inputRef}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => e.key === "Escape" && onClose()}
+            placeholder="Search messages… from:arfin in:design has:file after:2026-09-01"
+            className="min-w-0 flex-1 text-sm outline-none"
+          />
+          {input && (
+            <button type="button" onClick={() => setInput("")} className="text-slate-400 hover:text-slate-700" aria-label="Clear">
+              ×
+            </button>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <select value={chips.from} onChange={(e) => setChips({ ...chips, from: e.target.value })} className={sel} title="From">
+            <option value="">From: anyone</option>
+            {members.map((m) => (
+              <option key={m.id} value={m.id}>
+                From: {m.name}
+              </option>
+            ))}
+          </select>
+          <select value={chips.in} onChange={(e) => setChips({ ...chips, in: e.target.value })} className={sel} title="In">
+            <option value="">In: all channels</option>
+            {channels.map((c) => (
+              <option key={c.id} value={c.id}>
+                In: {c.type === "dm" ? channelLabel(c, meId) : `#${c.name}`}
+              </option>
+            ))}
+          </select>
+          <label className={cn(sel, "flex cursor-pointer items-center gap-1")}>
+            <input type="checkbox" checked={chips.hasFile} onChange={(e) => setChips({ ...chips, hasFile: e.target.checked })} className="h-3 w-3 accent-indigo-600" />
+            has file
+          </label>
+          <input type="date" value={chips.after} onChange={(e) => setChips({ ...chips, after: e.target.value })} className={sel} title="After" />
+          <input type="date" value={chips.before} onChange={(e) => setChips({ ...chips, before: e.target.value })} className={sel} title="Before" />
+          {(chips.from || chips.in || chips.hasFile || chips.after || chips.before) && (
+            <button type="button" onClick={() => setChips({ from: "", in: "", hasFile: false, after: "", before: "" })} className="text-[11px] text-indigo-600 hover:underline">
+              Clear filters
+            </button>
+          )}
+        </div>
+      </div>
+      <div className="flex-1 overflow-y-auto px-3 py-2">
+        {!active ? (
+          <p className="pt-8 text-center text-xs text-muted-foreground">
+            Type to search every channel you're in.
+            <br />
+            Tokens: <code>from:name</code> <code>in:channel</code> <code>has:file</code> <code>after:YYYY-MM-DD</code> <code>before:YYYY-MM-DD</code>
+          </p>
+        ) : results.length === 0 ? (
+          <p className="pt-8 text-center text-xs text-muted-foreground">{isFetching ? "Searching…" : "No messages match."}</p>
+        ) : (
+          <ul className="space-y-1">
+            <li className="px-1 pb-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+              {results.length} result{results.length === 1 ? "" : "s"}
+              {isFetching ? " · updating…" : ""}
+            </li>
+            {results.map((m) => (
+              <li key={m.id}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigate({ to: "/chat/$channelId", params: { channelId: m.channel.id } });
+                  }}
+                  className="w-full rounded-md border border-border bg-white px-2.5 py-2 text-left hover:border-indigo-300"
+                >
+                  <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                    <span className="font-medium text-slate-700">{m.channel.type === "dm" ? "DM" : `#${m.channel.name}`}</span>
+                    <span>{m.author.name}</span>
+                    <span className="ml-auto">{new Date(m.createdAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })} {fmtTime(m.createdAt)}</span>
+                  </div>
+                  <p className="mt-0.5 line-clamp-3 text-xs text-slate-800">
+                    <Highlight text={m.body || (m.attachments?.length ? `📎 ${m.attachments.map((a) => a.filename).join(", ")}` : "")} q={filters.q} />
+                  </p>
+                  {m.parentMessageId && <span className="mt-0.5 block text-[10px] text-muted-foreground">↳ in a thread</span>}
+                  {m.body && m.attachments && m.attachments.length > 0 && <span className="mt-0.5 block text-[10px] text-muted-foreground">📎 {m.attachments.length} file{m.attachments.length === 1 ? "" : "s"}</span>}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </aside>
+  );
+}
+
+/** Bold every occurrence of the query inside a result snippet. */
+function Highlight({ text, q }: { text: string; q: string }) {
+  if (!q.trim()) return <>{text}</>;
+  const re = new RegExp(`(${escapeRe(q.trim())})`, "ig");
+  return (
+    <>
+      {text.split(re).map((part, i) => (part.toLowerCase() === q.trim().toLowerCase() ? <mark key={i} className="rounded bg-yellow-100 px-0.5">{part}</mark> : <span key={i}>{part}</span>))}
+    </>
   );
 }

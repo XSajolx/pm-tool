@@ -1,8 +1,8 @@
 import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, asc, count, eq, gt, inArray, isNull, max, ne, or } from "drizzle-orm";
+import { and, asc, count, desc, eq, exists, gt, gte, ilike, inArray, isNull, lt, max, ne, or, sql } from "drizzle-orm";
 import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
-import { channelBookmarks, channels, channelMembers, memberships, messages, notificationPreferences, notifications, tasks } from "../../db/schema.js";
+import { attachments, channelBookmarks, channels, channelMembers, memberships, messages, notificationPreferences, notifications, tasks } from "../../db/schema.js";
 import { FilesService } from "../files/files.service.js";
 import { ReactionsService } from "../reactions/reactions.service.js";
 
@@ -135,6 +135,49 @@ export class ChatService {
     });
     for (const t of rows) out.set(t.sourceMessageId!, { id: t.id, title: t.title, reference: t.reference, status: t.status ?? null });
     return out;
+  }
+
+  /**
+   * Row 49: search messages across every channel I'm in. Text match is a
+   * case-insensitive substring; filters narrow by author, channel, files
+   * attached and date range. Newest first, capped.
+   */
+  async search(
+    orgId: string,
+    userId: string,
+    f: { q?: string; from?: string; in?: string; hasFile?: boolean; after?: string; before?: string; limit?: number },
+  ) {
+    const mine = await this.db.query.channelMembers.findMany({ where: eq(channelMembers.userId, userId), columns: { channelId: true } });
+    const ids = mine.map((m) => m.channelId);
+    if (!ids.length) return [];
+    const q = (f.q ?? "").trim();
+    if (!q && !f.from && !f.in && !f.hasFile && !f.after && !f.before) return [];
+
+    const where = [eq(messages.organizationId, orgId), inArray(messages.channelId, f.in && ids.includes(f.in) ? [f.in] : ids)];
+    if (q) where.push(ilike(messages.body, `%${q.replace(/[%_]/g, (c) => `\\${c}`)}%`));
+    if (f.from) where.push(eq(messages.authorId, f.from));
+    if (f.after) where.push(gte(messages.createdAt, new Date(f.after)));
+    if (f.before) {
+      const b = new Date(f.before);
+      b.setUTCDate(b.getUTCDate() + 1); // inclusive day
+      where.push(lt(messages.createdAt, b));
+    }
+    if (f.hasFile) {
+      where.push(exists(this.db.select({ one: sql`1` }).from(attachments).where(and(eq(attachments.messageId, messages.id), isNull(attachments.archivedAt)))));
+    }
+
+    const rows = await this.db.query.messages.findMany({
+      where: and(...where),
+      with: { author: { columns: { id: true, name: true, avatarUrl: true } }, channel: { columns: { id: true, name: true, type: true } } },
+      orderBy: [desc(messages.createdAt)],
+      limit: Math.min(Math.max(f.limit ?? 50, 1), 200),
+    });
+    const files = await this.files.forMessages(rows.map((m) => m.id));
+    return rows.map((m) => ({
+      ...this.shape(m),
+      channel: { id: m.channel.id, name: m.channel.name, type: m.channel.type },
+      attachments: files.get(m.id) ?? [],
+    }));
   }
 
   /* ---------------- Row 46: pins + bookmarks ---------------- */
