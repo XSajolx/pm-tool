@@ -4,6 +4,7 @@ import { z } from "zod";
 import { ZodValidationPipe } from "../../common/zod-validation.pipe.js";
 import { DocumentsService, type DocLinkEntity } from "./documents.service.js";
 import { Auth, Roles } from "../auth/auth.decorators.js";
+import { ActivityService } from "../activity/activity.service.js";
 import type { AuthContext } from "../auth/auth.types.js";
 
 const settingsSchema = z
@@ -39,7 +40,7 @@ const accessSchema = z.object({
 
 @Controller("documents")
 export class DocumentsController {
-  constructor(private readonly documents: DocumentsService) {}
+  constructor(private readonly documents: DocumentsService, private readonly activity: ActivityService) {}
 
   @Get()
   list(
@@ -104,14 +105,18 @@ export class DocumentsController {
   /** Row 65: public read-only link. Internal-only blocks never leave the team. */
   @Post(":id/share")
   @Roles("owner", "admin", "member")
-  enableShare(@Auth() auth: AuthContext, @Param("id") id: string) {
-    return this.documents.enableShare(auth.orgId, { userId: auth.userId, role: auth.role }, id);
+  async enableShare(@Auth() auth: AuthContext, @Param("id") id: string) {
+    const result = await this.documents.enableShare(auth.orgId, { userId: auth.userId, role: auth.role }, id);
+    await this.activity.record({ orgId: auth.orgId, actorId: auth.userId, entityType: "document", entityId: id, action: "share_enabled" });
+    return result;
   }
 
   @Delete(":id/share")
   @Roles("owner", "admin", "member")
-  disableShare(@Auth() auth: AuthContext, @Param("id") id: string) {
-    return this.documents.disableShare(auth.orgId, { userId: auth.userId, role: auth.role }, id);
+  async disableShare(@Auth() auth: AuthContext, @Param("id") id: string) {
+    const result = await this.documents.disableShare(auth.orgId, { userId: auth.userId, role: auth.role }, id);
+    await this.activity.record({ orgId: auth.orgId, actorId: auth.userId, entityType: "document", entityId: id, action: "share_disabled" });
+    return result;
   }
 
   /** Row 63: ask someone to sign the doc off. */
@@ -181,7 +186,9 @@ export class DocumentsController {
 
   @Delete(":id")
   @Roles("owner", "admin", "member")
-  archive(@Auth() auth: AuthContext, @Param("id") id: string) {
-    return this.documents.archive(auth.orgId, { userId: auth.userId, role: auth.role }, id);
+  async archive(@Auth() auth: AuthContext, @Param("id") id: string) {
+    const result = await this.documents.archive(auth.orgId, { userId: auth.userId, role: auth.role }, id);
+    await this.activity.record({ orgId: auth.orgId, actorId: auth.userId, entityType: "document", entityId: id, action: "deleted" });
+    return result;
   }
 }

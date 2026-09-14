@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, UsePipes
 import { z } from "zod";
 import { ZodValidationPipe } from "../../common/zod-validation.pipe.js";
 import { Auth, Roles } from "../auth/auth.decorators.js";
+import { ActivityService } from "../activity/activity.service.js";
 import type { AuthContext } from "../auth/auth.types.js";
 import { CustomFieldsService, FIELD_ENTITIES, FIELD_TYPES, type FieldEntity } from "./custom-fields.service.js";
 
@@ -14,7 +15,7 @@ const valuesSchema = z.object({ values: z.record(z.string().uuid(), z.unknown())
 /** Row 114: custom field definitions (admins) and values (anyone who can edit the record). */
 @Controller("custom-fields")
 export class CustomFieldsController {
-  constructor(private readonly fields: CustomFieldsService) {}
+  constructor(private readonly fields: CustomFieldsService, private readonly activity: ActivityService) {}
 
   @Get()
   list(@Auth() auth: AuthContext, @Query("entityType") entityType?: string) {
@@ -29,8 +30,10 @@ export class CustomFieldsController {
   @Post()
   @Roles("owner", "admin")
   @UsePipes(new ZodValidationPipe(createSchema))
-  create(@Auth() auth: AuthContext, @Body() dto: z.infer<typeof createSchema>) {
-    return this.fields.createDef(auth.orgId, dto);
+  async create(@Auth() auth: AuthContext, @Body() dto: z.infer<typeof createSchema>) {
+    const result = await this.fields.createDef(auth.orgId, dto);
+    await this.activity.record({ orgId: auth.orgId, actorId: auth.userId, entityType: "custom_field", entityId: result.id, action: "field_created", changes: [{ field: "name", from: null, to: `${dto.name} (${dto.type} on ${dto.entityType})` }] });
+    return result;
   }
 
   @Post("reorder")
@@ -49,8 +52,10 @@ export class CustomFieldsController {
 
   @Delete(":id")
   @Roles("owner", "admin")
-  archive(@Auth() auth: AuthContext, @Param("id") id: string) {
-    return this.fields.archiveDef(auth.orgId, id);
+  async archive(@Auth() auth: AuthContext, @Param("id") id: string) {
+    const result = await this.fields.archiveDef(auth.orgId, id);
+    await this.activity.record({ orgId: auth.orgId, actorId: auth.userId, entityType: "custom_field", entityId: id, action: "field_archived" });
+    return result;
   }
 
   @Get("values/:entityType/:entityId")

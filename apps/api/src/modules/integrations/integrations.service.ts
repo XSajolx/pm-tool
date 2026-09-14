@@ -4,6 +4,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:
 import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
 import { integrations } from "../../db/schema.js";
+import { ActivityService } from "../activity/activity.service.js";
 
 export type Provider = "google_drive" | "dropbox";
 export const PROVIDERS: Provider[] = ["google_drive", "dropbox"];
@@ -58,7 +59,10 @@ export class IntegrationsService {
   /** OAuth state nonces (single-process; fine for one API instance). */
   private readonly pending = new Map<string, PendingState>();
 
-  constructor(@Inject(DRIZZLE) private readonly db: DB) {}
+  constructor(
+    @Inject(DRIZZLE) private readonly db: DB,
+    private readonly activity: ActivityService,
+  ) {}
 
   configured(provider: Provider) {
     const e = ENV[provider];
@@ -159,6 +163,7 @@ export class IntegrationsService {
             updatedAt: new Date(),
           },
         });
+      await this.activity.record({ orgId: pend.orgId, actorId: pend.userId, entityType: "integration", entityId: pend.orgId, action: "integration_connected", changes: [{ field: "provider", from: null, to: provider }, { field: "account", from: null, to: account.email }] });
       return back(`connected=${provider}`);
     } catch (err) {
       this.logger.warn(`${provider} connect failed: ${(err as Error).message}`);

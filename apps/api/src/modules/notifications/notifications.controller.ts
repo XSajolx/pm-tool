@@ -5,6 +5,7 @@ import { NOTIF_TYPES, NotificationsService, type InboxTab, type MutableEntity } 
 import { RemindersService } from "./reminders.service.js";
 import { DigestService } from "./digest.service.js";
 import { Auth, Roles } from "../auth/auth.decorators.js";
+import { ActivityService } from "../activity/activity.service.js";
 import type { AuthContext } from "../auth/auth.types.js";
 
 /** Row 73: `{ mention: { email: false }, reminders: { push: true } }` - any subset. */
@@ -56,6 +57,8 @@ export class NotificationsController {
     private readonly notifications: NotificationsService,
     private readonly reminders: RemindersService,
     private readonly digest: DigestService,
+  
+    private readonly activity: ActivityService,
   ) {}
 
   /** Row 76: what my digest would contain right now. */
@@ -142,8 +145,10 @@ export class NotificationsController {
   @Patch("workspace-defaults")
   @Roles("owner", "admin")
   @UsePipes(new ZodValidationPipe(workspaceDefaultsSchema))
-  updateWorkspaceDefaults(@Auth() auth: AuthContext, @Body() dto: z.infer<typeof workspaceDefaultsSchema>) {
-    return this.notifications.updateWorkspaceDefaults(auth.orgId, dto);
+  async updateWorkspaceDefaults(@Auth() auth: AuthContext, @Body() dto: z.infer<typeof workspaceDefaultsSchema>) {
+    const result = await this.notifications.updateWorkspaceDefaults(auth.orgId, dto);
+    await this.activity.record({ orgId: auth.orgId, actorId: auth.userId, entityType: "workspace", entityId: auth.orgId, action: "notification_defaults_updated", changes: [...Object.entries(dto.channels ?? {}).map(([k, v]) => ({ field: `channels.${k}`, from: null, to: v })), ...(dto.quietHours ? [{ field: "quietHours", from: null, to: dto.quietHours }] : [])] });
+    return result;
   }
 
   @Get("preferences")

@@ -7,6 +7,7 @@ import { TimesheetRemindersService, type ReminderSlot } from "./timesheet-remind
 import { LeaveService, type LeaveKind } from "./leave.service.js";
 import { WorkCalendarService } from "./work-calendar.service.js";
 import { Auth, Roles } from "../auth/auth.decorators.js";
+import { ActivityService } from "../activity/activity.service.js";
 import type { AuthContext } from "../auth/auth.types.js";
 
 const startSchema = z.object({
@@ -84,6 +85,8 @@ export class TimeController {
     private readonly reminders: TimesheetRemindersService,
     private readonly leave: LeaveService,
     private readonly calendar: WorkCalendarService,
+  
+    private readonly activity: ActivityService,
   ) {}
 
   /* ---- Row 98: time off ---- */
@@ -268,28 +271,36 @@ export class TimeController {
   @Patch("calendar")
   @Roles("owner", "admin")
   @UsePipes(new ZodValidationPipe(calendarSchema))
-  updateCalendar(@Auth() auth: AuthContext, @Body() dto: z.infer<typeof calendarSchema>) {
-    return this.calendar.updateSettings(auth.orgId, dto);
+  async updateCalendar(@Auth() auth: AuthContext, @Body() dto: z.infer<typeof calendarSchema>) {
+    const result = await this.calendar.updateSettings(auth.orgId, dto);
+    await this.activity.record({ orgId: auth.orgId, actorId: auth.userId, entityType: "workspace", entityId: auth.orgId, action: "work_calendar_updated", changes: Object.entries(dto).map(([k, v]) => ({ field: k, from: null, to: v })) });
+    return result;
   }
 
   @Post("calendar/holidays")
   @Roles("owner", "admin")
   @UsePipes(new ZodValidationPipe(holidaySchema))
-  addHoliday(@Auth() auth: AuthContext, @Body() dto: z.infer<typeof holidaySchema>) {
-    return this.calendar.addHoliday(auth.orgId, dto);
+  async addHoliday(@Auth() auth: AuthContext, @Body() dto: z.infer<typeof holidaySchema>) {
+    const result = await this.calendar.addHoliday(auth.orgId, dto);
+    await this.activity.record({ orgId: auth.orgId, actorId: auth.userId, entityType: "workspace", entityId: auth.orgId, action: "holiday_added", changes: [{ field: "holiday", from: null, to: `${dto.date.slice(0, 10)} ${dto.name}` }] });
+    return result;
   }
 
   @Delete("calendar/holidays/:id")
   @Roles("owner", "admin")
-  removeHoliday(@Auth() auth: AuthContext, @Param("id") id: string) {
-    return this.calendar.removeHoliday(auth.orgId, id);
+  async removeHoliday(@Auth() auth: AuthContext, @Param("id") id: string) {
+    const result = await this.calendar.removeHoliday(auth.orgId, id);
+    await this.activity.record({ orgId: auth.orgId, actorId: auth.userId, entityType: "workspace", entityId: auth.orgId, action: "holiday_removed", changes: [{ field: "holidayId", from: id, to: null }] });
+    return result;
   }
 
   @Patch("calendar/members/:userId")
   @Roles("owner", "admin")
   @UsePipes(new ZodValidationPipe(memberCalendarSchema))
-  updateMemberCalendar(@Auth() auth: AuthContext, @Param("userId") userId: string, @Body() dto: z.infer<typeof memberCalendarSchema>) {
-    return this.calendar.updateMember(auth.orgId, userId, dto);
+  async updateMemberCalendar(@Auth() auth: AuthContext, @Param("userId") userId: string, @Body() dto: z.infer<typeof memberCalendarSchema>) {
+    const result = await this.calendar.updateMember(auth.orgId, userId, dto);
+    await this.activity.record({ orgId: auth.orgId, actorId: auth.userId, entityType: "member", entityId: userId, action: "working_hours_updated", changes: Object.entries(dto).map(([k, v]) => ({ field: k, from: null, to: v })) });
+    return result;
   }
 
   /** Row 104: what's waiting on me. */

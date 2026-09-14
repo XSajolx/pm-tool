@@ -14,13 +14,14 @@ import { WorkCalendarSettings } from "../components/WorkCalendarSettings.js";
 import { NotificationDefaultsSettings } from "../components/NotificationDefaultsSettings.js";
 import { ConnectionsSettings } from "../components/ConnectionsSettings.js";
 import { CustomFieldSettings } from "../components/CustomFieldSettings.js";
+import { AuditLogSettings } from "../components/AuditLogSettings.js";
 import type { Priority } from "../lib/api.js";
 
 /**
  * Workspace settings. Sections are added as the roadmap lands; each one is a
  * self-contained panel that owns its own queries.
  */
-type Section = "people" | "workhours" | "notifications" | "connections" | "fields" | "timecodes" | "statuses" | "priorities" | "stages" | "tags" | "templates" | "dealstages" | "proposals" | "snippets" | "branding" | "dockit" | "sso" | "security";
+type Section = "people" | "workhours" | "notifications" | "connections" | "fields" | "audit" | "timecodes" | "statuses" | "priorities" | "stages" | "tags" | "templates" | "dealstages" | "proposals" | "snippets" | "branding" | "dockit" | "sso" | "security";
 
 const SECTIONS: { id: Section; label: string; hint: string }[] = [
   { id: "people", label: "People & roles", hint: "Who's in the workspace and what each role can do" },
@@ -41,6 +42,7 @@ const SECTIONS: { id: Section; label: string; hint: string }[] = [
   { id: "sso", label: "Sign-in & SSO", hint: "Google Workspace domain that auto-joins" },
   { id: "security", label: "Security & 2FA", hint: "Authenticator app, backup codes, who must use it" },
   { id: "dockit", label: "Doc starter kit", hint: "Docs every new project starts with" },
+  { id: "audit", label: "Audit log", hint: "Who changed what and when" },
 ];
 
 export function SettingsPage() {
@@ -94,6 +96,7 @@ export function SettingsPage() {
           {section === "sso" && <SsoSettings canEdit={canEdit} />}
           {section === "security" && <SecuritySettings canEdit={canEdit} />}
           {section === "dockit" && <DocKitSettings canEdit={canEdit} />}
+          {section === "audit" && (canEdit ? <AuditLogSettings /> : <p className="text-sm text-muted-foreground">Only owners and admins can read the audit log.</p>)}
         </div>
       </div>
     </div>

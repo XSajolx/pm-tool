@@ -4,6 +4,7 @@ import { ZodValidationPipe } from "../../common/zod-validation.pipe.js";
 import { MilestonesService } from "./milestones.service.js";
 import { ProjectAccessService } from "../access/project-access.service.js";
 import { Auth, Roles } from "../auth/auth.decorators.js";
+import { ActivityService } from "../activity/activity.service.js";
 import type { AuthContext } from "../auth/auth.types.js";
 
 const isoDate = z.string().datetime();
@@ -25,6 +26,8 @@ export class MilestonesController {
   constructor(
     private readonly milestones: MilestonesService,
     private readonly access: ProjectAccessService,
+  
+    private readonly audit: ActivityService,
   ) {}
 
   @Get("projects/:projectId/milestones")
@@ -48,8 +51,10 @@ export class MilestonesController {
   @Patch("milestones/risk-settings")
   @Roles("owner", "admin")
   @UsePipes(new ZodValidationPipe(riskSchema))
-  setRiskSettings(@Auth() auth: AuthContext, @Body() dto: z.infer<typeof riskSchema>) {
-    return this.milestones.setRiskDays(auth.orgId, dto.days);
+  async setRiskSettings(@Auth() auth: AuthContext, @Body() dto: z.infer<typeof riskSchema>) {
+    const result = await this.milestones.setRiskDays(auth.orgId, dto.days);
+    await this.audit.record({ orgId: auth.orgId, actorId: auth.userId, entityType: "workspace", entityId: auth.orgId, action: "risk_window_updated", changes: [{ field: "milestoneRiskDays", from: null, to: dto.days }] });
+    return result;
   }
 
   @Get("milestones")

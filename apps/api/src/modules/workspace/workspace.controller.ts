@@ -4,6 +4,7 @@ import { ZodValidationPipe } from "../../common/zod-validation.pipe.js";
 import { WorkspaceService } from "./workspace.service.js";
 import { ProjectAccessService } from "../access/project-access.service.js";
 import { Auth, Public, Roles } from "../auth/auth.decorators.js";
+import { ActivityService } from "../activity/activity.service.js";
 import type { AuthContext, Role } from "../auth/auth.types.js";
 
 const spaceSchema = z.object({
@@ -38,6 +39,8 @@ export class WorkspaceController {
   constructor(
     private readonly workspace: WorkspaceService,
     private readonly access: ProjectAccessService,
+  
+    private readonly activity: ActivityService,
   ) {}
 
   @Get("spaces")
@@ -185,14 +188,18 @@ export class WorkspaceController {
   @Post("members/:userId/deactivate")
   @Roles("owner", "admin")
   @UsePipes(new ZodValidationPipe(deactivateSchema))
-  deactivate(@Auth() auth: AuthContext, @Param("userId") userId: string, @Body() dto: z.infer<typeof deactivateSchema>) {
-    return this.workspace.deactivateMember(auth.orgId, auth.userId, userId, dto);
+  async deactivate(@Auth() auth: AuthContext, @Param("userId") userId: string, @Body() dto: z.infer<typeof deactivateSchema>) {
+    const result = await this.workspace.deactivateMember(auth.orgId, auth.userId, userId, dto);
+    await this.activity.record({ orgId: auth.orgId, actorId: auth.userId, entityType: "member", entityId: userId, action: "member_deactivated", changes: dto.endDate ? [{ field: "endDate", from: null, to: dto.endDate }] : undefined });
+    return result;
   }
 
   @Post("members/:userId/reactivate")
   @Roles("owner", "admin")
-  reactivate(@Auth() auth: AuthContext, @Param("userId") userId: string) {
-    return this.workspace.reactivateMember(auth.orgId, userId);
+  async reactivate(@Auth() auth: AuthContext, @Param("userId") userId: string) {
+    const result = await this.workspace.reactivateMember(auth.orgId, userId);
+    await this.activity.record({ orgId: auth.orgId, actorId: auth.userId, entityType: "member", entityId: userId, action: "member_reactivated" });
+    return result;
   }
 
   @Post("members/:userId/reassign")
@@ -205,8 +212,10 @@ export class WorkspaceController {
   @Post("members/invite")
   @Roles("owner", "admin")
   @UsePipes(new ZodValidationPipe(inviteSchema))
-  invite(@Auth() auth: AuthContext, @Body() dto: z.infer<typeof inviteSchema>) {
-    return this.workspace.invite(auth.orgId, { ...dto, role: dto.role as Role | undefined, invitedById: auth.userId });
+  async invite(@Auth() auth: AuthContext, @Body() dto: z.infer<typeof inviteSchema>) {
+    const result = await this.workspace.invite(auth.orgId, { ...dto, role: dto.role as Role | undefined, invitedById: auth.userId });
+    await this.activity.record({ orgId: auth.orgId, actorId: auth.userId, entityType: "invitation", entityId: (result as { id?: string }).id ?? auth.orgId, action: "invite_sent", changes: [{ field: "email", from: null, to: dto.email }, { field: "role", from: null, to: dto.role ?? "member" }] });
+    return result;
   }
 
   /* ---- Row 83: invitations ---- */
@@ -219,14 +228,18 @@ export class WorkspaceController {
 
   @Post("invitations/:id/resend")
   @Roles("owner", "admin")
-  resendInvitation(@Auth() auth: AuthContext, @Param("id") id: string) {
-    return this.workspace.resendInvitation(auth.orgId, id);
+  async resendInvitation(@Auth() auth: AuthContext, @Param("id") id: string) {
+    const result = await this.workspace.resendInvitation(auth.orgId, id);
+    await this.activity.record({ orgId: auth.orgId, actorId: auth.userId, entityType: "invitation", entityId: id, action: "invite_resent" });
+    return result;
   }
 
   @Delete("invitations/:id")
   @Roles("owner", "admin")
-  revokeInvitation(@Auth() auth: AuthContext, @Param("id") id: string) {
-    return this.workspace.revokeInvitation(auth.orgId, id);
+  async revokeInvitation(@Auth() auth: AuthContext, @Param("id") id: string) {
+    const result = await this.workspace.revokeInvitation(auth.orgId, id);
+    await this.activity.record({ orgId: auth.orgId, actorId: auth.userId, entityType: "invitation", entityId: id, action: "invite_revoked" });
+    return result;
   }
 
   /** The invite link's landing data. Public by design - the token is the secret. */
@@ -239,20 +252,26 @@ export class WorkspaceController {
   @Patch("members/:userId/role")
   @Roles("owner", "admin")
   @UsePipes(new ZodValidationPipe(roleSchema))
-  setRole(@Auth() auth: AuthContext, @Param("userId") userId: string, @Body() dto: z.infer<typeof roleSchema>) {
-    return this.workspace.setMemberRole(auth.orgId, userId, dto.role as Role);
+  async setRole(@Auth() auth: AuthContext, @Param("userId") userId: string, @Body() dto: z.infer<typeof roleSchema>) {
+    const result = await this.workspace.setMemberRole(auth.orgId, userId, dto.role as Role);
+    await this.activity.record({ orgId: auth.orgId, actorId: auth.userId, entityType: "member", entityId: userId, action: "role_changed", changes: [{ field: "role", from: result.previousRole, to: result.role }] });
+    return result;
   }
 
   /** Row 82: only the owner can hand over the workspace; there is always exactly one owner. */
   @Post("members/:userId/transfer-ownership")
   @Roles("owner")
-  transferOwnership(@Auth() auth: AuthContext, @Param("userId") userId: string) {
-    return this.workspace.transferOwnership(auth.orgId, auth.userId, userId);
+  async transferOwnership(@Auth() auth: AuthContext, @Param("userId") userId: string) {
+    const result = await this.workspace.transferOwnership(auth.orgId, auth.userId, userId);
+    await this.activity.record({ orgId: auth.orgId, actorId: auth.userId, entityType: "member", entityId: userId, action: "ownership_transferred", changes: [{ field: "owner", from: auth.userId, to: userId }] });
+    return result;
   }
 
   @Delete("members/:userId")
   @Roles("owner", "admin")
-  removeMember(@Auth() auth: AuthContext, @Param("userId") userId: string) {
-    return this.workspace.removeMember(auth.orgId, userId);
+  async removeMember(@Auth() auth: AuthContext, @Param("userId") userId: string) {
+    const result = await this.workspace.removeMember(auth.orgId, userId);
+    await this.activity.record({ orgId: auth.orgId, actorId: auth.userId, entityType: "member", entityId: userId, action: "member_removed" });
+    return result;
   }
 }

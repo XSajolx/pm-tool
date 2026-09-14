@@ -894,6 +894,17 @@ export interface Timesheet {
   workingDays?: number[];
 }
 
+/** Row 115 */
+export interface AuditEntry extends ActivityEntry {
+  entityType: string;
+  entityId: string;
+  label: string | null;
+}
+export interface AuditPage {
+  entries: AuditEntry[];
+  nextCursor: string | null;
+}
+
 /** Row 114 */
 export type CustomFieldEntity = "task" | "project" | "contact";
 export type CustomFieldType = "text" | "number" | "date" | "select" | "checkbox" | "url" | "user";
@@ -1760,6 +1771,12 @@ export const api = {
     request<TimesheetSubmission>(`/time/timesheet/submissions/${id}/reopen`, { method: "POST", body: JSON.stringify({ reason }) }),
   getTimesheetEvents: (id: string) =>
     request<{ id: string; kind: string; note: string | null; createdAt: string; actor: { id: string; name: string } | null }[]>(`/time/timesheet/submissions/${id}/events`),
+  /** Row 115 */
+  getAuditLog: (f: { q?: string; entityType?: string; actorId?: string; from?: string; to?: string; cursor?: string; limit?: number }) => {
+    const q = new URLSearchParams();
+    for (const [k, v] of Object.entries(f)) if (v !== undefined && v !== "" && v !== null) q.set(k, String(v));
+    return request<AuditPage>(`/audit?${q.toString()}`);
+  },
   /** Row 114 */
   getCustomFieldDefs: (entityType?: CustomFieldEntity) => request<CustomFieldDef[]>(`/custom-fields${entityType ? `?entityType=${entityType}` : ""}`),
   createCustomField: (body: { entityType: CustomFieldEntity; name: string; type: CustomFieldType; options?: string[]; required?: boolean }) =>

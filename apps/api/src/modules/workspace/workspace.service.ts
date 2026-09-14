@@ -496,7 +496,7 @@ export class WorkspaceService {
       .where(and(eq(memberships.organizationId, orgId), eq(memberships.userId, userId)))
       .returning();
     if (!row) throw new NotFoundException("Member not found");
-    return { userId, role };
+    return { userId, role, previousRole: current.role };
   }
 
   /**

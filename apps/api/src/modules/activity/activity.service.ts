@@ -3,6 +3,7 @@ import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
 import { activityLog, documents, milestones, projectStages, projects, statuses, tasks, users } from "../../db/schema.js";
+import { desc as descOrder, gte, ilike, lt, lte } from "drizzle-orm";
 
 /** One field-level change. Stored as an array in `activity_log.changes`. */
 export interface FieldChange {
@@ -28,7 +29,12 @@ export interface RecordActivity {
     | "estimate"
     | "meeting"
     | "document"
-    | "project";
+    | "project"
+    | "workspace"
+    | "member"
+    | "invitation"
+    | "integration"
+    | "custom_field";
   entityId: string;
   action: string;
   changes?: FieldChange[];
@@ -169,6 +175,67 @@ export class ActivityService {
       statuses: Object.fromEntries(statusRows.map((s) => [s.id, s.name])),
       users: Object.fromEntries(userRows.map((u) => [u.id, u.name])),
     };
+  }
+
+  /**
+   * Row 115: the workspace audit log. Everything in activity_log, searchable
+   * by free text (action, entity type, actor name, the diff itself), filterable
+   * by type / actor / date, newest first with cursor paging.
+   */
+  async listAudit(orgId: string, f: { q?: string; entityType?: string; actorId?: string; from?: string; to?: string; cursor?: string; limit?: number }) {
+    const limit = Math.min(200, Math.max(1, f.limit ?? 50));
+    const conds = [eq(activityLog.organizationId, orgId)];
+    if (f.entityType) conds.push(eq(activityLog.entityType, f.entityType));
+    if (f.actorId) conds.push(eq(activityLog.actorId, f.actorId));
+    if (f.from) conds.push(gte(activityLog.createdAt, new Date(f.from)));
+    if (f.to) conds.push(lte(activityLog.createdAt, new Date(f.to)));
+    if (f.cursor) conds.push(lt(activityLog.createdAt, new Date(f.cursor)));
+    if (f.q?.trim()) {
+      const like = `%${f.q.trim()}%`;
+      conds.push(
+        or(
+          ilike(activityLog.action, like),
+          ilike(activityLog.entityType, like),
+          sql`${activityLog.changes}::text ilike ${like}`,
+          sql`${activityLog.entityId}::text ilike ${like}`,
+          sql`exists (select 1 from users u where u.id = ${activityLog.actorId} and u.name ilike ${like})`,
+        )!,
+      );
+    }
+    const rows = await this.db
+      .select()
+      .from(activityLog)
+      .where(and(...conds))
+      .orderBy(descOrder(activityLog.createdAt))
+      .limit(limit + 1);
+    const page = rows.slice(0, limit);
+    const base = await this.withActors(page);
+    const labels = await this.labelsFor(page);
+    return {
+      entries: base.map((e) => ({ ...e, label: labels.get(`${e.entityType}:${e.entityId}`) ?? null })),
+      nextCursor: rows.length > limit ? page[page.length - 1]!.createdAt.toISOString() : null,
+    };
+  }
+
+  /** Human labels for the things audit rows point at (batched per type). */
+  private async labelsFor(rows: (typeof activityLog.$inferSelect)[]) {
+    const out = new Map<string, string>();
+    const ids = (types: string[]) => [...new Set(rows.filter((r) => types.includes(r.entityType)).map((r) => r.entityId))];
+    const [t, d, p, u, m, st] = await Promise.all([
+      ids(["task"]).length ? this.db.select({ id: tasks.id, reference: tasks.reference, title: tasks.title }).from(tasks).where(inArray(tasks.id, ids(["task"]))) : [],
+      ids(["document"]).length ? this.db.select({ id: documents.id, title: documents.title }).from(documents).where(inArray(documents.id, ids(["document"]))) : [],
+      ids(["project", "list"]).length ? this.db.select({ id: projects.id, name: projects.name }).from(projects).where(inArray(projects.id, ids(["project", "list"]))) : [],
+      ids(["member"]).length ? this.db.select({ id: users.id, name: users.name }).from(users).where(inArray(users.id, ids(["member"]))) : [],
+      ids(["milestone"]).length ? this.db.select({ id: milestones.id, name: milestones.name }).from(milestones).where(inArray(milestones.id, ids(["milestone"]))) : [],
+      ids(["stage"]).length ? this.db.select({ id: projectStages.id, name: projectStages.name }).from(projectStages).where(inArray(projectStages.id, ids(["stage"]))) : [],
+    ]);
+    for (const x of t) out.set(`task:${x.id}`, x.reference ? `${x.reference} ${x.title}` : x.title);
+    for (const x of d) out.set(`document:${x.id}`, x.title || "Untitled");
+    for (const x of p) { out.set(`project:${x.id}`, x.name); out.set(`list:${x.id}`, x.name); }
+    for (const x of u) out.set(`member:${x.id}`, x.name);
+    for (const x of m) out.set(`milestone:${x.id}`, x.name);
+    for (const x of st) out.set(`stage:${x.id}`, x.name);
+    return out;
   }
 
   /** Org-wide feed — powers a "recent activity" panel. */

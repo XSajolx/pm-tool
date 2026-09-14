@@ -1,6 +1,7 @@
 import { Controller, Delete, Get, Param, Post, Query, Res } from "@nestjs/common";
 import type { Response } from "express";
 import { Auth, Public, Roles } from "../auth/auth.decorators.js";
+import { ActivityService } from "../activity/activity.service.js";
 import type { AuthContext } from "../auth/auth.types.js";
 import { IntegrationsService, PROVIDERS, type Provider } from "./integrations.service.js";
 
@@ -12,7 +13,7 @@ function asProvider(p: string): Provider {
 /** Row 112 (+116): connect Drive / Dropbox once per workspace; health checks. */
 @Controller("integrations")
 export class IntegrationsController {
-  constructor(private readonly integrations: IntegrationsService) {}
+  constructor(private readonly integrations: IntegrationsService, private readonly activity: ActivityService) {}
 
   @Get()
   list(@Auth() auth: AuthContext) {
@@ -42,7 +43,9 @@ export class IntegrationsController {
 
   @Delete(":provider")
   @Roles("owner", "admin")
-  disconnect(@Auth() auth: AuthContext, @Param("provider") provider: string) {
-    return this.integrations.disconnect(auth.orgId, asProvider(provider));
+  async disconnect(@Auth() auth: AuthContext, @Param("provider") provider: string) {
+    const result = await this.integrations.disconnect(auth.orgId, asProvider(provider));
+    await this.activity.record({ orgId: auth.orgId, actorId: auth.userId, entityType: "integration", entityId: auth.orgId, action: "integration_disconnected", changes: [{ field: "provider", from: provider, to: null }] });
+    return result;
   }
 }

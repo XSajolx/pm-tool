@@ -401,6 +401,7 @@ export class ProjectsService {
 
   async archive(orgId: string, userId: string, id: string) {
     await this.update(orgId, userId, id, { status: "archived" });
+    await this.activity.record({ orgId, actorId: userId, entityType: "project", entityId: id, action: "archived" });
     return { id, archived: true };
   }
 
