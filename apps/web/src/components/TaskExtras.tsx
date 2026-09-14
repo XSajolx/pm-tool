@@ -332,7 +332,7 @@ export function CrmLinkField({ task }: { task: Task }) {
               </span>
             )}
             {task.deal && (
-              <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs text-emerald-700" title={`Deal · ${task.deal.stage}`}>
+              <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs text-emerald-700" title={`Deal · ${task.deal.stage?.name ?? ""}`}>
                 💼 {task.deal.title}
               </span>
             )}

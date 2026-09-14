@@ -3,7 +3,6 @@ import { Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api.js";
 import { fmtDuration, fmtMoney, fmtShortDate } from "../lib/format.js";
-import { STAGE_LABEL } from "./DealsPage.js";
 import { cn } from "../lib/utils.js";
 
 /**
@@ -27,10 +26,10 @@ export function DashboardsPage() {
 
   const active = projects.filter((p) => p.status === "active");
   const overBudget = active.filter((p) => p.budgetHours != null && p.stats.loggedSeconds / 3600 > p.budgetHours);
-  const openCols = board.filter((c) => c.stage !== "won" && c.stage !== "lost");
+  const openCols = board.filter((c) => c.stage.kind === "open");
   const pipeline = openCols.reduce((a, c) => a + c.value, 0);
   const weighted = openCols.reduce((a, c) => a + c.weighted, 0);
-  const wonThisMonth = board.find((c) => c.stage === "won")?.deals.filter((d) => d.closedAt && new Date(d.closedAt).getMonth() === new Date().getMonth()) ?? [];
+  const wonThisMonth = board.filter((c) => c.stage.kind === "won").flatMap((c) => c.deals).filter((d) => d.closedAt && new Date(d.closedAt).getMonth() === new Date().getMonth()) ?? [];
   const weekSeconds = week.reduce((a, e) => a + e.durationSeconds, 0);
   const overdue = myTasks.filter((t) => t.dueDate && new Date(t.dueDate) < new Date());
   const awaiting = estimates.filter((e) => e.status === "sent");
@@ -57,13 +56,13 @@ export function DashboardsPage() {
                 {board.map((c) => {
                   const max = Math.max(1, ...board.map((x) => x.value));
                   return (
-                    <li key={c.stage} className="text-sm">
+                    <li key={c.stage.id} className="text-sm">
                       <div className="flex justify-between text-xs text-slate-600">
-                        <span>{STAGE_LABEL[c.stage]} <span className="text-muted-foreground">({c.count})</span></span>
+                        <span>{c.stage.name} <span className="text-muted-foreground">({c.count})</span></span>
                         <span className="tabular-nums">{fmtMoney(c.value)}</span>
                       </div>
                       <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-100">
-                        <div className={cn("h-full rounded-full", c.stage === "won" ? "bg-emerald-500" : c.stage === "lost" ? "bg-red-400" : "bg-indigo-500")} style={{ width: `${(c.value / max) * 100}%` }} />
+                        <div className="h-full rounded-full" style={{ width: `${(c.value / max) * 100}%`, background: c.stage.color }} />
                       </div>
                     </li>
                   );

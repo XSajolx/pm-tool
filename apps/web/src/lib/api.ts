@@ -249,7 +249,7 @@ export interface Task {
   dealId?: string | null;
   company?: { id: string; name: string } | null;
   contact?: { id: string; firstName: string; lastName: string | null } | null;
-  deal?: { id: string; title: string; stage: DealStage } | null;
+  deal?: { id: string; title: string; stage: { name: string; kind: DealStageKind } | null } | null;
   /** Row 47: where this task came from, when it was made from chat. */
   sourceMessage?: { id: string; channelId: string; body: string; createdAt: string; author: { id: string; name: string } | null; channel: { id: string; name: string | null; type: "channel" | "dm" } | null } | null;
   parentTaskId?: string | null;
@@ -578,6 +578,19 @@ export interface ResourcingBoard {
 
 /* ---- CRM ---- */
 
+/** Row 51: a project as listed on its client's page. */
+export interface CompanyProject {
+  id: string;
+  name: string;
+  color: string;
+  status: ProjectStatus;
+  startDate: string | null;
+  endDate: string | null;
+  budgetAmount: number | null;
+  currency: string;
+  lead: { id: string; name: string } | null;
+}
+
 export interface Company {
   id: string;
   name: string;
@@ -592,6 +605,7 @@ export interface Company {
   wonValue?: number;
   contacts?: Contact[];
   deals?: Deal[];
+  projects?: CompanyProject[];
   createdAt: string;
 }
 
@@ -628,14 +642,25 @@ export interface ContactInput {
   isPrimary?: boolean;
 }
 
-export type DealStage = "lead" | "qualified" | "proposal" | "negotiation" | "won" | "lost";
+/** Row 53: pipeline stages are per-workspace rows; `kind` marks the terminal ones. */
+export type DealStageKind = "open" | "won" | "lost";
+export interface DealStageRow {
+  id: string;
+  name: string;
+  kind: DealStageKind;
+  color: string;
+  probability: number;
+  position: number;
+}
+export type DealStageRef = Pick<DealStageRow, "id" | "name" | "kind" | "color">;
 
 export interface Deal {
   id: string;
   title: string;
   value: number;
   currency: string;
-  stage: DealStage;
+  stageId: string | null;
+  stage: DealStageRef | null;
   probability: number;
   expectedCloseDate: string | null;
   closedAt: string | null;
@@ -654,7 +679,7 @@ export interface DealInput {
   contactId?: string | null;
   value?: number;
   currency?: string;
-  stage?: DealStage;
+  stageId?: string;
   probability?: number;
   expectedCloseDate?: string | null;
   lostReason?: string | null;
@@ -662,7 +687,7 @@ export interface DealInput {
 }
 
 export interface DealColumn {
-  stage: DealStage;
+  stage: DealStageRow;
   count: number;
   value: number;
   weighted: number;
@@ -1173,8 +1198,17 @@ export const api = {
     request<Deal>(`/crm/deals`, { method: "POST", body: JSON.stringify(body) }),
   updateDeal: (id: string, body: Partial<DealInput>) =>
     request<Deal>(`/crm/deals/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
-  moveDeal: (id: string, stage: DealStage, position: number) =>
-    request<Deal>(`/crm/deals/${id}/move`, { method: "PATCH", body: JSON.stringify({ stage, position }) }),
+  moveDeal: (id: string, stageId: string, position: number) =>
+    request<Deal>(`/crm/deals/${id}/move`, { method: "PATCH", body: JSON.stringify({ stageId, position }) }),
+  // ---- CRM: pipeline stages (row 53) ----
+  getDealStages: () => request<DealStageRow[]>(`/crm/deals/stages`),
+  createDealStage: (body: { name: string; kind?: DealStageKind; probability?: number; color?: string }) =>
+    request<DealStageRow>(`/crm/deals/stages`, { method: "POST", body: JSON.stringify(body) }),
+  updateDealStage: (id: string, body: Partial<{ name: string; kind: DealStageKind; probability: number; color: string }>) =>
+    request<DealStageRow>(`/crm/deals/stages/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  reorderDealStages: (ids: string[]) => request<DealStageRow[]>(`/crm/deals/stages/order`, { method: "PUT", body: JSON.stringify({ ids }) }),
+  deleteDealStage: (id: string, moveTo?: string) =>
+    request<DealStageRow[]>(`/crm/deals/stages/${id}${moveTo ? `?moveTo=${moveTo}` : ""}`, { method: "DELETE" }),
   convertDeal: (id: string) => request<Deal>(`/crm/deals/${id}/convert`, { method: "POST" }),
   archiveDeal: (id: string) => request<{ id: string }>(`/crm/deals/${id}`, { method: "DELETE" }),
 

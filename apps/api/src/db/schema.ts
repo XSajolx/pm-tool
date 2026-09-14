@@ -1358,14 +1358,26 @@ export type Allocation = typeof allocations.$inferSelect;
  * tied to a deal. Notes and Meetings attach to any of the three.
  * ================================================================== */
 
-export const dealStage = pgEnum("deal_stage", [
-  "lead",
-  "qualified",
-  "proposal",
-  "negotiation",
-  "won",
-  "lost",
-]);
+/** Row 53: stages are per-org rows now (renamable, reorderable); `kind` says which are terminal. */
+export const dealStageKind = pgEnum("deal_stage_kind", ["open", "won", "lost"]);
+
+export const dealStages = pgTable(
+  "deal_stages",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 120 }).notNull(),
+    kind: dealStageKind("kind").notNull().default("open"),
+    /** Default probability a deal takes when it enters this stage. */
+    probability: integer("probability").notNull().default(10),
+    color: varchar("color", { length: 16 }).notNull().default("#6366f1"),
+    position: doublePrecision("position").notNull().default(0),
+    ...timestamps,
+  },
+  (t) => [index("deal_stages_org_idx").on(t.organizationId)],
+);
 
 export const estimateStatus = pgEnum("estimate_status", [
   "draft",
@@ -1436,7 +1448,7 @@ export const deals = pgTable(
     title: varchar("title", { length: 255 }).notNull(),
     value: doublePrecision("value").notNull().default(0),
     currency: varchar("currency", { length: 8 }).notNull().default("USD"),
-    stage: dealStage("stage").notNull().default("lead"),
+    stageId: uuid("stage_id").references((): AnyPgColumn => dealStages.id, { onDelete: "set null" }),
     /** 0-100. Defaults per stage; editable. Drives weighted pipeline value. */
     probability: integer("probability").notNull().default(10),
     expectedCloseDate: timestamp("expected_close_date", { withTimezone: true }),
@@ -1449,7 +1461,7 @@ export const deals = pgTable(
     ...timestamps,
   },
   (t) => [
-    index("deals_org_stage_idx").on(t.organizationId, t.stage),
+    index("deals_org_stage_idx").on(t.organizationId, t.stageId),
     index("deals_company_idx").on(t.companyId),
   ],
 );
@@ -1582,8 +1594,13 @@ export const contactsRelations = relations(contacts, ({ one, many }) => ({
   tasks: many(tasks),
 }));
 
+export const dealStagesRelations = relations(dealStages, ({ many }) => ({
+  deals: many(deals),
+}));
+
 export const dealsRelations = relations(deals, ({ one, many }) => ({
   tasks: many(tasks),
+  stage: one(dealStages, { fields: [deals.stageId], references: [dealStages.id] }),
   company: one(companies, { fields: [deals.companyId], references: [companies.id] }),
   contact: one(contacts, { fields: [deals.contactId], references: [contacts.id] }),
   project: one(projects, { fields: [deals.projectId], references: [projects.id] }),

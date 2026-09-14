@@ -12,7 +12,7 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
-import { api, type Deal, type DealStage } from "../lib/api.js";
+import { api, type Deal, type DealStageRow } from "../lib/api.js";
 import { useAuth } from "../lib/auth.js";
 import { fmtMoney, fmtShortDate } from "../lib/format.js";
 import { NotesPanel } from "../components/NotesPanel.js";
@@ -21,22 +21,9 @@ import { useEscape } from "../lib/useEscape.js";
 import { CrmField, input } from "./CompaniesPage.js";
 import { cn } from "../lib/utils.js";
 
-export const STAGES: DealStage[] = ["lead", "qualified", "proposal", "negotiation", "won", "lost"];
-
-export const STAGE_LABEL: Record<DealStage, string> = {
-  lead: "Lead",
-  qualified: "Qualified",
-  proposal: "Proposal",
-  negotiation: "Negotiation",
-  won: "Won",
-  lost: "Lost",
-};
-
-const STAGE_TONE: Record<DealStage, string> = {
-  lead: "bg-slate-400",
-  qualified: "bg-sky-500",
-  proposal: "bg-indigo-500",
-  negotiation: "bg-amber-500",
+/** Row 53: stages come from Settings → Deal stages; won/lost are marked by `kind`. */
+export const STAGE_TONE: Record<DealStageRow["kind"], string> = {
+  open: "bg-indigo-500",
   won: "bg-emerald-500",
   lost: "bg-red-400",
 };
@@ -52,7 +39,7 @@ export function DealsPage() {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
   const move = useMutation({
-    mutationFn: ({ id, stage, position }: { id: string; stage: DealStage; position: number }) => api.moveDeal(id, stage, position),
+    mutationFn: ({ id, stageId, position }: { id: string; stageId: string; position: number }) => api.moveDeal(id, stageId, position),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["deal-board"] }),
   });
 
@@ -63,26 +50,27 @@ export function DealsPage() {
 
   function onDragEnd(e: DragEndEvent) {
     setActive(null);
-    const stage = e.over?.id as DealStage | undefined;
+    const stageId = e.over?.id as string | undefined;
     const deal = columns.flatMap((c) => c.deals).find((d) => d.id === e.active.id);
-    if (!stage || !deal || deal.stage === stage) return;
-    const column = columns.find((c) => c.stage === stage);
-    const position = (column?.deals.reduce((m, d) => Math.max(m, d.position), 0) ?? 0) + 1;
+    if (!stageId || !deal || deal.stageId === stageId) return;
+    const column = columns.find((c) => c.stage.id === stageId);
+    if (!column) return;
+    const position = (column.deals.reduce((m, d) => Math.max(m, d.position), 0) ?? 0) + 1;
 
     // Optimistic: move the card now, let the server confirm.
     qc.setQueryData(["deal-board"], (old: typeof columns | undefined) =>
       old?.map((c) => ({
         ...c,
-        deals: c.stage === stage
-          ? [...c.deals, { ...deal, stage, position }]
+        deals: c.stage.id === stageId
+          ? [...c.deals, { ...deal, stageId, stage: { id: column.stage.id, name: column.stage.name, kind: column.stage.kind, color: column.stage.color }, position }]
           : c.deals.filter((d) => d.id !== deal.id),
       })),
     );
-    move.mutate({ id: deal.id, stage, position });
+    move.mutate({ id: deal.id, stageId, position });
   }
 
-  const openTotal = columns.filter((c) => c.stage !== "won" && c.stage !== "lost").reduce((a, c) => a + c.value, 0);
-  const weighted = columns.filter((c) => c.stage !== "won" && c.stage !== "lost").reduce((a, c) => a + c.weighted, 0);
+  const openTotal = columns.filter((c) => c.stage.kind === "open").reduce((a, c) => a + c.value, 0);
+  const weighted = columns.filter((c) => c.stage.kind === "open").reduce((a, c) => a + c.weighted, 0);
 
   return (
     <div className="flex h-screen flex-1 flex-col overflow-hidden">
@@ -92,7 +80,10 @@ export function DealsPage() {
           Open pipeline <span className="font-medium text-slate-700">{fmtMoney(openTotal)}</span> · weighted{" "}
           <span className="font-medium text-slate-700">{fmtMoney(weighted)}</span>
         </span>
-        <button onClick={() => setCreating(true)} className="ml-auto rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-indigo-700">
+        <Link to="/settings" className="ml-auto text-xs text-muted-foreground hover:text-indigo-700" title="Rename, reorder or add stages in Settings → Deal stages">
+          ⚙ Stages
+        </Link>
+        <button onClick={() => setCreating(true)} className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-indigo-700">
           New deal
         </button>
       </div>
@@ -100,7 +91,7 @@ export function DealsPage() {
       <DndContext sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd}>
         <div className="flex flex-1 gap-3 overflow-x-auto p-4">
           {columns.map((col) => (
-            <Column key={col.stage} stage={col.stage} count={col.count} value={col.value} weighted={col.weighted}>
+            <Column key={col.stage.id} stage={col.stage} count={col.count} value={col.value} weighted={col.weighted}>
               {col.deals.map((d) => (
                 <DealCard key={d.id} deal={d} onOpen={() => setOpenId(d.id)} />
               ))}
@@ -116,8 +107,8 @@ export function DealsPage() {
   );
 }
 
-function Column({ stage, count, value, weighted, children }: { stage: DealStage; count: number; value: number; weighted: number; children: React.ReactNode }) {
-  const { setNodeRef, isOver } = useDroppable({ id: stage });
+function Column({ stage, count, value, weighted, children }: { stage: DealStageRow; count: number; value: number; weighted: number; children: React.ReactNode }) {
+  const { setNodeRef, isOver } = useDroppable({ id: stage.id });
   return (
     <div
       ref={setNodeRef}
@@ -128,13 +119,14 @@ function Column({ stage, count, value, weighted, children }: { stage: DealStage;
     >
       <div className="border-b border-border px-3 py-2">
         <div className="flex items-center gap-2">
-          <span className={cn("h-2 w-2 rounded-full", STAGE_TONE[stage])} />
-          <span className="text-sm font-semibold text-slate-800">{STAGE_LABEL[stage]}</span>
+          <span className="h-2 w-2 rounded-full" style={{ background: stage.color }} />
+          <span className="text-sm font-semibold text-slate-800">{stage.name}</span>
+          {stage.kind !== "open" && <span className={cn("rounded px-1 text-[9px] font-semibold uppercase text-white", STAGE_TONE[stage.kind])}>{stage.kind}</span>}
           <span className="ml-auto text-xs tabular-nums text-muted-foreground">{count}</span>
         </div>
         <p className="mt-0.5 text-[11px] tabular-nums text-muted-foreground">
           {fmtMoney(value)}
-          {stage !== "won" && stage !== "lost" ? ` · ${fmtMoney(weighted)} weighted` : ""}
+          {stage.kind === "open" ? ` · ${fmtMoney(weighted)} weighted` : ""}
         </p>
       </div>
       <div className="flex-1 space-y-2 overflow-y-auto p-2">{children}</div>
@@ -247,6 +239,7 @@ function DealDrawer({ dealId, onClose }: { dealId: string; onClose: () => void }
   const { role } = useAuth();
   const isAdmin = role === "owner" || role === "admin";
   const { data: deal } = useQuery({ queryKey: ["deal", dealId], queryFn: () => api.getDeal(dealId) });
+  const { data: stages = [] } = useQuery({ queryKey: ["deal-stages"], queryFn: api.getDealStages });
 
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ["deal", dealId] });
@@ -284,8 +277,13 @@ function DealDrawer({ dealId, onClose }: { dealId: string; onClose: () => void }
 
               <div className="mt-4 space-y-2.5">
                 <Row label="Stage">
-                  <select value={deal.stage} onChange={(e) => update.mutate({ stage: e.target.value as DealStage })} className={input}>
-                    {STAGES.map((s) => <option key={s} value={s}>{STAGE_LABEL[s]}</option>)}
+                  <select value={deal.stageId ?? ""} onChange={(e) => update.mutate({ stageId: e.target.value })} className={input}>
+                    {stages.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                        {s.kind !== "open" ? ` (${s.kind})` : ""}
+                      </option>
+                    ))}
                   </select>
                 </Row>
                 <Row label="Value">
@@ -297,7 +295,7 @@ function DealDrawer({ dealId, onClose }: { dealId: string; onClose: () => void }
                 <Row label="Close date">
                   <input type="date" defaultValue={deal.expectedCloseDate?.slice(0, 10) ?? ""} onBlur={(e) => update.mutate({ expectedCloseDate: e.target.value ? new Date(e.target.value).toISOString() : null })} className={input} />
                 </Row>
-                {deal.stage === "lost" && (
+                {deal.stage?.kind === "lost" && (
                   <Row label="Lost reason">
                     <input defaultValue={deal.lostReason ?? ""} onBlur={(e) => update.mutate({ lostReason: e.target.value || null })} className={input} placeholder="Why did we lose it?" />
                   </Row>

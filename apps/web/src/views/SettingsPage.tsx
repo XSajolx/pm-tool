@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, type StageTemplate, type Status, type Tag, type TaskTemplate } from "../lib/api.js";
+import { api, type DealStageRow, type StageTemplate, type Status, type Tag, type TaskTemplate } from "../lib/api.js";
 import { useAuth } from "../lib/auth.js";
 import { PRIORITY } from "../components/ui.js";
 import type { Priority } from "../lib/api.js";
@@ -9,7 +9,7 @@ import type { Priority } from "../lib/api.js";
  * Workspace settings. Sections are added as the roadmap lands; each one is a
  * self-contained panel that owns its own queries.
  */
-type Section = "statuses" | "priorities" | "stages" | "tags" | "templates";
+type Section = "statuses" | "priorities" | "stages" | "tags" | "templates" | "dealstages";
 
 const SECTIONS: { id: Section; label: string; hint: string }[] = [
   { id: "statuses", label: "Task statuses", hint: "Per space: names, colours, order, done state" },
@@ -17,6 +17,7 @@ const SECTIONS: { id: Section; label: string; hint: string }[] = [
   { id: "stages", label: "Stage templates", hint: "Default stage sequences for new projects" },
   { id: "tags", label: "Tags", hint: "Workspace tags: rename, recolour, merge, retire" },
   { id: "templates", label: "Task list templates", hint: "Saved task sets to kick off new projects" },
+  { id: "dealstages", label: "Deal stages", hint: "Pipeline columns: rename, reorder, mark won/lost" },
 ];
 
 export function SettingsPage() {
@@ -54,6 +55,7 @@ export function SettingsPage() {
           {section === "stages" && <StageTemplateSettings canEdit={canEdit} />}
           {section === "tags" && <TagSettings canEdit={canEdit} />}
           {section === "templates" && <TaskTemplateSettings canEdit={canEdit} />}
+          {section === "dealstages" && <DealStageSettings canEdit={canEdit} />}
         </div>
       </div>
     </div>
@@ -568,6 +570,115 @@ function TemplateSettingsRow({ template, canEdit, onSave, onDelete }: { template
         <button type="button" onClick={onDelete} className="ml-auto text-xs text-slate-400 hover:text-red-500">
           Delete
         </button>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * Deal stages (row 53)
+ * ------------------------------------------------------------------ */
+const KIND_LABEL: Record<DealStageRow["kind"], string> = { open: "Open", won: "Won", lost: "Lost" };
+
+function DealStageSettings({ canEdit }: { canEdit: boolean }) {
+  const qc = useQueryClient();
+  const { data: stages = [] } = useQuery({ queryKey: ["deal-stages"], queryFn: api.getDealStages });
+  const [name, setName] = useState("");
+  const [deleting, setDeleting] = useState<DealStageRow | null>(null);
+  const [moveTo, setMoveTo] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ["deal-stages"] });
+    qc.invalidateQueries({ queryKey: ["deal-board"] });
+    qc.invalidateQueries({ queryKey: ["deals"] });
+    setError(null);
+  };
+  const fail = (e: unknown) => setError((e as Error).message.replace(/^API \d+: /, ""));
+  const create = useMutation({ mutationFn: () => api.createDealStage({ name }), onSuccess: () => { setName(""); refresh(); }, onError: fail });
+  const update = useMutation({ mutationFn: ({ id, body }: { id: string; body: Parameters<typeof api.updateDealStage>[1] }) => api.updateDealStage(id, body), onSuccess: refresh, onError: fail });
+  const reorder = useMutation({ mutationFn: (ids: string[]) => api.reorderDealStages(ids), onSuccess: refresh, onError: fail });
+  const remove = useMutation({ mutationFn: ({ id, to }: { id: string; to?: string }) => api.deleteDealStage(id, to), onSuccess: () => { setDeleting(null); refresh(); }, onError: fail });
+
+  function swap(i: number, j: number) {
+    if (j < 0 || j >= stages.length) return;
+    const ids = stages.map((s) => s.id);
+    [ids[i], ids[j]] = [ids[j]!, ids[i]!];
+    reorder.mutate(ids);
+  }
+
+  return (
+    <div>
+      <h1 className="text-lg font-semibold text-slate-900">Deal stages</h1>
+      <p className="mt-1 text-sm text-muted-foreground">
+        The columns of the pipeline board, in order. Mark which stages mean <b>Won</b> and <b>Lost</b>; deals entering a stage take its default probability.
+      </p>
+      {error && <p className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
+      <ul className="mt-5 divide-y divide-border rounded-lg border border-border bg-white">
+        {stages.map((st, i) => (
+          <li key={st.id} className="flex items-center gap-3 px-3 py-2">
+            <div className="flex flex-col text-[10px] leading-none text-slate-400">
+              <button type="button" disabled={!canEdit || i === 0} onClick={() => swap(i, i - 1)} className="hover:text-slate-700 disabled:opacity-30">▲</button>
+              <button type="button" disabled={!canEdit || i === stages.length - 1} onClick={() => swap(i, i + 1)} className="hover:text-slate-700 disabled:opacity-30">▼</button>
+            </div>
+            <label className="relative h-5 w-5 shrink-0 cursor-pointer rounded-full ring-1 ring-black/10" style={{ background: st.color }} title="Colour">
+              <input type="color" value={st.color} disabled={!canEdit} onChange={(e) => update.mutate({ id: st.id, body: { color: e.target.value } })} className="absolute inset-0 cursor-pointer opacity-0" />
+            </label>
+            <InlineName value={st.name} disabled={!canEdit} onCommit={(v) => update.mutate({ id: st.id, body: { name: v } })} />
+            <select value={st.kind} disabled={!canEdit} onChange={(e) => update.mutate({ id: st.id, body: { kind: e.target.value as DealStageRow["kind"] } })} className="rounded-md border border-border bg-white px-2 py-1 text-xs">
+              {(Object.keys(KIND_LABEL) as DealStageRow["kind"][]).map((k) => (
+                <option key={k} value={k}>
+                  {KIND_LABEL[k]}
+                </option>
+              ))}
+            </select>
+            <label className="flex items-center gap-1 text-xs text-slate-600">
+              <input type="number" min={0} max={100} defaultValue={st.probability} disabled={!canEdit} onBlur={(e) => Number(e.target.value) !== st.probability && update.mutate({ id: st.id, body: { probability: Number(e.target.value) } })} className="w-14 rounded-md border border-border px-1.5 py-1 text-xs" />
+              %
+            </label>
+            {canEdit && (
+              <button type="button" onClick={() => { setDeleting(st); setMoveTo(""); }} className="ml-auto text-xs text-slate-400 hover:text-red-600">
+                Delete
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
+      {canEdit && (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (name.trim()) create.mutate();
+          }}
+          className="mt-3 flex gap-2"
+        >
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="New stage, e.g. Discovery call" className="flex-1 rounded-md border border-border px-3 py-1.5 text-sm outline-none focus:border-indigo-500" />
+          <button type="submit" disabled={!name.trim() || create.isPending} className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50">
+            Add stage
+          </button>
+        </form>
+      )}
+      {deleting && (
+        <>
+          <div className="fixed inset-0 z-40 bg-black/20" onClick={() => setDeleting(null)} />
+          <div className="fixed left-1/2 top-1/2 z-50 w-[380px] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-white p-5 shadow-xl">
+            <h2 className="text-sm font-semibold text-slate-900">Delete “{deleting.name}”?</h2>
+            <p className="mt-1 text-xs text-muted-foreground">Deals in this stage move to:</p>
+            <select value={moveTo} onChange={(e) => setMoveTo(e.target.value)} className="mt-2 w-full rounded-md border border-border px-2 py-1.5 text-sm">
+              <option value="">First open stage</option>
+              {stages.filter((s) => s.id !== deleting.id).map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+            <div className="mt-4 flex justify-end gap-2">
+              <button type="button" onClick={() => setDeleting(null)} className="rounded-md px-3 py-1.5 text-sm text-slate-600 hover:bg-muted">Cancel</button>
+              <button type="button" onClick={() => remove.mutate({ id: deleting.id, to: moveTo || undefined })} disabled={remove.isPending} className="rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50">
+                Delete stage
+              </button>
+            </div>
+          </div>
+        </>
       )}
     </div>
   );

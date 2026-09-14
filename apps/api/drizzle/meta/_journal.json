@@ -155,6 +155,20 @@
       "when": 1789345629589,
       "tag": "0021_activity_feed",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1789346197120,
+      "tag": "0022_deal_stages",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1789346218615,
+      "tag": "0023_drop_legacy_deal_stage",
+      "breakpoints": true
     }
   ]
 }

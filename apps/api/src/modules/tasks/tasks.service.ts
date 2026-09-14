@@ -45,7 +45,7 @@ const TRACKED_FIELDS = [
 const CRM_WITH = {
   company: { columns: { id: true, name: true } },
   contact: { columns: { id: true, firstName: true, lastName: true } },
-  deal: { columns: { id: true, title: true, stage: true } },
+  deal: { columns: { id: true, title: true }, with: { stage: { columns: { name: true, kind: true } } } },
 } as const;
 
 /** Given relation A→B, the row we mirror onto B so both tasks show the link. */

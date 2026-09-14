@@ -2,7 +2,7 @@ import { Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { and, asc, eq, ilike, inArray, isNull, sql } from "drizzle-orm";
 import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
-import { companies, contacts, deals } from "../../db/schema.js";
+import { companies, contacts, dealStages, deals, projects } from "../../db/schema.js";
 import { ActivityService } from "../activity/activity.service.js";
 
 export interface CompanyDto {
@@ -47,10 +47,11 @@ export class CompaniesService {
       this.db
         .select({
           companyId: deals.companyId,
-          open: sql<number>`count(*) filter (where ${deals.stage} not in ('won','lost'))::int`,
-          wonValue: sql<number>`coalesce(sum(${deals.value}) filter (where ${deals.stage} = 'won'), 0)`,
+          open: sql<number>`count(*) filter (where coalesce(${dealStages.kind}, 'open') = 'open')::int`,
+          wonValue: sql<number>`coalesce(sum(${deals.value}) filter (where ${dealStages.kind} = 'won'), 0)`,
         })
         .from(deals)
+        .leftJoin(dealStages, eq(deals.stageId, dealStages.id))
         .where(and(inArray(deals.companyId, ids), isNull(deals.archivedAt)))
         .groupBy(deals.companyId),
     ]);
@@ -72,11 +73,18 @@ export class CompaniesService {
       with: {
         owner: true,
         contacts: { where: isNull(contacts.archivedAt), orderBy: asc(contacts.firstName) },
-        deals: { where: isNull(deals.archivedAt) },
+        deals: { where: isNull(deals.archivedAt), with: { stage: { columns: { id: true, name: true, kind: true, color: true } } } },
       },
     });
     if (!row) throw new NotFoundException("Company not found");
-    return { ...row, owner: row.owner ? { id: row.owner.id, name: row.owner.name } : null };
+    // Row 51: everything about a client in one place — its projects too.
+    const projectRows = await this.db.query.projects.findMany({
+      where: and(eq(projects.companyId, id), eq(projects.organizationId, orgId), isNull(projects.archivedAt)),
+      columns: { id: true, name: true, color: true, status: true, startDate: true, endDate: true, budgetAmount: true, currency: true },
+      with: { lead: { columns: { id: true, name: true } } },
+      orderBy: (p, { desc }) => [desc(p.createdAt)],
+    });
+    return { ...row, owner: row.owner ? { id: row.owner.id, name: row.owner.name } : null, projects: projectRows };
   }
 
   async create(orgId: string, userId: string, dto: CompanyDto) {
