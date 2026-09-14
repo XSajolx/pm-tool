@@ -54,7 +54,7 @@ export type MutableEntity = "task" | "document" | "project";
  * domain service that registered the kind (docs, milestones, timesheets),
  * then every pending card for that entity flips to the outcome.
  */
-export type ApprovalKind = "doc_review" | "milestone" | "timesheet";
+export type ApprovalKind = "doc_review" | "milestone" | "timesheet" | "leave";
 export interface ApprovalMeta {
   kind: ApprovalKind;
   status: "pending" | "approved" | "rejected";
@@ -91,6 +91,9 @@ const TYPE_FOR_VERB: Record<string, NotifType> = {
   timesheet_approved: "approvals",
   timesheet_rejected: "approvals",
   timesheet_reopened: "approvals",
+  leave_requested: "approvals",
+  leave_approved: "approvals",
+  leave_rejected: "approvals",
   milestone_signoff_requested: "approvals",
   milestone_approved: "approvals",
   milestone_rejected: "approvals",
@@ -179,6 +182,9 @@ const TAB_VERBS: Record<Exclude<TypedTab, "alerts">, string[]> = {
     "timesheet_approved",
     "timesheet_rejected",
     "timesheet_reopened",
+    "leave_requested",
+    "leave_approved",
+    "leave_rejected",
     "milestone_signoff_requested",
     "milestone_approved",
     "milestone_rejected",

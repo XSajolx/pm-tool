@@ -2297,3 +2297,41 @@ export const timesheetEvents = pgTable(
 export const timesheetEventsRelations = relations(timesheetEvents, ({ one }) => ({
   actor: one(users, { fields: [timesheetEvents.actorId], references: [users.id] }),
 }));
+
+/* ------------------------------------------------------------------ *
+ * Leave / PTO requests (row 98). Approved leave is written into the
+ * timesheet as hours on the "PTO" internal code, one entry per weekday,
+ * so capacity maths and the team calendar see it without special cases.
+ * ------------------------------------------------------------------ */
+export const leaveRequests = pgTable(
+  "leave_requests",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** vacation | sick | personal | other */
+    kind: varchar("kind", { length: 16 }).notNull().default("vacation"),
+    startDate: timestamp("start_date", { withTimezone: true }).notNull(),
+    endDate: timestamp("end_date", { withTimezone: true }).notNull(),
+    /** Hours per weekday of leave; defaults to capacity / 5. */
+    hoursPerDay: doublePrecision("hours_per_day").notNull().default(8),
+    note: text("note"),
+    /** pending | approved | rejected | cancelled */
+    status: varchar("status", { length: 16 }).notNull().default("pending"),
+    approverId: uuid("approver_id").references(() => users.id, { onDelete: "set null" }),
+    decidedById: uuid("decided_by_id").references(() => users.id, { onDelete: "set null" }),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    decisionNote: text("decision_note"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("leave_requests_org_user_idx").on(t.organizationId, t.userId), index("leave_requests_dates_idx").on(t.startDate, t.endDate)],
+);
+
+export const leaveRequestsRelations = relations(leaveRequests, ({ one }) => ({
+  user: one(users, { fields: [leaveRequests.userId], references: [users.id], relationName: "leave_user" }),
+  decidedBy: one(users, { fields: [leaveRequests.decidedById], references: [users.id], relationName: "leave_decider" }),
+}));

@@ -516,7 +516,7 @@ export interface MyTask extends Task {
 
 /** Row 75: approval request carried by a notification (`data.approval`). */
 export interface ApprovalMeta {
-  kind: "doc_review" | "milestone" | "timesheet";
+  kind: "doc_review" | "milestone" | "timesheet" | "leave";
   status: "pending" | "approved" | "rejected";
   decidedAt?: string;
   decidedById?: string;
@@ -707,6 +707,24 @@ export interface TimeEntry {
   user: { id: string; name: string } | null;
   /** Row 87 */
   stage?: { id: string; name: string } | null;
+}
+
+/** Row 98 */
+export interface LeaveRequest {
+  id: string;
+  userId: string;
+  kind: "vacation" | "sick" | "personal" | "other";
+  startDate: string;
+  endDate: string;
+  hoursPerDay: number;
+  note: string | null;
+  status: "pending" | "approved" | "rejected" | "cancelled";
+  decidedAt: string | null;
+  decisionNote: string | null;
+  createdAt: string;
+  days: number;
+  user?: { id: string; name: string };
+  decidedBy?: { id: string; name: string } | null;
 }
 
 /** Row 97 */
@@ -1542,6 +1560,22 @@ export const api = {
   /** Row 75 */
   submitTimesheet: (week: string, approverId?: string) =>
     request<TimesheetSubmission>(`/time/timesheet/submit`, { method: "POST", body: JSON.stringify({ week, approverId }) }),
+  /** Row 98: time off. */
+  getLeave: (opts: { from?: string; to?: string; all?: boolean } = {}) => {
+    const q = new URLSearchParams();
+    if (opts.from) q.set("from", opts.from);
+    if (opts.to) q.set("to", opts.to);
+    if (opts.all) q.set("all", "true");
+    const qs = q.toString();
+    return request<LeaveRequest[]>(`/time/leave${qs ? "?" + qs : ""}`);
+  },
+  getLeaveCalendar: (from: string, to: string) =>
+    request<{ id: string; userId: string; name: string; kind: string; status: string; startDate: string; endDate: string; days: number }[]>(`/time/leave/calendar?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
+  requestLeave: (body: { kind: LeaveRequest["kind"]; startDate: string; endDate: string; note?: string; hoursPerDay?: number }) =>
+    request<LeaveRequest>(`/time/leave`, { method: "POST", body: JSON.stringify(body) }),
+  decideLeave: (id: string, body: { approve: boolean; note?: string }) =>
+    request<{ id: string; status: string }>(`/time/leave/${id}/decision`, { method: "POST", body: JSON.stringify(body) }),
+  cancelLeave: (id: string) => request<{ id: string; status: string }>(`/time/leave/${id}`, { method: "DELETE" }),
   /** Row 97 */
   getTimesheetBoard: (week: string) => request<TimesheetBoard>(`/time/timesheet/board?week=${encodeURIComponent(week)}`),
   nudgeTimesheet: (userId: string, week: string) => request<{ nudged: string }>(`/time/timesheet/board/nudge`, { method: "POST", body: JSON.stringify({ userId, week }) }),

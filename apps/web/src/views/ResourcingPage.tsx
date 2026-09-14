@@ -26,6 +26,16 @@ export function ResourcingPage() {
     queryFn: () => api.getResourcing(fromIso, WEEKS),
   });
 
+  // Row 98: approved / pending leave over the visible weeks, shown on each person's cells.
+  const { data: leave = [] } = useQuery({
+    queryKey: ["leave-calendar", fromIso],
+    queryFn: () => api.getLeaveCalendar(fromIso, new Date(from.getTime() + WEEKS * 7 * 86_400_000).toISOString()),
+  });
+  const leaveFor = (userId: string, weekStart: string) => {
+    const ws = new Date(weekStart).getTime();
+    const we = ws + 7 * 86_400_000;
+    return leave.filter((l) => l.userId === userId && new Date(l.startDate).getTime() < we && new Date(l.endDate).getTime() + 86_400_000 > ws);
+  };
   const refresh = () => qc.invalidateQueries({ queryKey: ["resourcing"] });
   const setCapacity = useMutation({
     mutationFn: ({ userId, hours }: { userId: string; hours: number }) => api.setCapacity(userId, hours),
@@ -79,13 +89,22 @@ export function ResourcingPage() {
                         )}
                       </td>
                       {m.cells.map((c) => (
-                        <td key={c.weekStart} className="border-b border-border p-1">
+                        <td key={c.weekStart} className="relative border-b border-border p-1">
                           <Cell
                             cell={c}
                             capacity={m.capacity}
                             clickable={isAdmin}
                             onClick={() => setEditing({ userId: m.userId, week: c.weekStart })}
                           />
+                          {leaveFor(m.userId, c.weekStart).map((l) => (
+                            <span
+                              key={l.id}
+                              className={`pointer-events-none absolute left-1.5 top-1.5 rounded px-1 text-[10px] font-medium ${l.status === "approved" ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}
+                              title={`${l.name}: ${l.kind} ${new Date(l.startDate).toLocaleDateString()} → ${new Date(l.endDate).toLocaleDateString()} (${l.status})`}
+                            >
+                              🏖 {l.days}d{l.status === "pending" ? "?" : ""}
+                            </span>
+                          ))}
                         </td>
                       ))}
                     </tr>

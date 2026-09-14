@@ -4,6 +4,7 @@ import { ZodValidationPipe } from "../../common/zod-validation.pipe.js";
 import { TimeService } from "./time.service.js";
 import { TimeCodesService } from "./time-codes.service.js";
 import { TimesheetRemindersService, type ReminderSlot } from "./timesheet-reminders.service.js";
+import { LeaveService, type LeaveKind } from "./leave.service.js";
 import { Auth, Roles } from "../auth/auth.decorators.js";
 import type { AuthContext } from "../auth/auth.types.js";
 
@@ -50,6 +51,14 @@ const codePatchSchema = z.object({ name: z.string().min(1).max(64).optional(), c
 /** Row 75 */
 const submitSchema = z.object({ week: z.string().min(8), approverId: z.string().uuid().optional() });
 const decisionSchema = z.object({ approve: z.boolean(), note: z.string().max(2000).optional() });
+/** Row 98 */
+const leaveSchema = z.object({
+  kind: z.enum(["vacation", "sick", "personal", "other"]),
+  startDate: z.string().min(8),
+  endDate: z.string().min(8),
+  note: z.string().max(2000).optional(),
+  hoursPerDay: z.number().min(0.5).max(24).optional(),
+});
 /** Row 97 */
 const nudgeSchema = z.object({ userId: z.string().uuid(), week: z.string().min(8) });
 /** Row 93 */
@@ -64,7 +73,40 @@ export class TimeController {
     private readonly time: TimeService,
     private readonly codes: TimeCodesService,
     private readonly reminders: TimesheetRemindersService,
+    private readonly leave: LeaveService,
   ) {}
+
+  /* ---- Row 98: time off ---- */
+
+  @Get("leave")
+  listLeave(@Auth() auth: AuthContext, @Query("from") from?: string, @Query("to") to?: string, @Query("all") all?: string) {
+    return this.leave.list(auth.orgId, this.actor(auth), { from, to, all: all === "true" });
+  }
+
+  @Get("leave/calendar")
+  leaveCalendar(@Auth() auth: AuthContext, @Query("from") from: string, @Query("to") to: string) {
+    return this.leave.calendar(auth.orgId, from, to);
+  }
+
+  @Post("leave")
+  @Roles(...WRITERS)
+  @UsePipes(new ZodValidationPipe(leaveSchema))
+  requestLeave(@Auth() auth: AuthContext, @Body() dto: z.infer<typeof leaveSchema>) {
+    return this.leave.create(auth.orgId, this.actor(auth), { ...dto, kind: dto.kind as LeaveKind });
+  }
+
+  @Post("leave/:id/decision")
+  @Roles("owner", "admin")
+  @UsePipes(new ZodValidationPipe(decisionSchema))
+  decideLeave(@Auth() auth: AuthContext, @Param("id") id: string, @Body() dto: z.infer<typeof decisionSchema>) {
+    return this.leave.decide(auth.orgId, this.actor(auth), id, dto.approve, dto.note);
+  }
+
+  @Delete("leave/:id")
+  @Roles(...WRITERS)
+  cancelLeave(@Auth() auth: AuthContext, @Param("id") id: string) {
+    return this.leave.cancel(auth.orgId, this.actor(auth), id);
+  }
 
   /* ---- Row 94: missing-timesheet reminders ---- */
 

@@ -5,6 +5,7 @@ import { useAuth } from "../lib/auth.js";
 import { fmtDayLabel, fmtHours, fmtShortDate, isoDay } from "../lib/format.js";
 import { cn } from "../lib/utils.js";
 import { TimesheetBoard } from "../components/TimesheetBoard.js";
+import { TimeOffPanel } from "../components/TimeOffPanel.js";
 
 const WEEK_MS = 7 * 86_400_000;
 
@@ -211,6 +212,7 @@ export function TimesheetPage() {
             <span className="text-xs text-green-700">Need a change? Ask a project manager to unlock it.</span>
           </div>
         )}
+        {!board && !forUser && <TimeOffPanel isAdmin={isAdmin} />}
         {board ? null : isLoading || !sheet ? (
           <p className="text-sm text-muted-foreground">Loading…</p>
         ) : (

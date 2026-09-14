@@ -372,6 +372,13 @@
       "when": 1789357897350,
       "tag": "0052_timesheet_reminders",
       "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1789358836636,
+      "tag": "0053_leave_requests",
+      "breakpoints": true
     }
   ]
 }

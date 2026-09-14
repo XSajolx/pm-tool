@@ -45,6 +45,9 @@ const VERB_LABEL: Record<string, string> = {
   timesheet_rejected: "sent back your timesheet",
   timesheet_reopened: "unlocked your timesheet for correction",
   timesheet_reminder: "— timesheet reminder",
+  leave_requested: "asked for time off",
+  leave_approved: "approved your time off",
+  leave_rejected: "declined your time off",
   doc_approved: "approved",
   doc_rejected: "sent back",
   proposal_viewed: "— proposal viewed",
@@ -349,7 +352,7 @@ function NotificationList({
                         navigate({ to: "/crm/deals", search: { deal: n.entityId } });
                       } else if (n.entityType === "project") {
                         navigate({ to: "/projects/$projectId", params: { projectId: n.entityId } });
-                      } else if (n.entityType === "timesheet") {
+                      } else if (n.entityType === "timesheet" || n.entityType === "leave") {
                         navigate({ to: "/timesheets" });
                       } else if (n.entityType === "milestone" && typeof n.data?.projectId === "string") {
                         // Row 72: a milestone reminder opens its project.
@@ -518,7 +521,7 @@ function ApprovalCard({ n, approval }: { n: AppNotification; approval: ApprovalM
       qc.invalidateQueries({ queryKey: ["document"] });
     },
   });
-  const kindLabel = approval.kind === "doc_review" ? "Doc review" : approval.kind === "milestone" ? "Milestone sign-off" : "Timesheet";
+  const kindLabel = approval.kind === "doc_review" ? "Doc review" : approval.kind === "milestone" ? "Milestone sign-off" : approval.kind === "leave" ? "Time off" : "Timesheet";
 
   if (approval.status !== "pending") {
     const ok = approval.status === "approved";
