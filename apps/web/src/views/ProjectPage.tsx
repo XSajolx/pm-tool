@@ -11,6 +11,7 @@ import { ProjectTeam } from "../components/ProjectTeam.js";
 import { DocsTab } from "../components/DocsTab.js";
 import { MuteButton } from "../components/MuteButton.js";
 import { FollowButton } from "../components/FollowButton.js";
+import { MilestoneTimeline } from "../components/MilestoneTimeline.js";
 import { cn } from "../lib/utils.js";
 
 /** One project: headline numbers, its lists, who has logged time, recent entries. */
@@ -197,7 +198,7 @@ export function ProjectPage() {
         <ProjectDetails project={project} canManage={canManage} onSaved={refresh} />
         <ProjectTeam projectId={project.id} canManage={canManage} />
         <ProjectStages projectId={project.id} canManage={canManage} />
-        <ProjectMilestones projectId={project.id} canManage={canManage} />
+        <ProjectMilestones projectId={project.id} canManage={canManage} startDate={project.startDate} endDate={project.endDate} />
         {canManage && <ApplyTemplate projectId={project.id} />}
 
         <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
@@ -629,7 +630,7 @@ function StageName({ stage, canEdit, onRename }: { stage: Stage; canEdit: boolea
  * Milestones: target date, linked-task progress, "reached" set by hand,
  * optional client visibility.
  * ------------------------------------------------------------------ */
-function ProjectMilestones({ projectId, canManage }: { projectId: string; canManage: boolean }) {
+function ProjectMilestones({ projectId, canManage, startDate, endDate }: { projectId: string; canManage: boolean; startDate?: string | null; endDate?: string | null }) {
   const qc = useQueryClient();
   const { data: milestones = [] } = useQuery({ queryKey: ["milestones", projectId], queryFn: () => api.getMilestones(projectId) });
   const [name, setName] = useState("");
@@ -663,6 +664,8 @@ function ProjectMilestones({ projectId, canManage }: { projectId: string; canMan
           {milestones.filter((m) => m.reachedAt).length}/{milestones.length} reached
         </span>
       </div>
+      {/* Row 101: target vs reached on one axis */}
+      <MilestoneTimeline milestones={milestones} startDate={startDate} endDate={endDate} />
       {milestones.length ? (
         <ul className="divide-y divide-border">
           {milestones.map((m) => {
