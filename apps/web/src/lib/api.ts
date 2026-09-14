@@ -1786,6 +1786,22 @@ export const api = {
     request<TimesheetSubmission>(`/time/timesheet/submissions/${id}/reopen`, { method: "POST", body: JSON.stringify({ reason }) }),
   getTimesheetEvents: (id: string) =>
     request<{ id: string; kind: string; note: string | null; createdAt: string; actor: { id: string; name: string } | null }[]>(`/time/timesheet/submissions/${id}/events`),
+  /** Row 117: authenticated ZIP download (workspace or one project). */
+  downloadExport: async (projectId?: string) => {
+    const token = await accessToken();
+    const res = await fetch(`${API_URL}/api/export/${projectId ? `projects/${projectId}` : "workspace"}`, {
+      headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), ...(activeOrgId ? { "x-org-id": activeOrgId } : {}) },
+    });
+    if (!res.ok) throw new ApiError(res.status, `API ${res.status}: ${await res.text()}`);
+    const name = /filename="([^"]+)"/.exec(res.headers.get("content-disposition") ?? "")?.[1] ?? "export.zip";
+    const url = URL.createObjectURL(await res.blob());
+    const a = Object.assign(document.createElement("a"), { href: url, download: name });
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    return name;
+  },
   /** Row 115 */
   getAuditLog: (f: { q?: string; entityType?: string; actorId?: string; from?: string; to?: string; cursor?: string; limit?: number }) => {
     const q = new URLSearchParams();
