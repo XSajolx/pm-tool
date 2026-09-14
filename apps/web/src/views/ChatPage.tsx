@@ -6,6 +6,7 @@ import { useAuth } from "../lib/auth.js";
 import { getSocket } from "../lib/socket.js";
 import { ChatActions, PeoplePicker } from "../components/ChatActions.js";
 import { QuickAdd } from "../components/QuickAdd.js";
+import { LinkPreviews, parseAppLink } from "../components/LinkPreview.js";
 import { cn } from "../lib/utils.js";
 
 /**
@@ -402,6 +403,7 @@ function MessageRow({
           </div>
         )}
         {m.body && <MessageBody body={m.body} members={members} meId={meId} />}
+        {m.body && <LinkPreviews text={m.body} compact={compact} />}
         {m.attachments && m.attachments.length > 0 && <AttachmentList files={m.attachments} compact={compact} />}
         {m.task && (
           <Link
@@ -913,21 +915,33 @@ function MessageBody({ body, members, meId }: { body: string; members: ChatMembe
     ])
     .sort((a, b) => b.text.length - a.text.length);
   const alts = ["channel", "here", ...names.map((n) => n.text)].map(escapeRe);
-  const re = new RegExp(`@(${alts.join("|")})(?![\\w])`, "gi");
+  // Mentions (row 41) and URLs (row 48) in one pass so they never overlap.
+  const re = new RegExp(`@(${alts.join("|")})(?![\\w])|(https?://[^\\s<>"'\\])]+)`, "gi");
   const parts: ReactNode[] = [];
   let last = 0;
   let i = 0;
   for (const match of body.matchAll(re)) {
     const start = match.index ?? 0;
     if (start > last) parts.push(body.slice(last, start));
-    const token = match[1]!.toLowerCase();
-    const special = token === "channel" || token === "here";
-    const isMe = names.some((n) => n.text.toLowerCase() === token && n.id === meId);
-    parts.push(
-      <span key={i++} className={cn("rounded px-1 font-medium", isMe || special ? "bg-amber-100 text-amber-900" : "bg-indigo-50 text-indigo-700")}>
-        {match[0]}
-      </span>,
-    );
+    if (match[2]) {
+      const url = match[2];
+      const app = parseAppLink(url);
+      const label = app ? url.replace(/^https?:\/\/[^/]+/, "") : url;
+      parts.push(
+        <a key={i++} href={url} target={app ? undefined : "_blank"} rel="noreferrer" className="break-all text-indigo-600 underline decoration-indigo-300 underline-offset-2 hover:text-indigo-800">
+          {label}
+        </a>,
+      );
+    } else {
+      const token = match[1]!.toLowerCase();
+      const special = token === "channel" || token === "here";
+      const isMe = names.some((n) => n.text.toLowerCase() === token && n.id === meId);
+      parts.push(
+        <span key={i++} className={cn("rounded px-1 font-medium", isMe || special ? "bg-amber-100 text-amber-900" : "bg-indigo-50 text-indigo-700")}>
+          {match[0]}
+        </span>,
+      );
+    }
     last = start + match[0].length;
   }
   if (last < body.length) parts.push(body.slice(last));
