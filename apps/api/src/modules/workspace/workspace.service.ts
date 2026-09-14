@@ -3,6 +3,7 @@ import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
 import {
+  organizations,
   bookmarks,
   documents,
   folders,
@@ -315,6 +316,10 @@ export class WorkspaceService {
 
   async setMemberRole(orgId: string, userId: string, role: Role) {
     if (role === "owner") throw new BadRequestException("Ownership is transferred, not granted");
+    // Row 82: the owner's role only changes through a transfer - there is always exactly one owner.
+    const current = await this.db.query.memberships.findFirst({ where: and(eq(memberships.organizationId, orgId), eq(memberships.userId, userId)) });
+    if (!current) throw new NotFoundException("Member not found");
+    if (current.role === "owner") throw new BadRequestException("Transfer ownership to someone else first");
     const [row] = await this.db
       .update(memberships)
       .set({ role, updatedAt: new Date() })
@@ -322,6 +327,26 @@ export class WorkspaceService {
       .returning();
     if (!row) throw new NotFoundException("Member not found");
     return { userId, role };
+  }
+
+  /**
+   * Row 82: hand the workspace to another member. They become the single
+   * owner; the previous owner steps down to project manager (admin).
+   */
+  async transferOwnership(orgId: string, fromUserId: string, toUserId: string) {
+    if (fromUserId === toUserId) throw new BadRequestException("You already own this workspace");
+    const target = await this.db.query.memberships.findFirst({
+      where: and(eq(memberships.organizationId, orgId), eq(memberships.userId, toUserId)),
+      with: { user: { columns: { authSubject: true, name: true } } },
+    });
+    if (!target) throw new NotFoundException("That person isn't a member of this workspace");
+    if (target.user.authSubject.startsWith("invite|")) throw new BadRequestException("They need to sign in at least once before they can own the workspace");
+    await this.db.transaction(async (tx) => {
+      await tx.update(memberships).set({ role: "admin", updatedAt: new Date() }).where(and(eq(memberships.organizationId, orgId), eq(memberships.userId, fromUserId)));
+      await tx.update(memberships).set({ role: "owner", updatedAt: new Date() }).where(eq(memberships.id, target.id));
+      await tx.update(organizations).set({ ownerId: toUserId, updatedAt: new Date() }).where(eq(organizations.id, orgId));
+    });
+    return { ownerId: toUserId, previousOwnerRole: "admin" as Role };
   }
 
   async removeMember(orgId: string, userId: string) {

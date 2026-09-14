@@ -8,6 +8,7 @@ import { TimerBar } from "./TimerBar.js";
 import { QuickAdd, useQuickAddShortcut } from "./QuickAdd.js";
 import { InviteDialog, NewSpaceDialog } from "./SidebarDialogs.js";
 import { cn } from "../lib/utils.js";
+import { roleLabel } from "../lib/roles.js";
 
 export function Sidebar() {
   const { data: spaces = [] } = useQuery({ queryKey: ["spaces"], queryFn: api.getSpaces });
@@ -112,8 +113,8 @@ export function Sidebar() {
                   {m.organization.name.slice(0, 2).toUpperCase()}
                 </span>
                 <span className="truncate">{m.organization.name}</span>
-                <span className="ml-auto text-[11px] capitalize text-muted-foreground">
-                  {m.role}
+                <span className="ml-auto text-[11px] text-muted-foreground">
+                  {roleLabel(m.role)}
                 </span>
               </button>
             ))}
@@ -226,8 +227,8 @@ export function Sidebar() {
           </span>
           <span className="min-w-0 flex-1">
             <span className="block truncate text-sm text-slate-700">{user?.name}</span>
-            <span className="block truncate text-[11px] capitalize text-muted-foreground">
-              {role ?? "member"}
+            <span className="block truncate text-[11px] text-muted-foreground">
+              {roleLabel(role ?? "member")}
             </span>
           </span>
         </button>

@@ -1636,6 +1636,9 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ role }),
     }),
+  /** Row 82: hand the workspace to another member (owner only). */
+  transferOwnership: (userId: string) =>
+    request<{ ownerId: string }>(`/members/${userId}/transfer-ownership`, { method: "POST" }),
   removeMember: (userId: string) =>
     request<{ userId: string }>(`/members/${userId}`, { method: "DELETE" }),
 

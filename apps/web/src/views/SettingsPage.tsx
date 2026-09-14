@@ -5,6 +5,7 @@ import { ProposalSectionsEditor } from "../components/ProposalSections.js";
 import { DocEditor } from "../components/doc/DocEditor.js";
 import { useAuth } from "../lib/auth.js";
 import { MfaEnroll } from "./MfaPages.js";
+import { ASSIGNABLE_ROLES, PERMISSION_MATRIX, ROLE_DESCRIPTIONS, ROLE_LABELS, type WorkspaceRole } from "../lib/roles.js";
 import { supabase } from "../lib/supabase.js";
 import { PRIORITY } from "../components/ui.js";
 import type { Priority } from "../lib/api.js";
@@ -13,9 +14,10 @@ import type { Priority } from "../lib/api.js";
  * Workspace settings. Sections are added as the roadmap lands; each one is a
  * self-contained panel that owns its own queries.
  */
-type Section = "statuses" | "priorities" | "stages" | "tags" | "templates" | "dealstages" | "proposals" | "snippets" | "branding" | "dockit" | "sso" | "security";
+type Section = "people" | "statuses" | "priorities" | "stages" | "tags" | "templates" | "dealstages" | "proposals" | "snippets" | "branding" | "dockit" | "sso" | "security";
 
 const SECTIONS: { id: Section; label: string; hint: string }[] = [
+  { id: "people", label: "People & roles", hint: "Who's in the workspace and what each role can do" },
   { id: "statuses", label: "Task statuses", hint: "Per space: names, colours, order, done state" },
   { id: "priorities", label: "Priorities", hint: "The four priority levels" },
   { id: "stages", label: "Stage templates", hint: "Default stage sequences for new projects" },
@@ -61,6 +63,7 @@ export function SettingsPage() {
             </p>
           )}
           {section === "statuses" && <StatusSettings canEdit={canEdit} />}
+          {section === "people" && <PeopleSettings canEdit={canEdit} />}
           {section === "priorities" && <PrioritySettings />}
           {section === "stages" && <StageTemplateSettings canEdit={canEdit} />}
           {section === "tags" && <TagSettings canEdit={canEdit} />}
@@ -896,6 +899,143 @@ function BrandingSettings({ canEdit }: { canEdit: boolean }) {
             </div>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * People & roles (row 82)
+ * ------------------------------------------------------------------ */
+function PeopleSettings({ canEdit }: { canEdit: boolean }) {
+  const qc = useQueryClient();
+  const { role: myRole, user, refreshMe } = useAuth();
+  const { data: members = [] } = useQuery({ queryKey: ["members"], queryFn: api.getMembers });
+  const refresh = () => qc.invalidateQueries({ queryKey: ["members"] });
+  const setRole = useMutation({ mutationFn: ({ userId, role }: { userId: string; role: "admin" | "member" | "guest" }) => api.setMemberRole(userId, role), onSuccess: refresh });
+  const remove = useMutation({ mutationFn: api.removeMember, onSuccess: refresh });
+  const transfer = useMutation({
+    mutationFn: api.transferOwnership,
+    onSuccess: async () => {
+      await refresh();
+      await refreshMe();
+    },
+  });
+  const [confirmTransfer, setConfirmTransfer] = useState<string | null>(null);
+  const err = (setRole.error ?? remove.error ?? transfer.error) as Error | null;
+  const sorted = [...members].sort((a, b) => ["owner", "admin", "member", "guest"].indexOf(a.role) - ["owner", "admin", "member", "guest"].indexOf(b.role) || a.name.localeCompare(b.name));
+
+  return (
+    <div>
+      <h1 className="text-lg font-semibold text-slate-900">People &amp; roles</h1>
+      <p className="mt-1 text-sm text-muted-foreground">Everyone has exactly one role in this workspace. Project access on top of that is set per project.</p>
+
+      <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {(Object.keys(ROLE_LABELS) as WorkspaceRole[]).map((r) => (
+          <div key={r} className="rounded-lg border border-border bg-white p-3">
+            <p className="text-sm font-semibold text-slate-800">{ROLE_LABELS[r]}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{ROLE_DESCRIPTIONS[r]}</p>
+            <p className="mt-2 text-[11px] text-slate-500">{members.filter((m) => m.role === r).length} in workspace</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-6 overflow-hidden rounded-lg border border-border bg-white">
+        <table className="w-full text-sm">
+          <thead className="bg-[#fbfbfa] text-xs text-muted-foreground">
+            <tr>
+              <th className="px-3 py-2 text-left font-medium">Person</th>
+              <th className="px-3 py-2 text-left font-medium">Role</th>
+              <th className="px-3 py-2 text-right font-medium" />
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {sorted.map((m) => (
+              <tr key={m.id}>
+                <td className="px-3 py-2">
+                  <div className="flex items-center gap-2.5">
+                    <span className="flex h-7 w-7 items-center justify-center rounded-full bg-indigo-100 text-[10px] font-semibold text-indigo-700">
+                      {m.name.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase()}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="truncate text-slate-800">
+                        {m.name}
+                        {m.id === user?.id && <span className="ml-1.5 text-[11px] text-muted-foreground">(you)</span>}
+                        {m.pending && <span className="ml-2 rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">Invited</span>}
+                      </p>
+                      <p className="truncate text-xs text-muted-foreground">{m.email}</p>
+                    </div>
+                  </div>
+                </td>
+                <td className="px-3 py-2">
+                  {m.role === "owner" || !canEdit ? (
+                    <span className="text-slate-700">{ROLE_LABELS[m.role as WorkspaceRole] ?? m.role}</span>
+                  ) : (
+                    <select value={m.role} onChange={(e) => setRole.mutate({ userId: m.id, role: e.target.value as "admin" | "member" | "guest" })} className="rounded-md border border-border bg-white px-2 py-1 text-xs text-slate-700">
+                      {ASSIGNABLE_ROLES.map((r) => (
+                        <option key={r} value={r}>
+                          {ROLE_LABELS[r]}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </td>
+                <td className="px-3 py-2 text-right text-xs">
+                  {myRole === "owner" && m.role !== "owner" && !m.pending && (
+                    confirmTransfer === m.id ? (
+                      <span className="inline-flex items-center gap-2">
+                        <span className="text-amber-800">Make {m.name.split(" ")[0]} the owner? You become a project manager.</span>
+                        <button type="button" onClick={() => { transfer.mutate(m.id); setConfirmTransfer(null); }} className="rounded-md bg-amber-600 px-2 py-1 font-medium text-white hover:bg-amber-700">
+                          Transfer
+                        </button>
+                        <button type="button" onClick={() => setConfirmTransfer(null)} className="text-slate-500 hover:underline">
+                          Cancel
+                        </button>
+                      </span>
+                    ) : (
+                      <button type="button" onClick={() => setConfirmTransfer(m.id)} className="mr-3 text-slate-500 hover:text-amber-700 hover:underline">
+                        Transfer ownership
+                      </button>
+                    )
+                  )}
+                  {canEdit && m.role !== "owner" && m.id !== user?.id && (
+                    <button type="button" onClick={() => remove.mutate(m.id)} className="text-slate-400 hover:text-red-600" title="Remove from workspace">
+                      Remove
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {err && <p className="mt-2 text-xs text-red-600">{err.message}</p>}
+
+      <h2 className="mt-8 text-sm font-semibold text-slate-800">What each role can do</h2>
+      <div className="mt-2 overflow-x-auto rounded-lg border border-border bg-white">
+        <table className="w-full text-xs">
+          <thead className="bg-[#fbfbfa] text-muted-foreground">
+            <tr>
+              <th className="px-3 py-2 text-left font-medium">Area</th>
+              {(Object.keys(ROLE_LABELS) as WorkspaceRole[]).map((r) => (
+                <th key={r} className="px-3 py-2 text-left font-medium">
+                  {ROLE_LABELS[r]}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {PERMISSION_MATRIX.map((row) => (
+              <tr key={row.area}>
+                <td className="px-3 py-2 text-slate-700">{row.area}</td>
+                <td className="px-3 py-2">{row.owner}</td>
+                <td className="px-3 py-2">{row.admin}</td>
+                <td className="px-3 py-2">{row.member}</td>
+                <td className="px-3 py-2">{row.guest}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );

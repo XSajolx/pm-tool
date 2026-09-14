@@ -1,3 +1,4 @@
+import { ASSIGNABLE_ROLES, ROLE_LABELS } from "../lib/roles.js";
 import { useState, type FormEvent } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -92,9 +93,11 @@ export function InviteDialog({ onClose }: { onClose: () => void }) {
           <input autoFocus type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@company.com" required className={input} />
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name (optional)" className={input} />
           <select value={role} onChange={(e) => setRole(e.target.value as typeof role)} className={input}>
-            <option value="member">Member</option>
-            <option value="admin">Admin</option>
-            <option value="guest">Guest</option>
+            {ASSIGNABLE_ROLES.map((r) => (
+              <option key={r} value={r}>
+                {ROLE_LABELS[r]}
+              </option>
+            ))}
           </select>
         </div>
         <div className="flex items-center gap-3">
@@ -120,7 +123,7 @@ export function InviteDialog({ onClose }: { onClose: () => void }) {
               <p className="truncate text-xs text-muted-foreground">{m.email}</p>
             </div>
             {m.role === "owner" ? (
-              <span className="text-xs capitalize text-muted-foreground">owner</span>
+              <span className="text-xs text-muted-foreground">{ROLE_LABELS.owner}</span>
             ) : (
               <>
                 <select
@@ -128,9 +131,11 @@ export function InviteDialog({ onClose }: { onClose: () => void }) {
                   onChange={(e) => setMemberRole.mutate({ userId: m.id, role: e.target.value as "admin" | "member" | "guest" })}
                   className="rounded-md border border-border bg-white px-2 py-1 text-xs text-slate-700"
                 >
-                  <option value="admin">Admin</option>
-                  <option value="member">Member</option>
-                  <option value="guest">Guest</option>
+                  {ASSIGNABLE_ROLES.map((r) => (
+                    <option key={r} value={r}>
+                      {ROLE_LABELS[r]}
+                    </option>
+                  ))}
                 </select>
                 <button onClick={() => remove.mutate(m.id)} title="Remove from workspace" className="text-slate-300 hover:text-red-500">✕</button>
               </>

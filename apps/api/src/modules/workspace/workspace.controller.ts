@@ -177,6 +177,13 @@ export class WorkspaceController {
     return this.workspace.setMemberRole(auth.orgId, userId, dto.role as Role);
   }
 
+  /** Row 82: only the owner can hand over the workspace; there is always exactly one owner. */
+  @Post("members/:userId/transfer-ownership")
+  @Roles("owner")
+  transferOwnership(@Auth() auth: AuthContext, @Param("userId") userId: string) {
+    return this.workspace.transferOwnership(auth.orgId, auth.userId, userId);
+  }
+
   @Delete("members/:userId")
   @Roles("owner", "admin")
   removeMember(@Auth() auth: AuthContext, @Param("userId") userId: string) {
