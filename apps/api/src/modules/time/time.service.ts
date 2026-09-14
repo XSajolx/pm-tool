@@ -8,7 +8,7 @@ import {
 import { and, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
 import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
-import { lists, memberships, projects, projectStages, tasks, timeEntries, timesheetSubmissions, users } from "../../db/schema.js";
+import { lists, memberships, projects, projectStages, tasks, timeEntries, timesheetEvents, timesheetSubmissions, users } from "../../db/schema.js";
 import { NotificationsService, pendingApproval } from "../notifications/notifications.service.js";
 import type { Role } from "../auth/auth.types.js";
 
@@ -67,8 +67,10 @@ export class TimeService {
     const existing = await this.db.query.timesheetSubmissions.findFirst({
       where: and(eq(timesheetSubmissions.userId, actor.userId), eq(timesheetSubmissions.weekStart, weekStart)),
     });
-    if (existing?.status === "approved") throw new BadRequestException("This week is already approved");
+    if (existing?.status === "approved") throw new BadRequestException("This week is already approved - ask a project manager to unlock it first");
     if (existing?.status === "submitted") throw new BadRequestException("This week is already awaiting approval");
+    // Row 93: a week that was sent back or unlocked comes back as a resubmission.
+    const resubmit = existing?.status === "rejected" || existing?.status === "reopened";
 
     const [sum] = await this.db
       .select({ seconds: sql<number>`coalesce(sum(${timeEntries.durationSeconds}), 0)::int` })
@@ -95,6 +97,7 @@ export class TimeService {
       })
       .returning();
 
+    await this.db.insert(timesheetEvents).values({ submissionId: row!.id, kind: resubmit ? "resubmitted" : "submitted", actorId: actor.userId, note: null });
     const [who] = await this.db.select({ name: users.name }).from(users).where(eq(users.id, actor.userId));
     const hours = Math.round((totalSeconds / 3600) * 10) / 10;
     await this.notifications.notifyDirect({
@@ -123,6 +126,7 @@ export class TimeService {
       .set({ status: approve ? "approved" : "rejected", note: note?.trim() || null, decidedAt: now, decidedById: actor.userId })
       .where(eq(timesheetSubmissions.id, id))
       .returning();
+    await this.db.insert(timesheetEvents).values({ submissionId: id, kind: approve ? "approved" : "rejected", actorId: actor.userId, note: note?.trim() || null });
     await this.notifications.resolveApproval("timesheet", id, approve ? "approved" : "rejected", note, actor.userId);
     if (sub.userId !== actor.userId) {
       await this.notifications.notifyDirect({
@@ -540,6 +544,55 @@ export class TimeService {
   }
 
   /** Project must be in this org; task (if given) must live in the project's space. */
+  /**
+   * Row 93: a project manager unlocks an approved week with a reason. The
+   * hours become editable again, the member is told why, and the week must be
+   * resubmitted and re-approved. Everything lands in the trail.
+   */
+  async reopenTimesheet(orgId: string, actor: Actor, id: string, reason: string) {
+    const sub = await this.db.query.timesheetSubmissions.findFirst({ where: and(eq(timesheetSubmissions.id, id), eq(timesheetSubmissions.organizationId, orgId)) });
+    if (!sub) throw new NotFoundException("Submission not found");
+    if (sub.status !== "approved") throw new BadRequestException("Only an approved week can be unlocked");
+    const admin = actor.role === "owner" || actor.role === "admin";
+    if (!admin && sub.approverId !== actor.userId) throw new ForbiddenException("Only a project manager can unlock an approved week");
+    const why = reason.trim();
+    if (!why) throw new BadRequestException("Say why the week is being unlocked");
+    const now = new Date();
+    const [row] = await this.db
+      .update(timesheetSubmissions)
+      .set({ status: "reopened", note: why, decidedAt: now, decidedById: actor.userId })
+      .where(eq(timesheetSubmissions.id, id))
+      .returning();
+    await this.db.insert(timesheetEvents).values({ submissionId: id, kind: "reopened", actorId: actor.userId, note: why });
+    if (sub.userId !== actor.userId) {
+      await this.notifications.notifyDirect({
+        orgId,
+        receiverId: sub.userId,
+        actorId: actor.userId,
+        entityType: "timesheet",
+        entityId: id,
+        verb: "timesheet_reopened",
+        title: `Timesheet unlocked for correction: week of ${sub.weekStart.toLocaleDateString()}`,
+        body: why,
+        data: { submissionId: id, weekStart: sub.weekStart.toISOString() },
+      });
+    }
+    return row!;
+  }
+
+  /** Row 93: the trail for a week. */
+  async timesheetEvents(orgId: string, actor: Actor, id: string) {
+    const sub = await this.db.query.timesheetSubmissions.findFirst({ where: and(eq(timesheetSubmissions.id, id), eq(timesheetSubmissions.organizationId, orgId)), columns: { userId: true } });
+    if (!sub) throw new NotFoundException("Submission not found");
+    this.resolveUser(actor, sub.userId);
+    const rows = await this.db.query.timesheetEvents.findMany({
+      where: eq(timesheetEvents.submissionId, id),
+      with: { actor: { columns: { id: true, name: true } } },
+      orderBy: [desc(timesheetEvents.createdAt)],
+    });
+    return rows.map((e) => ({ id: e.id, kind: e.kind, note: e.note, createdAt: e.createdAt, actor: e.actor }));
+  }
+
   /**
    * Row 92: once a week is approved its hours are locked - no new entries, edits
    * or deletions for that person in that week until a project manager unlocks it

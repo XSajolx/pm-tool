@@ -2271,3 +2271,27 @@ export const timesheetSubmissionsRelations = relations(timesheetSubmissions, ({ 
   approver: one(users, { fields: [timesheetSubmissions.approverId], references: [users.id], relationName: "timesheet_approver" }),
   decidedBy: one(users, { fields: [timesheetSubmissions.decidedById], references: [users.id], relationName: "timesheet_decider" }),
 }));
+
+/* ------------------------------------------------------------------ *
+ * Timesheet trail (row 93) - every submit / approve / reject / unlock /
+ * resubmit on a week, with who and why. Never edited, never deleted.
+ * ------------------------------------------------------------------ */
+export const timesheetEvents = pgTable(
+  "timesheet_events",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    submissionId: uuid("submission_id")
+      .notNull()
+      .references(() => timesheetSubmissions.id, { onDelete: "cascade" }),
+    /** submitted | resubmitted | approved | rejected | reopened */
+    kind: varchar("kind", { length: 16 }).notNull(),
+    actorId: uuid("actor_id").references(() => users.id, { onDelete: "set null" }),
+    note: text("note"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("timesheet_events_submission_idx").on(t.submissionId)],
+);
+
+export const timesheetEventsRelations = relations(timesheetEvents, ({ one }) => ({
+  actor: one(users, { fields: [timesheetEvents.actorId], references: [users.id] }),
+}));

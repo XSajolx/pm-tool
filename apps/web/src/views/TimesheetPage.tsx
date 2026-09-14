@@ -149,7 +149,12 @@ export function TimesheetPage() {
                 Sent back{sheet.submission.note ? `: ${sheet.submission.note}` : ""}
               </span>
             )}
-            {(!sheet.submission || sheet.submission.status === "rejected") && (
+            {sheet.submission?.status === "reopened" && (
+              <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800" title={sheet.submission.note ?? undefined}>
+                🔓 Unlocked for correction{sheet.submission.note ? `: ${sheet.submission.note}` : ""}
+              </span>
+            )}
+            {(!sheet.submission || sheet.submission.status === "rejected" || sheet.submission.status === "reopened") && (
               <button
                 type="button"
                 onClick={() => submit.mutate()}
@@ -258,6 +263,7 @@ export function TimesheetPage() {
               </tfoot>
             </table>
 
+            {sheet.submission && <TrailPanel submissionId={sheet.submission.id} />}
             {editable && addable.length > 0 && (
               <AddRowPicker
                 projects={addable}
@@ -305,12 +311,58 @@ function HourCell({ value, editable, onCommit }: { value: number; editable: bool
   );
 }
 
+/** Row 93: who did what to this week, and why. */
+function TrailPanel({ submissionId }: { submissionId: string }) {
+  const { data: events = [] } = useQuery({ queryKey: ["timesheet-events", submissionId], queryFn: () => api.getTimesheetEvents(submissionId) });
+  if (!events.length) return null;
+  const label: Record<string, string> = { submitted: "submitted", resubmitted: "resubmitted", approved: "approved", rejected: "sent back", reopened: "unlocked for correction" };
+  return (
+    <div className="border-t border-border px-3 py-2">
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">History</p>
+      <ul className="mt-1 space-y-0.5 text-xs text-slate-600">
+        {events.map((e) => (
+          <li key={e.id}>
+            <span className="text-muted-foreground">{new Date(e.createdAt).toLocaleString()}</span> · <span className="font-medium text-slate-800">{e.actor?.name ?? "System"}</span> {label[e.kind] ?? e.kind}
+            {e.note ? <span className="text-muted-foreground"> — “{e.note}”</span> : null}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 /** Row 92: approve or send back someone's submitted week, right on their timesheet. */
 function ApproveControls({ submission, onDone }: { submission: { id: string; status: string; note: string | null; decidedBy?: { name: string } | null }; onDone: () => void }) {
   const [rejecting, setRejecting] = useState(false);
   const [note, setNote] = useState("");
+  const [unlocking, setUnlocking] = useState(false);
+  const [reason, setReason] = useState("");
   const decide = useMutation({ mutationFn: (body: { approve: boolean; note?: string }) => api.decideTimesheet(submission.id, body), onSuccess: onDone });
-  if (submission.status === "approved") return <span className="ml-auto rounded-full bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700">✓ Approved{submission.decidedBy ? ` by ${submission.decidedBy.name}` : ""}</span>;
+  // Row 93: unlock an approved week with a reason; the member fixes and resubmits.
+  const reopen = useMutation({ mutationFn: () => api.reopenTimesheet(submission.id, reason.trim()), onSuccess: () => { setUnlocking(false); setReason(""); onDone(); } });
+  if (submission.status === "approved")
+    return (
+      <div className="ml-auto flex items-center gap-2">
+        <span className="rounded-full bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700">✓ Approved{submission.decidedBy ? ` by ${submission.decidedBy.name}` : ""}</span>
+        {unlocking ? (
+          <>
+            <input autoFocus value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Why unlock? (required)" className="w-52 rounded-md border border-border px-2 py-1 text-xs" />
+            <button type="button" disabled={!reason.trim() || reopen.isPending} onClick={() => reopen.mutate()} className="rounded-md bg-amber-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-amber-700 disabled:opacity-50">
+              Unlock
+            </button>
+            <button type="button" onClick={() => setUnlocking(false)} className="text-xs text-slate-500 hover:underline">
+              Cancel
+            </button>
+            {reopen.isError && <span className="text-xs text-red-600">{(reopen.error as Error).message}</span>}
+          </>
+        ) : (
+          <button type="button" onClick={() => setUnlocking(true)} className="rounded-md border border-border px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-amber-50 hover:text-amber-800" title="Unlock this approved week so the person can correct it">
+            🔓 Unlock for correction
+          </button>
+        )}
+      </div>
+    );
+  if (submission.status === "reopened") return <span className="ml-auto rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800" title={submission.note ?? undefined}>🔓 Unlocked - waiting for resubmission</span>;
   if (submission.status === "rejected") return <span className="ml-auto rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700" title={submission.note ?? undefined}>Sent back{submission.note ? `: ${submission.note}` : ""}</span>;
   return (
     <div className="ml-auto flex items-center gap-2">

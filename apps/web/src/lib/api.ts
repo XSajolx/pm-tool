@@ -720,7 +720,7 @@ export interface TimesheetSubmission {
   id: string;
   userId: string;
   weekStart: string;
-  status: "submitted" | "approved" | "rejected";
+  status: "submitted" | "approved" | "rejected" | "reopened";
   approverId: string | null;
   totalSeconds: number;
   note: string | null;
@@ -1513,6 +1513,11 @@ export const api = {
   /** Row 75 */
   submitTimesheet: (week: string, approverId?: string) =>
     request<TimesheetSubmission>(`/time/timesheet/submit`, { method: "POST", body: JSON.stringify({ week, approverId }) }),
+  /** Row 93 */
+  reopenTimesheet: (id: string, reason: string) =>
+    request<TimesheetSubmission>(`/time/timesheet/submissions/${id}/reopen`, { method: "POST", body: JSON.stringify({ reason }) }),
+  getTimesheetEvents: (id: string) =>
+    request<{ id: string; kind: string; note: string | null; createdAt: string; actor: { id: string; name: string } | null }[]>(`/time/timesheet/submissions/${id}/events`),
   decideTimesheet: (id: string, body: { approve: boolean; note?: string }) =>
     request<TimesheetSubmission>(`/time/timesheet/submissions/${id}/decision`, { method: "POST", body: JSON.stringify(body) }),
   setTimesheetCell: (body: { projectId: string; taskId?: string | null; date: string; hours: number; userId?: string }) =>
