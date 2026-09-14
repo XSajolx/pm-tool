@@ -496,6 +496,38 @@ export interface PortalProject {
   docs: { id: string; title: string; icon: string | null; updatedAt: string; reviewStatus: string; shareToken: string | null; clientApprovedAt?: string | null; clientApprovedBy?: string | null; clientDecision?: "approved" | "changes_requested" | null }[];
   generatedAt: string;
 }
+/** Row 120 */
+export interface PortalAccess {
+  id: string;
+  email: string;
+  name: string | null;
+  contactId: string | null;
+  projectIds: string[];
+  status: "active" | "expired" | "revoked";
+  expiresAt: string | null;
+  revokedAt: string | null;
+  invitedBy: { id: string; name: string } | null;
+  lastSentAt: string | null;
+  lastOpenedAt: string | null;
+  createdAt: string;
+  link: string;
+}
+/** Row 122 */
+export interface PortalEvent {
+  id: string;
+  kind: "opened" | "viewed_doc" | "approved" | "changes_requested" | string;
+  who: string;
+  entityType: string | null;
+  entityId: string | null;
+  label: string | null;
+  note: string | null;
+  createdAt: string;
+}
+export interface PortalHome {
+  guest: { name: string | null; email: string; expiresAt: string | null };
+  organization: { name: string; brandColor: string; brandLogoUrl: string | null; brandFooter: string | null } | null;
+  projects: { id: string; name: string; color: string; status: string }[];
+}
 export interface PortalDoc {
   id: string;
   title: string;
@@ -553,6 +585,11 @@ export interface Milestone {
   progress: { total: number; done: number };
   /** Row 106: inside the risk window with open linked tasks. */
   atRisk?: boolean;
+  /** Row 121 */
+  clientDecision?: "approved" | "changes_requested" | null;
+  clientDecidedAt?: string | null;
+  clientDecidedBy?: string | null;
+  clientDecisionNote?: string | null;
 }
 export interface AtRiskMilestone {
   id: string;
@@ -1816,6 +1853,20 @@ export const api = {
     request<TimesheetSubmission>(`/time/timesheet/submissions/${id}/reopen`, { method: "POST", body: JSON.stringify({ reason }) }),
   getTimesheetEvents: (id: string) =>
     request<{ id: string; kind: string; note: string | null; createdAt: string; actor: { id: string; name: string } | null }[]>(`/time/timesheet/submissions/${id}/events`),
+  /** Row 120 */
+  getPortalAccess: (projectId?: string) => request<PortalAccess[]>(`/portal/access${projectId ? `?projectId=${projectId}` : ""}`),
+  createPortalAccess: (body: { email: string; name?: string | null; projectIds: string[]; expiresAt?: string | null; contactId?: string | null; send?: boolean }) =>
+    request<PortalAccess>(`/portal/access`, { method: "POST", body: JSON.stringify(body) }),
+  resendPortalAccess: (id: string) => request<PortalAccess>(`/portal/access/${id}/resend`, { method: "POST" }),
+  revokePortalAccess: (id: string) => request<{ id: string; revoked: boolean }>(`/portal/access/${id}`, { method: "DELETE" }),
+  /** Row 122 */
+  getPortalEngagement: (projectId: string) => request<PortalEvent[]>(`/portal/engagement/${projectId}`),
+  /** Guest side (public, token is the credential). */
+  getGuestPortal: (token: string) => publicRequest<PortalHome>(`/public/portal/${token}`),
+  getGuestProject: (token: string, projectId: string) => publicRequest<PortalProject>(`/public/portal/${token}/projects/${projectId}`),
+  getGuestDoc: (token: string, projectId: string, docId: string) => publicRequest<PortalDoc>(`/public/portal/${token}/projects/${projectId}/docs/${docId}`),
+  guestDecide: (token: string, projectId: string, body: { kind: "milestone" | "document"; id: string; decision: "approved" | "changes_requested"; note?: string }) =>
+    publicRequest<{ ok: boolean; decision: string; decidedAt: string }>(`/public/portal/${token}/projects/${projectId}/decisions`, { method: "POST", body: JSON.stringify(body) }),
   /** Row 118 */
   getPortalPreview: (projectId: string) => request<PortalProject>(`/portal/preview/${projectId}`),
   getPortalPreviewDoc: (projectId: string, docId: string) => request<PortalDoc>(`/portal/preview/${projectId}/docs/${docId}`),

@@ -96,6 +96,8 @@ const TYPE_FOR_VERB: Record<string, NotifType> = {
   leave_approved: "approvals",
   leave_rejected: "approvals",
   milestone_signoff_requested: "approvals",
+  client_approved: "approvals",
+  client_changes_requested: "approvals",
   milestone_approved: "approvals",
   milestone_rejected: "approvals",
   due_soon: "reminders",

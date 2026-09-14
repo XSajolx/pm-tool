@@ -41,6 +41,8 @@ const VERB_LABEL: Record<string, string> = {
   integration_failing: "— connection needs attention",
   doc_review_requested: "asked you to review",
   milestone_signoff_requested: "asked you to sign off",
+  client_approved: "— client approved",
+  client_changes_requested: "— client requested changes",
   milestone_approved: "signed off",
   milestone_rejected: "declined sign-off on",
   timesheet_submitted: "submitted a timesheet",

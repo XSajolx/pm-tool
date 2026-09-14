@@ -14,6 +14,7 @@ import { FollowButton } from "../components/FollowButton.js";
 import { MilestoneTimeline } from "../components/MilestoneTimeline.js";
 import { ProjectActivityFeed } from "../components/ProjectActivityFeed.js";
 import { CustomFieldsPanel } from "../components/CustomFieldsPanel.js";
+import { ClientAccessCard } from "../components/ClientAccessCard.js";
 import { cn } from "../lib/utils.js";
 
 /** One project: headline numbers, its lists, who has logged time, recent entries. */
@@ -291,6 +292,9 @@ export function ProjectPage() {
 
         {/* Row 102 */}
         <ProjectActivityFeed projectId={project.id} />
+
+        {/* Rows 120 + 122 */}
+        <ClientAccessCard projectId={project.id} canManage={canManage} />
 
         <InboundEmailCard projectId={project.id} canManage={canManage} />
 
@@ -795,6 +799,11 @@ function ProjectMilestones({ projectId, canManage, startDate, endDate }: { proje
                     {m.progress.done}/{m.progress.total} tasks done
                     {m.atRisk && (
                       <span className="ml-1.5 rounded-full bg-red-50 px-1.5 py-0.5 text-[10px] font-medium text-red-700" title="Target within the risk window and linked tasks still open">⚠ At risk</span>
+                    )}
+                    {m.clientDecision && (
+                      <span className={`ml-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-medium ${m.clientDecision === "approved" ? "bg-green-50 text-green-700" : "bg-amber-50 text-amber-800"}`} title={`${m.clientDecidedBy ?? "Client"}${m.clientDecidedAt ? ` · ${new Date(m.clientDecidedAt).toLocaleString()}` : ""}${m.clientDecisionNote ? ` · ${m.clientDecisionNote}` : ""}`}>
+                        {m.clientDecision === "approved" ? "✓ Client approved" : "Client: changes requested"}
+                      </span>
                     )}
                   </p>
                 </div>

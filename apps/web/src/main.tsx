@@ -42,6 +42,7 @@ import { DocsPage, DocPage } from "./views/DocsPage.js";
 import { DashboardsPage } from "./views/DashboardsPage.js";
 import { OverviewPage } from "./views/OverviewPage.js";
 import { PortalPreviewPage } from "./views/PortalPreviewPage.js";
+import { PortalPage } from "./views/PortalPage.js";
 import { TaskOpenPage } from "./views/TaskOpenPage.js";
 import { SpaceOverviewPage } from "./views/SpaceOverviewPage.js";
 import { AuthPage } from "./views/AuthPage.js";
@@ -63,7 +64,8 @@ function Protected() {
   const { pathname } = useLocation();
 
   // Client-facing pages (proposal links, rows 58-59) live outside the login gate.
-  if (pathname.startsWith("/p/") || pathname.startsWith("/d/") || pathname === "/reset-password") return <Outlet />;
+  // Rows 65/55/79/120: public pages - share links, proposals, password reset, the client portal (but not the team's preview).
+  if (pathname.startsWith("/p/") || pathname.startsWith("/d/") || pathname === "/reset-password" || (pathname.startsWith("/portal/") && !pathname.startsWith("/portal/preview/"))) return <Outlet />;
 
   if (loading) return <Splash />;
   if (!session) return <AuthPage />;
@@ -198,6 +200,7 @@ const docRoute = createRoute({ getParentRoute: () => rootRoute, path: "/docs/$do
 const dashboardsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/dashboards", component: DashboardsPage });
 const overviewRoute = createRoute({ getParentRoute: () => rootRoute, path: "/overview", component: OverviewPage });
 const portalPreviewRoute = createRoute({ getParentRoute: () => rootRoute, path: "/portal/preview/$projectId", component: PortalPreviewPage });
+const portalRoute = createRoute({ getParentRoute: () => rootRoute, path: "/portal/$token", component: PortalPage });
 const spaceRoute = createRoute({ getParentRoute: () => rootRoute, path: "/s/$spaceId", component: SpaceOverviewPage });
 const chatIndexRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -297,6 +300,7 @@ const routeTree = rootRoute.addChildren([
   dashboardsRoute,
   overviewRoute,
   portalPreviewRoute,
+  portalRoute,
   spaceRoute,
   settingsRoute,
   myWorkRoute,

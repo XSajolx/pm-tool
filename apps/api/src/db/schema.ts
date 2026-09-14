@@ -1280,6 +1280,59 @@ export const integrationsRelations = relations(integrations, ({ one }) => ({
 }));
 
 /**
+ * Row 120: a client guest's access link - one token per (person, set of
+ * projects), with an expiry and one-click revoke. No account needed.
+ */
+export const portalAccess = pgTable(
+  "portal_access",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    email: varchar("email", { length: 255 }).notNull(),
+    name: varchar("name", { length: 160 }),
+    contactId: uuid("contact_id").references(() => contacts.id, { onDelete: "set null" }),
+    projectIds: jsonb("project_ids").$type<string[]>().notNull().default([]),
+    token: varchar("token", { length: 64 }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    invitedById: uuid("invited_by_id").references(() => users.id, { onDelete: "set null" }),
+    lastSentAt: timestamp("last_sent_at", { withTimezone: true }),
+    lastOpenedAt: timestamp("last_opened_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex("portal_access_token_uq").on(t.token), index("portal_access_org_idx").on(t.organizationId)],
+);
+
+/** Row 122: what clients did on the portal - opened it, viewed a doc, approved something. */
+export const portalEvents = pgTable(
+  "portal_events",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    accessId: uuid("access_id").references(() => portalAccess.id, { onDelete: "set null" }),
+    projectId: uuid("project_id").references(() => projects.id, { onDelete: "cascade" }),
+    email: varchar("email", { length: 255 }),
+    /** opened | viewed_doc | approved | changes_requested */
+    kind: varchar("kind", { length: 24 }).notNull(),
+    entityType: varchar("entity_type", { length: 24 }),
+    entityId: uuid("entity_id"),
+    label: varchar("label", { length: 255 }),
+    note: text("note"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("portal_events_project_idx").on(t.projectId, t.createdAt)],
+);
+
+export const portalAccessRelations = relations(portalAccess, ({ one }) => ({
+  invitedBy: one(users, { fields: [portalAccess.invitedById], references: [users.id] }),
+  contact: one(contacts, { fields: [portalAccess.contactId], references: [contacts.id] }),
+}));
+
+/**
  * Row 114: custom fields. A definition per (entity type, name); values stored
  * as JSON so one table serves text, number, date, select, checkbox, url, user.
  */
@@ -1396,6 +1449,11 @@ export const milestones = pgTable(
     signoffNote: text("signoff_note"),
     /** Shown on the client portal / share pages when true. */
     clientVisible: boolean("client_visible").notNull().default(false),
+    /** Row 121: the client's one-click decision from the portal. */
+    clientDecision: varchar("client_decision", { length: 24 }),
+    clientDecidedAt: timestamp("client_decided_at", { withTimezone: true }),
+    clientDecidedBy: varchar("client_decided_by", { length: 255 }),
+    clientDecisionNote: text("client_decision_note"),
     createdById: uuid("created_by_id").references(() => users.id),
     ...timestamps,
   },
@@ -1969,6 +2027,11 @@ export const documents = pgTable(
     effectiveFrom: timestamp("effective_from", { withTimezone: true }),
     /** Row 119: listed on the client portal (internal blocks stripped) when true. */
     clientVisible: boolean("client_visible").notNull().default(false),
+    /** Row 121 */
+    clientDecision: varchar("client_decision", { length: 24 }),
+    clientDecidedAt: timestamp("client_decided_at", { withTimezone: true }),
+    clientDecidedBy: varchar("client_decided_by", { length: 255 }),
+    clientDecisionNote: text("client_decision_note"),
     /** Row 65: public read-only link (internal-only blocks stripped). Null = not shared. */
     shareToken: varchar("share_token", { length: 64 }),
     sharedAt: timestamp("shared_at", { withTimezone: true }),
