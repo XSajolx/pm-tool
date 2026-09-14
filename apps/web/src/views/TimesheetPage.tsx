@@ -19,7 +19,8 @@ export function TimesheetPage() {
 
   const [weekOf, setWeekOf] = useState(() => new Date());
   const [forUser, setForUser] = useState<string>("");
-  const [extraRows, setExtraRows] = useState<string[]>([]);
+  // Row 88: hand-added rows are project or project+task.
+  const [extraRows, setExtraRows] = useState<{ projectId: string; taskId: string | null; taskTitle?: string | null }[]>([]);
 
   const { data: members = [] } = useQuery({ queryKey: ["members"], queryFn: api.getMembers, enabled: isAdmin });
   const { data: projects = [] } = useQuery({ queryKey: ["projects"], queryFn: () => api.getProjects() });
@@ -31,7 +32,7 @@ export function TimesheetPage() {
   });
 
   const setCell = useMutation({
-    mutationFn: (v: { projectId: string; date: string; hours: number }) =>
+    mutationFn: (v: { projectId: string; taskId?: string | null; date: string; hours: number }) =>
       api.setTimesheetCell({ ...v, userId: forUser || undefined }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["timesheet"] });
@@ -49,17 +50,18 @@ export function TimesheetPage() {
   // Rows = projects with time this week, plus any the user added by hand.
   const rows = useMemo(() => {
     const base = sheet?.rows ?? [];
-    const have = new Set(base.map((r) => r.projectId));
+    const key = (r: { projectId: string; taskId: string | null }) => `${r.projectId}:${r.taskId ?? ""}`;
+    const have = new Set(base.map(key));
     const added = extraRows
-      .filter((id) => !have.has(id))
-      .map((id) => {
-        const p = projects.find((x) => x.id === id);
-        return { projectId: id, projectName: p?.name ?? "Project", color: p?.color ?? "#94a3b8", hours: [0, 0, 0, 0, 0, 0, 0], total: 0 };
+      .filter((x) => !have.has(key(x)))
+      .map((x) => {
+        const p = projects.find((pr) => pr.id === x.projectId);
+        return { projectId: x.projectId, projectName: p?.name ?? "Project", color: p?.color ?? "#94a3b8", taskId: x.taskId, taskTitle: x.taskTitle ?? null, taskReference: null, hours: [0, 0, 0, 0, 0, 0, 0], total: 0 };
       });
     return [...base, ...added];
   }, [sheet, extraRows, projects]);
 
-  const addable = projects.filter((p) => p.status === "active" && !rows.some((r) => r.projectId === p.id));
+  const addable = projects.filter((p) => p.status === "active");
   const editable = !forUser || forUser === user?.id || isAdmin;
   const weekStart = sheet ? new Date(sheet.weekStart) : null;
   const weekEnd = weekStart ? new Date(weekStart.getTime() + 6 * 86_400_000) : null;
@@ -78,6 +80,17 @@ export function TimesheetPage() {
           {weekStart && weekEnd && (
             <span className="ml-2 text-sm text-slate-600">
               {fmtShortDate(weekStart.toISOString())} – {fmtShortDate(weekEnd.toISOString())}
+            </span>
+          )}
+          {sheet && (
+            <span
+              className={cn("ml-3 inline-flex items-center gap-2 rounded-full border px-2.5 py-0.5 text-xs font-medium tabular-nums", sheet.grandTotal >= sheet.expectedHours ? "border-green-200 bg-green-50 text-green-700" : "border-border bg-white text-slate-700")}
+              title="Logged this week vs your expected weekly hours"
+            >
+              {fmtHours(sheet.grandTotal)}/{sheet.expectedHours}h
+              <span className="h-1.5 w-16 overflow-hidden rounded-full bg-slate-100">
+                <span className="block h-full rounded-full bg-indigo-500" style={{ width: `${Math.min(100, Math.round((sheet.grandTotal / Math.max(1, sheet.expectedHours)) * 100))}%` }} />
+              </span>
             </span>
           )}
         </div>
@@ -141,11 +154,19 @@ export function TimesheetPage() {
               </thead>
               <tbody>
                 {rows.map((r) => (
-                  <tr key={r.projectId} className="group">
+                  <tr key={`${r.projectId}:${r.taskId ?? ""}`} className="group">
                     <td className="border-b border-r border-border px-3 py-1.5">
                       <span className="flex items-center gap-2">
                         <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: r.color }} />
-                        <span className="truncate font-medium text-slate-800">{r.projectName}</span>
+                        <span className="min-w-0">
+                          <span className="block truncate font-medium text-slate-800">{r.projectName}</span>
+                          {r.taskId && (
+                            <span className="block truncate text-[11px] text-muted-foreground" title={r.taskTitle ?? undefined}>
+                              {r.taskReference ? `${r.taskReference} · ` : "↳ "}
+                              {r.taskTitle}
+                            </span>
+                          )}
+                        </span>
                       </span>
                     </td>
                     {r.hours.map((h, i) => (
@@ -153,7 +174,7 @@ export function TimesheetPage() {
                         <HourCell
                           value={h}
                           editable={editable}
-                          onCommit={(v) => setCell.mutate({ projectId: r.projectId, date: sheet.days[i]!, hours: v })}
+                          onCommit={(v) => setCell.mutate({ projectId: r.projectId, taskId: r.taskId, date: sheet.days[i]!, hours: v })}
                         />
                       </td>
                     ))}
@@ -184,18 +205,7 @@ export function TimesheetPage() {
             </table>
 
             {editable && addable.length > 0 && (
-              <div className="border-t border-border px-3 py-2">
-                <select
-                  value=""
-                  onChange={(e) => e.target.value && setExtraRows((x) => [...x, e.target.value])}
-                  className="rounded-md border border-border bg-white px-2 py-1 text-xs text-slate-700"
-                >
-                  <option value="">+ Add project row…</option>
-                  {addable.map((p) => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
-                  ))}
-                </select>
-              </div>
+              <AddRowPicker projects={addable} onAdd={(row) => setExtraRows((x) => [...x, row])} />
             )}
           </div>
         )}
@@ -232,6 +242,48 @@ function HourCell({ value, editable, onCommit }: { value: number; editable: bool
       onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
       className="h-9 w-full bg-transparent text-center text-sm tabular-nums text-slate-800 outline-none placeholder:text-slate-300 focus:bg-indigo-50"
     />
+  );
+}
+
+/** Row 88: add a row for a project, or for one task inside it. */
+function AddRowPicker({ projects, onAdd }: { projects: { id: string; name: string }[]; onAdd: (row: { projectId: string; taskId: string | null; taskTitle?: string | null }) => void }) {
+  const [projectId, setProjectId] = useState("");
+  const [taskId, setTaskId] = useState("");
+  const { data: tasks = [] } = useQuery({ queryKey: ["pickable-tasks", projectId], queryFn: () => api.getPickableTasks(projectId), enabled: Boolean(projectId) });
+  const sel = "rounded-md border border-border bg-white px-2 py-1 text-xs text-slate-700";
+  return (
+    <div className="flex flex-wrap items-center gap-2 border-t border-border px-3 py-2">
+      <select value={projectId} onChange={(e) => { setProjectId(e.target.value); setTaskId(""); }} className={sel}>
+        <option value="">+ Add row for project…</option>
+        {projects.map((p) => (
+          <option key={p.id} value={p.id}>{p.name}</option>
+        ))}
+      </select>
+      {projectId && (
+        <select value={taskId} onChange={(e) => setTaskId(e.target.value)} className={sel} title="Optional: a task inside the project">
+          <option value="">Whole project</option>
+          {tasks.map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.reference ? `${t.reference} ` : ""}
+              {t.title}
+            </option>
+          ))}
+        </select>
+      )}
+      {projectId && (
+        <button
+          type="button"
+          onClick={() => {
+            onAdd({ projectId, taskId: taskId || null, taskTitle: tasks.find((t) => t.id === taskId)?.title ?? null });
+            setProjectId("");
+            setTaskId("");
+          }}
+          className="rounded-md bg-indigo-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-indigo-700"
+        >
+          Add row
+        </button>
+      )}
+    </div>
   );
 }
 

@@ -724,9 +724,11 @@ export interface Timesheet {
   submission: TimesheetSubmission | null;
   weekStart: string;
   days: string[];
-  rows: { projectId: string; projectName: string; color: string; hours: number[]; total: number }[];
+  rows: { projectId: string; projectName: string; color: string; taskId: string | null; taskTitle: string | null; taskReference: string | null; hours: number[]; total: number }[];
   totals: number[];
   grandTotal: number;
+  /** Row 88: the person's weekly capacity, for "29/40". */
+  expectedHours: number;
 }
 
 export interface ProjectTimeSummary {
@@ -1496,7 +1498,7 @@ export const api = {
     request<TimesheetSubmission>(`/time/timesheet/submit`, { method: "POST", body: JSON.stringify({ week, approverId }) }),
   decideTimesheet: (id: string, body: { approve: boolean; note?: string }) =>
     request<TimesheetSubmission>(`/time/timesheet/submissions/${id}/decision`, { method: "POST", body: JSON.stringify(body) }),
-  setTimesheetCell: (body: { projectId: string; date: string; hours: number; userId?: string }) =>
+  setTimesheetCell: (body: { projectId: string; taskId?: string | null; date: string; hours: number; userId?: string }) =>
     request<{ ok: boolean }>(`/time/timesheet`, { method: "PUT", body: JSON.stringify(body) }),
   getProjectTimeSummary: (projectId: string) =>
     request<ProjectTimeSummary>(`/time/summary/${projectId}`),

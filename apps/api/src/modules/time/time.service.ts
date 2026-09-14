@@ -315,36 +315,45 @@ export class TimeService {
         gte(timeEntries.startedAt, weekStart),
         lt(timeEntries.startedAt, weekEnd),
       ),
-      with: { project: true },
+      with: { project: true, task: { columns: { id: true, title: true, reference: true } } },
     });
 
+    // Row 88: one row per project *or* project+task, so a week can be typed in straight.
     const byProject = new Map<
       string,
-      { projectId: string; projectName: string; color: string; hours: number[] }
+      { projectId: string; projectName: string; color: string; taskId: string | null; taskTitle: string | null; taskReference: string | null; hours: number[] }
     >();
     for (const r of rows) {
       const day = Math.floor((r.startedAt.getTime() - weekStart.getTime()) / DAY_MS);
       const seconds = r.endedAt
         ? r.durationSeconds
         : Math.round((Date.now() - r.startedAt.getTime()) / 1000);
-      let row = byProject.get(r.projectId);
+      const key = `${r.projectId}:${r.taskId ?? ""}`;
+      let row = byProject.get(key);
       if (!row) {
         row = {
           projectId: r.projectId,
           projectName: r.project.name,
           color: r.project.color,
+          taskId: r.taskId ?? null,
+          taskTitle: r.task?.title ?? null,
+          taskReference: r.task?.reference ?? null,
           hours: [0, 0, 0, 0, 0, 0, 0],
         };
-        byProject.set(r.projectId, row);
+        byProject.set(key, row);
       }
       row.hours[day] = (row.hours[day] ?? 0) + seconds / 3600;
     }
+    // Row 88: "29/40" in the header - expected hours come from the person's weekly capacity.
+    const membership = await this.db.query.memberships.findFirst({ where: and(eq(memberships.organizationId, orgId), eq(memberships.userId, userId)), columns: { weeklyCapacityHours: true } });
 
-    const rowsOut = [...byProject.values()].map((r) => ({
-      ...r,
-      hours: r.hours.map((h) => round2(h)),
-      total: round2(r.hours.reduce((a, b) => a + b, 0)),
-    }));
+    const rowsOut = [...byProject.values()]
+      .map((r) => ({
+        ...r,
+        hours: r.hours.map((h) => round2(h)),
+        total: round2(r.hours.reduce((a, b) => a + b, 0)),
+      }))
+      .sort((a, b) => a.projectName.localeCompare(b.projectName) || (a.taskId ? 1 : 0) - (b.taskId ? 1 : 0) || (a.taskTitle ?? "").localeCompare(b.taskTitle ?? ""));
     const totals = [0, 1, 2, 3, 4, 5, 6].map((i) =>
       round2(rowsOut.reduce((a, r) => a + (r.hours[i] ?? 0), 0)),
     );
@@ -363,6 +372,7 @@ export class TimeService {
       rows: rowsOut,
       totals,
       grandTotal: round2(totals.reduce((a, b) => a + b, 0)),
+      expectedHours: membership?.weeklyCapacityHours ?? 40,
     };
   }
 
@@ -375,10 +385,12 @@ export class TimeService {
   async setTimesheetCell(
     orgId: string,
     actor: Actor,
-    dto: { projectId: string; date: string; hours: number; userId?: string },
+    dto: { projectId: string; taskId?: string | null; date: string; hours: number; userId?: string },
   ) {
     const userId = this.resolveUser(actor, dto.userId) ?? actor.userId;
-    await this.assertProjectAndTask(orgId, dto.projectId);
+    await this.assertProjectAndTask(orgId, dto.projectId, dto.taskId ?? undefined);
+    // Row 88: a cell is (project, task-or-none, day).
+    const taskMatch = dto.taskId ? eq(timeEntries.taskId, dto.taskId) : isNull(timeEntries.taskId);
 
     const day = new Date(dto.date);
     const dayStart = new Date(Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate()));
@@ -389,6 +401,7 @@ export class TimeService {
         eq(timeEntries.organizationId, orgId),
         eq(timeEntries.userId, userId),
         eq(timeEntries.projectId, dto.projectId),
+        taskMatch,
         eq(timeEntries.source, "timesheet"),
         gte(timeEntries.startedAt, dayStart),
         lt(timeEntries.startedAt, dayEnd),
@@ -405,6 +418,7 @@ export class TimeService {
           eq(timeEntries.organizationId, orgId),
           eq(timeEntries.userId, userId),
           eq(timeEntries.projectId, dto.projectId),
+          taskMatch,
           sql`${timeEntries.source} <> 'timesheet'`,
           gte(timeEntries.startedAt, dayStart),
           lt(timeEntries.startedAt, dayEnd),
@@ -430,6 +444,7 @@ export class TimeService {
         organizationId: orgId,
         userId,
         projectId: dto.projectId,
+        taskId: dto.taskId ?? null,
         startedAt,
         endedAt,
         durationSeconds: seconds,

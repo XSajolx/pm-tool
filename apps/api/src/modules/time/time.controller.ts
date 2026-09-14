@@ -31,6 +31,8 @@ const updateSchema = z.object({
 
 const cellSchema = z.object({
   projectId: z.string().uuid(),
+  /** Row 88: optional task row. */
+  taskId: z.string().uuid().nullable().optional(),
   /** Any ISO date inside the target day. */
   date: z.string().min(8),
   hours: z.number().min(0).max(24),
