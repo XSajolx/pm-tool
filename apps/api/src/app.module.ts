@@ -26,6 +26,7 @@ import { CustomFieldsModule } from "./modules/custom-fields/custom-fields.module
 import { ExportModule } from "./modules/export/export.module.js";
 import { PortalModule } from "./modules/portal/portal.module.js";
 import { SearchModule } from "./modules/search/search.module.js";
+import { LinkedFilesModule } from "./modules/linked-files/linked-files.module.js";
 
 @Module({
   imports: [
@@ -55,6 +56,7 @@ import { SearchModule } from "./modules/search/search.module.js";
     ExportModule,
     PortalModule,
     SearchModule,
+    LinkedFilesModule,
   ],
   controllers: [HealthController],
 })

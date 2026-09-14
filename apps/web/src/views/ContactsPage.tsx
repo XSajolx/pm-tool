@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api.js";
 import { CrmField, input } from "./CompaniesPage.js";
 import { CustomFieldsPanel } from "../components/CustomFieldsPanel.js";
+import { LinkedFiles } from "../components/LinkedFiles.js";
 
 /** People. Each optionally belongs to a company; one per company can be primary. */
 export function ContactsPage() {
@@ -66,11 +67,9 @@ export function ContactsPage() {
                     <td className="px-4 py-2.5 text-slate-600">{c.email ?? "—"}</td>
                     <td className="px-4 py-2.5 text-slate-600">{c.phone ?? "—"}</td>
                     <td className="px-2 py-2.5 text-right">
-                      {hasContactFields && (
-                        <button type="button" onClick={() => setOpenId(openId === c.id ? null : c.id)} className="text-xs text-indigo-700 hover:underline" title="Custom fields">
-                          {openId === c.id ? "Hide" : "Fields"}
-                        </button>
-                      )}
+                      <button type="button" onClick={() => setOpenId(openId === c.id ? null : c.id)} className="text-xs text-indigo-700 hover:underline" title={hasContactFields ? "Custom fields and linked files" : "Linked files"}>
+                        {openId === c.id ? "Hide" : "More"}
+                      </button>
                     </td>
                   </tr>
                   {openId === c.id && (
@@ -78,6 +77,8 @@ export function ContactsPage() {
                       <td colSpan={6} className="px-6 py-3">
                         {/* Row 114 */}
                         <CustomFieldsPanel entityType="contact" entityId={c.id} layout="grid" />
+                        {/* Row 124 */}
+                        <div className="mt-3"><LinkedFiles entityType="contact" entityId={c.id} compact /></div>
                       </td>
                     </tr>
                   )}

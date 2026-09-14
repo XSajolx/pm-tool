@@ -7,6 +7,7 @@ import { TaskCollaboration } from "./TaskCollaboration.js";
 import { CrmLinkField, CycleField, MilestoneField, StageField, SubtasksSection, TagsField, TrackTimeButton } from "./TaskExtras.js";
 import { DocsTab } from "./DocsTab.js";
 import { CustomFieldsPanel } from "./CustomFieldsPanel.js";
+import { LinkedFiles } from "./LinkedFiles.js";
 import { useEscape } from "../lib/useEscape.js";
 import { useAuth } from "../lib/auth.js";
 import { fmtDuration } from "../lib/format.js";
@@ -194,6 +195,9 @@ export function TaskDetail({ taskId, listId, spaceId, statuses, members, onClose
                   Visible on client portal
                 </label>
               </Field>
+
+              {/* Row 124 */}
+              <LinkedFiles entityType="task" entityId={task.id} compact />
 
               <Field label="Assignees">
                 <div className="flex flex-wrap items-center gap-1.5">

@@ -1280,6 +1280,41 @@ export const integrationsRelations = relations(integrations, ({ one }) => ({
 }));
 
 /**
+ * Row 124: a Drive / Dropbox (or any) file linked to a task, doc, project,
+ * contact or company. The file stays where it lives; we keep the link plus
+ * the metadata the provider told us last time we looked.
+ */
+export const linkedFiles = pgTable(
+  "linked_files",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    /** task | document | project | contact | company */
+    entityType: varchar("entity_type", { length: 16 }).notNull(),
+    entityId: uuid("entity_id").notNull(),
+    /** google_drive | dropbox | link */
+    provider: varchar("provider", { length: 24 }).notNull(),
+    url: text("url").notNull(),
+    externalId: varchar("external_id", { length: 255 }),
+    name: varchar("name", { length: 255 }).notNull(),
+    mimeType: varchar("mime_type", { length: 128 }),
+    sizeBytes: integer("size_bytes"),
+    iconUrl: text("icon_url"),
+    lastModifiedAt: timestamp("last_modified_at", { withTimezone: true }),
+    lastCheckedAt: timestamp("last_checked_at", { withTimezone: true }),
+    addedById: uuid("added_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("linked_files_entity_idx").on(t.entityType, t.entityId)],
+);
+
+export const linkedFilesRelations = relations(linkedFiles, ({ one }) => ({
+  addedBy: one(users, { fields: [linkedFiles.addedById], references: [users.id] }),
+}));
+
+/**
  * Row 120: a client guest's access link - one token per (person, set of
  * projects), with an expiry and one-click revoke. No account needed.
  */

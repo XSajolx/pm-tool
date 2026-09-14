@@ -15,6 +15,7 @@ import { MilestoneTimeline } from "../components/MilestoneTimeline.js";
 import { ProjectActivityFeed } from "../components/ProjectActivityFeed.js";
 import { CustomFieldsPanel } from "../components/CustomFieldsPanel.js";
 import { ClientAccessCard } from "../components/ClientAccessCard.js";
+import { LinkedFiles } from "../components/LinkedFiles.js";
 import { cn } from "../lib/utils.js";
 
 /** One project: headline numbers, its lists, who has logged time, recent entries. */
@@ -287,6 +288,8 @@ export function ProjectPage() {
           <h2 id="project-docs" className="border-b border-border px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Docs</h2>
           <div className="p-4">
             <DocsTab entityType="project" entityId={project.id} />
+            {/* Row 124 */}
+            <div className="mt-4"><LinkedFiles entityType="project" entityId={project.id} compact /></div>
           </div>
         </section>
 

@@ -496,6 +496,24 @@ export interface PortalProject {
   docs: { id: string; title: string; icon: string | null; updatedAt: string; reviewStatus: string; shareToken: string | null; clientApprovedAt?: string | null; clientApprovedBy?: string | null; clientDecision?: "approved" | "changes_requested" | null }[];
   generatedAt: string;
 }
+/** Row 124 */
+export type LinkedEntity = "task" | "document" | "project" | "contact" | "company";
+export interface LinkedFile {
+  id: string;
+  entityType: LinkedEntity;
+  entityId: string;
+  provider: "google_drive" | "dropbox" | "link";
+  url: string;
+  name: string;
+  mimeType: string | null;
+  sizeBytes: number | null;
+  iconUrl: string | null;
+  lastModifiedAt: string | null;
+  lastCheckedAt: string | null;
+  addedBy: { id: string; name: string } | null;
+  createdAt: string;
+}
+
 /** Row 123 */
 export interface SearchHit {
   id: string;
@@ -1867,6 +1885,11 @@ export const api = {
     request<TimesheetSubmission>(`/time/timesheet/submissions/${id}/reopen`, { method: "POST", body: JSON.stringify({ reason }) }),
   getTimesheetEvents: (id: string) =>
     request<{ id: string; kind: string; note: string | null; createdAt: string; actor: { id: string; name: string } | null }[]>(`/time/timesheet/submissions/${id}/events`),
+  /** Row 124 */
+  getLinkedFiles: (entityType: LinkedEntity, entityId: string) => request<LinkedFile[]>(`/linked-files?entityType=${entityType}&entityId=${entityId}`),
+  addLinkedFile: (body: { entityType: LinkedEntity; entityId: string; url: string; name?: string | null }) => request<LinkedFile[]>(`/linked-files`, { method: "POST", body: JSON.stringify(body) }),
+  refreshLinkedFile: (id: string) => request<LinkedFile[]>(`/linked-files/${id}/refresh`, { method: "POST" }),
+  removeLinkedFile: (id: string) => request<LinkedFile[]>(`/linked-files/${id}`, { method: "DELETE" }),
   /** Row 123 */
   search: (q: string, limit = 8) => request<SearchResult>(`/search?q=${encodeURIComponent(q)}&limit=${limit}`),
   /** Row 120 */

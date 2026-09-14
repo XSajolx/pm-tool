@@ -9,6 +9,7 @@ import { useEscape } from "../lib/useEscape.js";
 import { relativeTime } from "../components/TaskCollaboration.js";
 import { NotFound } from "../components/NotFound.js";
 import { DocEditor } from "../components/doc/DocEditor.js";
+import { LinkedFiles } from "../components/LinkedFiles.js";
 
 /* ------------------------------------------------------------------ *
  * Shared bits
@@ -458,6 +459,8 @@ export function DocPage() {
                 ))}
               </p>
             )}
+            {/* Row 124 */}
+            <div className="mt-3"><LinkedFiles entityType="document" entityId={doc.id} compact /></div>
             <div className="mt-4">
               <DocEditor
                 docId={doc.id}

@@ -9,6 +9,7 @@ import { NotesPanel } from "../components/NotesPanel.js";
 import { CrmTasks } from "../components/CrmTasks.js";
 import { ContactDialog } from "../components/ContactDialog.js";
 import { DocsTab } from "../components/DocsTab.js";
+import { LinkedFiles } from "../components/LinkedFiles.js";
 import { NotFound } from "../components/NotFound.js";
 import { cn } from "../lib/utils.js";
 
@@ -147,7 +148,13 @@ export function CompanyPage() {
 
           {tab === "tasks" && <CrmTasks link={{ companyId }} />}
 
-          {tab === "docs" && <DocsTab entityType="company" entityId={companyId} />}
+          {tab === "docs" && (
+            <>
+              <DocsTab entityType="company" entityId={companyId} />
+              {/* Row 124 */}
+              <div className="mt-4"><LinkedFiles entityType="company" entityId={companyId} /></div>
+            </>
+          )}
 
           {tab === "estimates" && (
             estimates.length ? (
