@@ -5,10 +5,11 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { and, desc, eq, gte, isNull, lt, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
 import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
-import { lists, projects, tasks, timeEntries, users } from "../../db/schema.js";
+import { lists, memberships, projects, tasks, timeEntries, timesheetSubmissions, users } from "../../db/schema.js";
+import { NotificationsService, pendingApproval } from "../notifications/notifications.service.js";
 import type { Role } from "../auth/auth.types.js";
 
 export interface Actor {
@@ -40,7 +41,99 @@ export function startOfWeek(d: Date) {
 
 @Injectable()
 export class TimeService {
-  constructor(@Inject(DRIZZLE) private readonly db: DB) {}
+  constructor(
+    @Inject(DRIZZLE) private readonly db: DB,
+    private readonly notifications: NotificationsService,
+  ) {}
+
+  /** Row 75: inbox cards decide timesheet submissions through here. */
+  onModuleInit() {
+    this.notifications.registerApproval("timesheet", (d) => this.decideTimesheet(d.orgId, { userId: d.userId, role: d.role as Role }, d.entityId, d.approve, d.note));
+  }
+
+  /* ---------------------------------------------------------------- *
+   * Row 75: submit a week for approval
+   * ---------------------------------------------------------------- */
+
+  /** Submit my week. The approver (named, else an org owner/admin) gets an inbox card. */
+  async submitWeek(orgId: string, actor: Actor, weekOf: string, approverId?: string) {
+    const weekStart = startOfWeek(new Date(weekOf));
+    const weekEnd = new Date(weekStart.getTime() + 7 * DAY_MS);
+    const existing = await this.db.query.timesheetSubmissions.findFirst({
+      where: and(eq(timesheetSubmissions.userId, actor.userId), eq(timesheetSubmissions.weekStart, weekStart)),
+    });
+    if (existing?.status === "approved") throw new BadRequestException("This week is already approved");
+    if (existing?.status === "submitted") throw new BadRequestException("This week is already awaiting approval");
+
+    const [sum] = await this.db
+      .select({ seconds: sql<number>`coalesce(sum(${timeEntries.durationSeconds}), 0)::int` })
+      .from(timeEntries)
+      .where(and(eq(timeEntries.organizationId, orgId), eq(timeEntries.userId, actor.userId), gte(timeEntries.startedAt, weekStart), lt(timeEntries.startedAt, weekEnd), isNull(timeEntries.archivedAt)));
+    const totalSeconds = sum?.seconds ?? 0;
+
+    let approver = approverId ?? null;
+    if (!approver) {
+      const admins = await this.db
+        .select({ userId: memberships.userId })
+        .from(memberships)
+        .where(and(eq(memberships.organizationId, orgId), inArray(memberships.role, ["owner", "admin"])));
+      approver = admins.find((a) => a.userId !== actor.userId)?.userId ?? admins[0]?.userId ?? null;
+    }
+    if (!approver) throw new BadRequestException("No one can approve timesheets in this workspace yet");
+
+    const [row] = await this.db
+      .insert(timesheetSubmissions)
+      .values({ organizationId: orgId, userId: actor.userId, weekStart, status: "submitted", approverId: approver, totalSeconds, note: null, submittedAt: new Date(), decidedAt: null, decidedById: null })
+      .onConflictDoUpdate({
+        target: [timesheetSubmissions.userId, timesheetSubmissions.weekStart],
+        set: { status: "submitted", approverId: approver, totalSeconds, note: null, submittedAt: new Date(), decidedAt: null, decidedById: null },
+      })
+      .returning();
+
+    const [who] = await this.db.select({ name: users.name }).from(users).where(eq(users.id, actor.userId));
+    const hours = Math.round((totalSeconds / 3600) * 10) / 10;
+    await this.notifications.notifyDirect({
+      orgId,
+      receiverId: approver,
+      actorId: actor.userId,
+      entityType: "timesheet",
+      entityId: row!.id,
+      verb: "timesheet_submitted",
+      title: `Timesheet: ${who?.name ?? "Someone"} - week of ${weekStart.toLocaleDateString()}`,
+      body: `${hours}h logged`,
+      data: { submissionId: row!.id, userId: actor.userId, weekStart: weekStart.toISOString(), approval: pendingApproval("timesheet") },
+    });
+    return row!;
+  }
+
+  async decideTimesheet(orgId: string, actor: Actor, id: string, approve: boolean, note?: string) {
+    const sub = await this.db.query.timesheetSubmissions.findFirst({ where: and(eq(timesheetSubmissions.id, id), eq(timesheetSubmissions.organizationId, orgId)) });
+    if (!sub) throw new NotFoundException("Submission not found");
+    if (sub.status !== "submitted") throw new BadRequestException("This week isn't awaiting approval");
+    const admin = actor.role === "owner" || actor.role === "admin";
+    if (sub.approverId !== actor.userId && !admin) throw new ForbiddenException("Only the approver can decide this timesheet");
+    const now = new Date();
+    const [row] = await this.db
+      .update(timesheetSubmissions)
+      .set({ status: approve ? "approved" : "rejected", note: note?.trim() || null, decidedAt: now, decidedById: actor.userId })
+      .where(eq(timesheetSubmissions.id, id))
+      .returning();
+    await this.notifications.resolveApproval("timesheet", id, approve ? "approved" : "rejected", note, actor.userId);
+    if (sub.userId !== actor.userId) {
+      await this.notifications.notifyDirect({
+        orgId,
+        receiverId: sub.userId,
+        actorId: actor.userId,
+        entityType: "timesheet",
+        entityId: id,
+        verb: approve ? "timesheet_approved" : "timesheet_rejected",
+        title: `Timesheet ${approve ? "approved" : "rejected"}: week of ${sub.weekStart.toLocaleDateString()}`,
+        body: note?.trim() || (approve ? "Hours signed off" : "Please fix and resubmit"),
+        data: { submissionId: id, weekStart: sub.weekStart.toISOString() },
+      });
+    }
+    return row!;
+  }
 
   /* ---------------------------------------------------------------- *
    * Timer
@@ -252,6 +345,11 @@ export class TimeService {
 
     return {
       userId,
+      // Row 75: where this week stands in the approval flow (null = not submitted).
+      submission:
+        (await this.db.query.timesheetSubmissions.findFirst({
+          where: and(eq(timesheetSubmissions.userId, userId), eq(timesheetSubmissions.weekStart, weekStart)),
+        })) ?? null,
       weekStart: weekStart.toISOString(),
       days: [0, 1, 2, 3, 4, 5, 6].map((i) =>
         new Date(weekStart.getTime() + i * DAY_MS).toISOString(),

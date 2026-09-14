@@ -1268,6 +1268,12 @@ export const milestones = pgTable(
     description: text("description"),
     targetDate: timestamp("target_date", { withTimezone: true }),
     reachedAt: timestamp("reached_at", { withTimezone: true }),
+    /** Row 75: sign-off request - null | pending | approved | rejected. Approving marks it reached. */
+    signoffStatus: varchar("signoff_status", { length: 16 }),
+    signoffRequestedById: uuid("signoff_requested_by_id").references(() => users.id, { onDelete: "set null" }),
+    signoffRequestedAt: timestamp("signoff_requested_at", { withTimezone: true }),
+    signoffApproverId: uuid("signoff_approver_id").references(() => users.id, { onDelete: "set null" }),
+    signoffNote: text("signoff_note"),
     /** Shown on the client portal / share pages when true. */
     clientVisible: boolean("client_visible").notNull().default(false),
     createdById: uuid("created_by_id").references(() => users.id),
@@ -2101,3 +2107,33 @@ export const notificationMutes = pgTable(
 );
 
 export type NotificationMute = typeof notificationMutes.$inferSelect;
+
+/* ------------------------------------------------------------------ *
+ * Timesheet submissions (row 75) - a person submits a week; an approver
+ * signs it off from the inbox. Row 92 builds on this (locking approved hours).
+ * ------------------------------------------------------------------ */
+export const timesheetSubmissions = pgTable(
+  "timesheet_submissions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** Monday 00:00 UTC (see time.service startOfWeek). */
+    weekStart: timestamp("week_start", { withTimezone: true }).notNull(),
+    /** submitted | approved | rejected */
+    status: varchar("status", { length: 16 }).notNull().default("submitted"),
+    approverId: uuid("approver_id").references(() => users.id, { onDelete: "set null" }),
+    totalSeconds: integer("total_seconds").notNull().default(0),
+    note: text("note"),
+    submittedAt: timestamp("submitted_at", { withTimezone: true }).defaultNow().notNull(),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    decidedById: uuid("decided_by_id").references(() => users.id, { onDelete: "set null" }),
+  },
+  (t) => [uniqueIndex("timesheet_submissions_user_week_uq").on(t.userId, t.weekStart)],
+);
+
+export type TimesheetSubmission = typeof timesheetSubmissions.$inferSelect;

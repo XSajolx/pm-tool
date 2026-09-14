@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger } from "@nestjs/common";
+import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { and, desc, eq, gt, inArray, isNotNull, isNull, notInArray, or, sql, type SQL } from "drizzle-orm";
 import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
@@ -45,6 +45,31 @@ export type ChannelMatrix = Record<NotifType, ChannelPrefs>;
 /** Row 74: what can be muted. */
 export type MutableEntity = "task" | "document" | "project";
 
+/**
+ * Row 75: an approval request rides on a notification as `data.approval`.
+ * The inbox renders Approve / Reject inline; deciding dispatches to the
+ * domain service that registered the kind (docs, milestones, timesheets),
+ * then every pending card for that entity flips to the outcome.
+ */
+export type ApprovalKind = "doc_review" | "milestone" | "timesheet";
+export interface ApprovalMeta {
+  kind: ApprovalKind;
+  status: "pending" | "approved" | "rejected";
+  decidedAt?: string;
+  decidedById?: string;
+  note?: string | null;
+}
+export interface ApprovalDecision {
+  orgId: string;
+  userId: string;
+  role: string;
+  entityId: string;
+  approve: boolean;
+  note?: string;
+}
+type ApprovalHandler = (d: ApprovalDecision) => Promise<unknown>;
+export const pendingApproval = (kind: ApprovalKind): ApprovalMeta => ({ kind, status: "pending" });
+
 const TYPE_FOR_VERB: Record<string, NotifType> = {
   mentioned: "mention",
   comment_assigned: "mention",
@@ -62,7 +87,9 @@ const TYPE_FOR_VERB: Record<string, NotifType> = {
   timesheet_submitted: "approvals",
   timesheet_approved: "approvals",
   timesheet_rejected: "approvals",
-  milestone_signoff: "approvals",
+  milestone_signoff_requested: "approvals",
+  milestone_approved: "approvals",
+  milestone_rejected: "approvals",
   due_soon: "reminders",
   overdue: "reminders",
   follow_up: "reminders",
@@ -141,7 +168,9 @@ const TAB_VERBS: Record<Exclude<TypedTab, "alerts">, string[]> = {
     "timesheet_submitted",
     "timesheet_approved",
     "timesheet_rejected",
-    "milestone_signoff",
+    "milestone_signoff_requested",
+    "milestone_approved",
+    "milestone_rejected",
   ],
 };
 const TYPED_VERBS = [...TAB_VERBS.mentions, ...TAB_VERBS.assigned, ...TAB_VERBS.approvals];
@@ -353,6 +382,48 @@ export class NotificationsService {
     }
     for (const v of wantPush) {
       this.gateway.emitToUser(v.receiverId, "notification:push", { title: v.title, body: v.body ?? "", link: linkFor(v), verb: v.verb });
+    }
+  }
+
+  /* ---------------------------------------------------------------- *
+   * Row 75: approvals
+   * ---------------------------------------------------------------- */
+
+  private readonly approvalHandlers = new Map<ApprovalKind, ApprovalHandler>();
+
+  /** Domain services register how a kind gets decided (called from their onModuleInit). */
+  registerApproval(kind: ApprovalKind, handler: ApprovalHandler) {
+    this.approvalHandlers.set(kind, handler);
+  }
+
+  /** Approve / reject straight from the inbox card. */
+  async decide(orgId: string, actor: { userId: string; role: string }, id: string, approve: boolean, note?: string) {
+    const n = await this.db.query.notifications.findFirst({ where: this.ownRow(orgId, actor.userId, id) });
+    const approval = n?.data?.approval as ApprovalMeta | undefined;
+    if (!n || !approval) throw new NotFoundException("No approval on this notification");
+    if (approval.status !== "pending") throw new BadRequestException("This was already decided");
+    const handler = this.approvalHandlers.get(approval.kind);
+    if (!handler) throw new BadRequestException(`Nothing handles ${approval.kind} approvals`);
+    await handler({ orgId, userId: actor.userId, role: actor.role, entityId: n.entityId, approve, note });
+    // The handler normally resolves the cards itself; this is the safety net.
+    await this.resolveApproval(n.entityType, n.entityId, approve ? "approved" : "rejected", note, actor.userId);
+    const [updated] = await this.decorate([(await this.db.query.notifications.findFirst({ where: this.ownRow(orgId, actor.userId, id) }))!]);
+    return updated;
+  }
+
+  /** Flip every pending approval card for an entity to its outcome (whoever decided, from wherever). */
+  async resolveApproval(entityType: string, entityId: string, status: "approved" | "rejected", note: string | null | undefined, decidedById: string) {
+    const rows = await this.db
+      .select({ id: notifications.id, data: notifications.data, readAt: notifications.readAt })
+      .from(notifications)
+      .where(and(eq(notifications.entityType, entityType), eq(notifications.entityId, entityId), sql`${notifications.data}->'approval'->>'status' = 'pending'`));
+    const now = new Date();
+    for (const row of rows) {
+      const approval = { ...(row.data?.approval as ApprovalMeta), status, decidedAt: now.toISOString(), decidedById, note: note?.trim() || null };
+      await this.db
+        .update(notifications)
+        .set({ data: { ...(row.data ?? {}), approval }, readAt: row.readAt ?? now })
+        .where(eq(notifications.id, row.id));
     }
   }
 

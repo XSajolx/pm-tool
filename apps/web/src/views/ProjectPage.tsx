@@ -601,6 +601,8 @@ function ProjectMilestones({ projectId, canManage }: { projectId: string; canMan
     onSuccess: refresh,
   });
   const remove = useMutation({ mutationFn: (id: string) => api.deleteMilestone(id), onSuccess: refresh });
+  // Row 75: ask the project lead to sign the milestone off from their inbox.
+  const signoff = useMutation({ mutationFn: (id: string) => api.requestMilestoneSignoff(id), onSuccess: refresh });
   const today = new Date().toISOString().slice(0, 10);
 
   return (
@@ -639,6 +641,28 @@ function ProjectMilestones({ projectId, canManage }: { projectId: string; canMan
                     {m.progress.done}/{m.progress.total} tasks done
                   </p>
                 </div>
+                {!m.reachedAt && m.signoffStatus === "pending" && (
+                  <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-800" title="Waiting for the approver to decide in their inbox">
+                    Sign-off pending
+                  </span>
+                )}
+                {!m.reachedAt && m.signoffStatus === "rejected" && (
+                  <span className="rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-medium text-red-700" title={m.signoffNote ?? undefined}>
+                    Sign-off declined
+                  </span>
+                )}
+                {!m.reachedAt && m.signoffStatus !== "pending" && (
+                  <button
+                    type="button"
+                    onClick={() => signoff.mutate(m.id)}
+                    disabled={signoff.isPending}
+                    className="rounded-md border border-border px-2 py-0.5 text-[11px] font-medium text-slate-600 hover:bg-muted disabled:opacity-50"
+                    title="Send an Approve / Reject card to the project lead's inbox"
+                  >
+                    {m.signoffStatus === "rejected" ? "Ask again" : "Request sign-off"}
+                  </button>
+                )}
+                {signoff.isError && <span className="text-[11px] text-red-600">{(signoff.error as Error).message}</span>}
                 <div className="h-1.5 w-28 overflow-hidden rounded-full bg-slate-100" title={`${pct}% of linked tasks done`}>
                   <div className={cn("h-full rounded-full", m.reachedAt ? "bg-green-500" : "bg-indigo-500")} style={{ width: `${pct}%` }} />
                 </div>

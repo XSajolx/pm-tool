@@ -35,6 +35,9 @@ const cellSchema = z.object({
 });
 
 const WRITERS = ["owner", "admin", "member"] as const;
+/** Row 75 */
+const submitSchema = z.object({ week: z.string().min(8), approverId: z.string().uuid().optional() });
+const decisionSchema = z.object({ approve: z.boolean(), note: z.string().max(2000).optional() });
 
 @Controller("time")
 export class TimeController {
@@ -116,6 +119,21 @@ export class TimeController {
       week ?? new Date().toISOString(),
       userId,
     );
+  }
+
+  /** Row 75: submit a week for approval - the approver gets an inbox card. */
+  @Post("timesheet/submit")
+  @Roles(...WRITERS)
+  @UsePipes(new ZodValidationPipe(submitSchema))
+  submit(@Auth() auth: AuthContext, @Body() dto: z.infer<typeof submitSchema>) {
+    return this.time.submitWeek(auth.orgId, this.actor(auth), dto.week, dto.approverId);
+  }
+
+  @Post("timesheet/submissions/:id/decision")
+  @Roles(...WRITERS)
+  @UsePipes(new ZodValidationPipe(decisionSchema))
+  decideSubmission(@Auth() auth: AuthContext, @Param("id") id: string, @Body() dto: z.infer<typeof decisionSchema>) {
+    return this.time.decideTimesheet(auth.orgId, this.actor(auth), id, dto.approve, dto.note);
   }
 
   @Put("timesheet")

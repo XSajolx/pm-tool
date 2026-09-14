@@ -13,6 +13,9 @@ const milestoneSchema = z.object({
   reachedAt: isoDate.nullable().optional(),
   clientVisible: z.boolean().optional(),
 });
+/** Row 75 */
+const signoffRequestSchema = z.object({ approverId: z.string().uuid().optional() });
+const signoffDecisionSchema = z.object({ approve: z.boolean(), note: z.string().max(2000).optional() });
 
 @Controller()
 export class MilestonesController {
@@ -40,6 +43,21 @@ export class MilestonesController {
   @UsePipes(new ZodValidationPipe(milestoneSchema.partial()))
   update(@Auth() auth: AuthContext, @Param("id") id: string, @Body() dto: Partial<z.infer<typeof milestoneSchema>>) {
     return this.milestones.update(auth.orgId, auth.userId, id, dto);
+  }
+
+  /** Row 75: ask for sign-off; the approver gets an inbox card with Approve / Reject. */
+  @Post("milestones/:id/signoff")
+  @Roles("owner", "admin", "member")
+  @UsePipes(new ZodValidationPipe(signoffRequestSchema))
+  requestSignoff(@Auth() auth: AuthContext, @Param("id") id: string, @Body() dto: z.infer<typeof signoffRequestSchema>) {
+    return this.milestones.requestSignoff(auth.orgId, auth.userId, id, dto.approverId);
+  }
+
+  @Post("milestones/:id/signoff/decision")
+  @Roles("owner", "admin", "member")
+  @UsePipes(new ZodValidationPipe(signoffDecisionSchema))
+  decideSignoff(@Auth() auth: AuthContext, @Param("id") id: string, @Body() dto: z.infer<typeof signoffDecisionSchema>) {
+    return this.milestones.decideSignoff(auth.orgId, { userId: auth.userId, role: auth.role }, id, dto.approve, dto.note);
   }
 
   @Get("milestones/:id/activity")

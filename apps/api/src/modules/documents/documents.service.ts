@@ -5,7 +5,7 @@ import type { DB } from "../../db/index.js";
 import { companies, deals, documentAccess, documentLinks, documentStars, documentVisits, documents, projectMembers, projects, tasks, type DocumentSettings } from "../../db/schema.js";
 import type { Role } from "../auth/auth.types.js";
 import { ChatEventsService } from "../chat/chat-events.service.js";
-import { NotificationsService } from "../notifications/notifications.service.js";
+import { NotificationsService, pendingApproval } from "../notifications/notifications.service.js";
 import { randomBytes } from "node:crypto";
 import { expandSnippets, snippetIds, stripInternal, textOf, toLines, type PmNode } from "./doc-content.js";
 import { renderDocPdf } from "../crm/pdf.js";
@@ -345,9 +345,16 @@ export class DocumentsService {
       verb: "doc_review_requested",
       title: `Review requested: ${doc.title}`,
       body: note?.trim() || "Please review and sign off",
-      data: { documentId: id },
+      data: { documentId: id, approval: pendingApproval("doc_review") },
     });
     return this.get(orgId, id);
+  }
+
+  /** Row 75: inbox cards decide doc reviews through here. */
+  onModuleInit() {
+    this.notifications.registerApproval("doc_review", (d) =>
+      this.decideReview(d.orgId, { userId: d.userId, role: d.role as Viewer["role"] }, d.entityId, d.approve, d.note),
+    );
   }
 
   /** The approver (or an admin) approves, or sends it back to Draft with a note. */
@@ -361,6 +368,8 @@ export class DocumentsService {
       .update(documents)
       .set(approve ? { reviewStatus: "approved", approvedAt: now, approverId: actor.userId, reviewNote: note?.trim() || null, updatedAt: now } : { reviewStatus: "draft", approvedAt: null, reviewNote: note?.trim() || "Sent back for changes", updatedAt: now })
       .where(eq(documents.id, id));
+    // Row 75: flip the inbox card(s) whether this came from the doc page or the inbox.
+    await this.notifications.resolveApproval("document", id, approve ? "approved" : "rejected", note, actor.userId);
     const receivers = new Set([doc.reviewRequestedBy?.id, doc.createdBy?.id].filter((x): x is string => Boolean(x) && x !== actor.userId));
     for (const receiverId of receivers) {
       await this.notifications.notifyDirect({

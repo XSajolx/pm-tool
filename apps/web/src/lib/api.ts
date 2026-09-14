@@ -436,6 +436,11 @@ export interface Milestone {
   targetDate: string | null;
   reachedAt: string | null;
   clientVisible: boolean;
+  /** Row 75 */
+  signoffStatus: "pending" | "approved" | "rejected" | null;
+  signoffRequestedById: string | null;
+  signoffApproverId: string | null;
+  signoffNote: string | null;
   progress: { total: number; done: number };
 }
 export type MilestoneWrite = Partial<{
@@ -479,6 +484,15 @@ export interface StageTemplate {
 
 export interface MyTask extends Task {
   list: { id: string; name: string; spaceId: string; spaceName: string | null } | null;
+}
+
+/** Row 75: approval request carried by a notification (`data.approval`). */
+export interface ApprovalMeta {
+  kind: "doc_review" | "milestone" | "timesheet";
+  status: "pending" | "approved" | "rejected";
+  decidedAt?: string;
+  decidedById?: string;
+  note?: string | null;
 }
 
 /** Row 74: a muted thread. */
@@ -639,8 +653,23 @@ export interface TimeEntry {
   user: { id: string; name: string } | null;
 }
 
+/** Row 75 */
+export interface TimesheetSubmission {
+  id: string;
+  userId: string;
+  weekStart: string;
+  status: "submitted" | "approved" | "rejected";
+  approverId: string | null;
+  totalSeconds: number;
+  note: string | null;
+  submittedAt: string;
+  decidedAt: string | null;
+}
+
 export interface Timesheet {
   userId: string;
+  /** Row 75: null until the week is submitted. */
+  submission: TimesheetSubmission | null;
   weekStart: string;
   days: string[];
   rows: { projectId: string; projectName: string; color: string; hours: number[]; total: number }[];
@@ -1201,6 +1230,9 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ until }),
     }),
+  /** Row 75: approve / reject from the inbox card. */
+  decideApproval: (id: string, body: { approve: boolean; note?: string }) =>
+    request<AppNotification>(`/notifications/${id}/decide`, { method: "POST", body: JSON.stringify(body) }),
   /** Row 74: mutes. */
   getMutes: () => request<NotificationMute[]>(`/notifications/mutes`),
   muteEntity: (entityType: MutableEntity, entityId: string) =>
@@ -1303,6 +1335,11 @@ export const api = {
   updateMilestone: (id: string, body: MilestoneWrite) =>
     request<Milestone>(`/milestones/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteMilestone: (id: string) => request<{ id: string }>(`/milestones/${id}`, { method: "DELETE" }),
+  /** Row 75: milestone sign-off. */
+  requestMilestoneSignoff: (id: string, body: { approverId?: string } = {}) =>
+    request<Milestone>(`/milestones/${id}/signoff`, { method: "POST", body: JSON.stringify(body) }),
+  decideMilestoneSignoff: (id: string, body: { approve: boolean; note?: string }) =>
+    request<Milestone>(`/milestones/${id}/signoff/decision`, { method: "POST", body: JSON.stringify(body) }),
   // ---- Project stages ----
   getStages: (projectId: string) => request<Stage[]>(`/projects/${projectId}/stages`),
   getStagesForSpace: (spaceId: string) => request<Stage[]>(`/stages?spaceId=${encodeURIComponent(spaceId)}`),
@@ -1362,6 +1399,11 @@ export const api = {
     const qs = q.toString();
     return request<Timesheet>(`/time/timesheet${qs ? "?" + qs : ""}`);
   },
+  /** Row 75 */
+  submitTimesheet: (week: string, approverId?: string) =>
+    request<TimesheetSubmission>(`/time/timesheet/submit`, { method: "POST", body: JSON.stringify({ week, approverId }) }),
+  decideTimesheet: (id: string, body: { approve: boolean; note?: string }) =>
+    request<TimesheetSubmission>(`/time/timesheet/submissions/${id}/decision`, { method: "POST", body: JSON.stringify(body) }),
   setTimesheetCell: (body: { projectId: string; date: string; hours: number; userId?: string }) =>
     request<{ ok: boolean }>(`/time/timesheet`, { method: "PUT", body: JSON.stringify(body) }),
   getProjectTimeSummary: (projectId: string) =>

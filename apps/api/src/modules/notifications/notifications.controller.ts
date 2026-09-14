@@ -11,6 +11,8 @@ const channelSchema = z.object({ inApp: z.boolean().optional(), email: z.boolean
 const preferencesSchema = z.object(Object.fromEntries(NOTIF_TYPES.map((t) => [t, channelSchema.optional()])) as Record<(typeof NOTIF_TYPES)[number], z.ZodOptional<typeof channelSchema>>);
 
 const snoozeSchema = z.object({ until: z.string().datetime() });
+/** Row 75 */
+const decisionSchema = z.object({ approve: z.boolean(), note: z.string().max(2000).optional() });
 /** Row 74 */
 const mutableEntity = z.enum(["task", "document", "project"]);
 const muteSchema = z.object({ entityType: mutableEntity, entityId: z.string().uuid() });
@@ -121,6 +123,13 @@ export class NotificationsController {
   @Patch(":id/important")
   important(@Auth() auth: AuthContext, @Param("id") id: string) {
     return this.notifications.toggleImportant(auth.orgId, auth.userId, id);
+  }
+
+  /** Row 75: approve / reject the request carried by this notification. */
+  @Post(":id/decide")
+  @UsePipes(new ZodValidationPipe(decisionSchema))
+  decide(@Auth() auth: AuthContext, @Param("id") id: string, @Body() dto: z.infer<typeof decisionSchema>) {
+    return this.notifications.decide(auth.orgId, { userId: auth.userId, role: auth.role }, id, dto.approve, dto.note);
   }
 
   @Patch(":id/snooze")

@@ -40,6 +40,12 @@ export function TimesheetPage() {
     },
   });
 
+  // Row 75: submit my week; the approver gets an inbox card.
+  const submit = useMutation({
+    mutationFn: () => api.submitTimesheet(weekIso),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["timesheet"] }),
+  });
+
   // Rows = projects with time this week, plus any the user added by hand.
   const rows = useMemo(() => {
     const base = sheet?.rows ?? [];
@@ -76,8 +82,35 @@ export function TimesheetPage() {
           )}
         </div>
 
+        {sheet && !forUser && (
+          <div className="ml-auto flex items-center gap-2">
+            {sheet.submission?.status === "approved" && (
+              <span className="rounded-full bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700">✓ Approved</span>
+            )}
+            {sheet.submission?.status === "submitted" && (
+              <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800">Awaiting approval</span>
+            )}
+            {sheet.submission?.status === "rejected" && (
+              <span className="rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700" title={sheet.submission.note ?? undefined}>
+                Sent back{sheet.submission.note ? `: ${sheet.submission.note}` : ""}
+              </span>
+            )}
+            {(!sheet.submission || sheet.submission.status === "rejected") && (
+              <button
+                type="button"
+                onClick={() => submit.mutate()}
+                disabled={submit.isPending || !sheet.grandTotal}
+                title={sheet.grandTotal ? "Send this week to your approver's inbox" : "Log some time first"}
+                className="rounded-md bg-indigo-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+              >
+                {sheet.submission ? "Resubmit week" : "Submit week for approval"}
+              </button>
+            )}
+            {submit.isError && <span className="text-xs text-red-600">{(submit.error as Error).message}</span>}
+          </div>
+        )}
         {isAdmin && (
-          <select value={forUser} onChange={(e) => setForUser(e.target.value)} className="ml-auto rounded-md border border-border bg-white px-2 py-1 text-xs text-slate-700">
+          <select value={forUser} onChange={(e) => setForUser(e.target.value)} className={cn("rounded-md border border-border bg-white px-2 py-1 text-xs text-slate-700", forUser ? "ml-auto" : "")}>
             <option value="">My timesheet</option>
             {members.map((m) => (
               <option key={m.id} value={m.id}>{m.name}</option>

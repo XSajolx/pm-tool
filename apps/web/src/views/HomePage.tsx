@@ -3,6 +3,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   api,
+  type ApprovalMeta,
   type AppNotification,
   type InboxTab,
   type MutableEntity,
@@ -28,6 +29,12 @@ const VERB_LABEL: Record<string, string> = {
   due_soon: "— due soon",
   overdue: "— overdue",
   doc_review_requested: "asked you to review",
+  milestone_signoff_requested: "asked you to sign off",
+  milestone_approved: "signed off",
+  milestone_rejected: "declined sign-off on",
+  timesheet_submitted: "submitted a timesheet",
+  timesheet_approved: "approved your timesheet",
+  timesheet_rejected: "sent back your timesheet",
   doc_approved: "approved",
   doc_rejected: "sent back",
   proposal_viewed: "— proposal viewed",
@@ -330,6 +337,8 @@ function NotificationList({
                         navigate({ to: "/crm/proposals/$proposalId", params: { proposalId: n.entityId } });
                       } else if (n.entityType === "deal") {
                         navigate({ to: "/crm/deals", search: { deal: n.entityId } });
+                      } else if (n.entityType === "timesheet") {
+                        navigate({ to: "/timesheets" });
                       } else if (n.entityType === "milestone" && typeof n.data?.projectId === "string") {
                         // Row 72: a milestone reminder opens its project.
                         navigate({ to: "/projects/$projectId", params: { projectId: n.data.projectId } });
@@ -472,7 +481,82 @@ function NotificationRow({
           )}
         </span>
       </span>
+      {n.data?.approval ? <ApprovalCard n={n} approval={n.data.approval as ApprovalMeta} /> : null}
     </li>
+  );
+}
+
+/**
+ * Row 75: the inline Approve / Reject strip under an approval request
+ * (timesheet submitted, milestone sign-off, doc review). Once decided - here
+ * or on the item's own page - it shows the outcome instead.
+ */
+function ApprovalCard({ n, approval }: { n: AppNotification; approval: ApprovalMeta }) {
+  const qc = useQueryClient();
+  const [rejecting, setRejecting] = useState(false);
+  const [note, setNote] = useState("");
+  const decide = useMutation({
+    mutationFn: (body: { approve: boolean; note?: string }) => api.decideApproval(n.id, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["notifications"] });
+      qc.invalidateQueries({ queryKey: ["unread-count"] });
+      qc.invalidateQueries({ queryKey: ["milestones"] });
+      qc.invalidateQueries({ queryKey: ["timesheet"] });
+      qc.invalidateQueries({ queryKey: ["document"] });
+    },
+  });
+  const kindLabel = approval.kind === "doc_review" ? "Doc review" : approval.kind === "milestone" ? "Milestone sign-off" : "Timesheet";
+
+  if (approval.status !== "pending") {
+    const ok = approval.status === "approved";
+    return (
+      <div className="col-span-full ml-5 flex flex-wrap items-center gap-2 text-xs" onClick={(e) => e.stopPropagation()}>
+        <span className={cn("rounded-full px-2 py-0.5 font-medium", ok ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700")}>
+          {ok ? "✓ Approved" : "✕ Rejected"}
+        </span>
+        <span className="text-muted-foreground">
+          {kindLabel}
+          {approval.decidedAt ? ` · ${new Date(approval.decidedAt).toLocaleDateString()}` : ""}
+          {approval.note ? ` · “${approval.note}”` : ""}
+        </span>
+      </div>
+    );
+  }
+  return (
+    <div className="col-span-full ml-5 flex flex-wrap items-center gap-2" onClick={(e) => e.stopPropagation()}>
+      <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800">{kindLabel} · awaiting you</span>
+      {rejecting ? (
+        <>
+          <input
+            autoFocus
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="Why? (optional)"
+            className="w-56 rounded-md border border-border px-2 py-1 text-xs"
+            onKeyDown={(e) => {
+              if (e.key === "Enter") decide.mutate({ approve: false, note: note.trim() || undefined });
+              if (e.key === "Escape") setRejecting(false);
+            }}
+          />
+          <button type="button" disabled={decide.isPending} onClick={() => decide.mutate({ approve: false, note: note.trim() || undefined })} className="rounded-md bg-red-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-50">
+            Confirm reject
+          </button>
+          <button type="button" onClick={() => setRejecting(false)} className="text-xs text-slate-500 hover:underline">
+            Cancel
+          </button>
+        </>
+      ) : (
+        <>
+          <button type="button" disabled={decide.isPending} onClick={() => decide.mutate({ approve: true })} className="rounded-md bg-green-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50">
+            ✓ Approve
+          </button>
+          <button type="button" disabled={decide.isPending} onClick={() => setRejecting(true)} className="rounded-md border border-border px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-red-50 hover:text-red-700 disabled:opacity-50">
+            ✕ Reject
+          </button>
+        </>
+      )}
+      {decide.isError && <span className="text-xs text-red-600">{(decide.error as Error).message}</span>}
+    </div>
   );
 }
 
