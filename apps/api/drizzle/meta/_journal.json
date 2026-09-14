@@ -379,6 +379,13 @@
       "when": 1789358836636,
       "tag": "0053_leave_requests",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1789360909521,
+      "tag": "0054_stage_progress",
+      "breakpoints": true
     }
   ]
 }

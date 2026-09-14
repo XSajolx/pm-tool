@@ -66,7 +66,7 @@ export interface ProjectStats {
   /** The project's chat channel, for the dashboard link. */
   channelId: string | null;
   /** Row 100: the active stage, else the first not-started one; null when every stage is done. */
-  currentStage: { id: string; name: string; status: "not_started" | "active" | "completed"; index: number; count: number } | null;
+  currentStage: { id: string; name: string; status: "not_started" | "active" | "completed"; index: number; count: number; progressPct: number } | null;
 }
 
 @Injectable()
@@ -501,7 +501,7 @@ export class ProjectsService {
 
     // Row 100: current stage per project (active first, else the first one not started).
     const stageRows = await this.db
-      .select({ id: projectStages.id, projectId: projectStages.projectId, name: projectStages.name, status: projectStages.status })
+      .select({ id: projectStages.id, projectId: projectStages.projectId, name: projectStages.name, status: projectStages.status, progressPct: projectStages.progressPct })
       .from(projectStages)
       .where(and(inArray(projectStages.projectId, ids), isNull(projectStages.archivedAt)))
       .orderBy(projectStages.projectId, projectStages.position);
@@ -513,7 +513,7 @@ export class ProjectsService {
       const idx = list.findIndex((st) => st.status === "active");
       const pick = idx >= 0 ? idx : list.findIndex((st) => st.status === "not_started");
       const cur = pick >= 0 ? list[pick] : undefined;
-      if (cur) s.currentStage = { id: cur.id, name: cur.name, status: cur.status, index: pick + 1, count: list.length };
+      if (cur) s.currentStage = { id: cur.id, name: cur.name, status: cur.status, index: pick + 1, count: list.length, progressPct: cur.progressPct };
     }
     return out;
   }

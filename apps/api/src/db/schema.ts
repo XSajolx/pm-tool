@@ -1263,6 +1263,11 @@ export const projectStages = pgTable(
     status: stageStatus("status").notNull().default("not_started"),
     startedAt: timestamp("started_at", { withTimezone: true }),
     completedAt: timestamp("completed_at", { withTimezone: true }),
+    /** Row 105: percent complete set by hand - never derived from tasks or hours. */
+    progressPct: integer("progress_pct").notNull().default(0),
+    progressSetById: uuid("progress_set_by_id").references(() => users.id, { onDelete: "set null" }),
+    progressSetAt: timestamp("progress_set_at", { withTimezone: true }),
+    progressNote: text("progress_note"),
     ...timestamps,
   },
   (t) => [index("project_stages_project_idx").on(t.projectId)],
@@ -1271,6 +1276,33 @@ export const projectStages = pgTable(
 export const projectStagesRelations = relations(projectStages, ({ one, many }) => ({
   project: one(projects, { fields: [projectStages.projectId], references: [projects.id] }),
   tasks: many(tasks),
+  progressSetBy: one(users, { fields: [projectStages.progressSetById], references: [users.id] }),
+  progressEvents: many(stageProgressEvents),
+}));
+
+/** Row 105: every hand-set progress change, with who, when and why (a note is required when it goes down). */
+export const stageProgressEvents = pgTable(
+  "stage_progress_events",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    stageId: uuid("stage_id")
+      .notNull()
+      .references(() => projectStages.id, { onDelete: "cascade" }),
+    actorId: uuid("actor_id").references(() => users.id, { onDelete: "set null" }),
+    fromPct: integer("from_pct").notNull(),
+    toPct: integer("to_pct").notNull(),
+    note: text("note"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("stage_progress_events_stage_idx").on(t.stageId, t.createdAt)],
+);
+
+export const stageProgressEventsRelations = relations(stageProgressEvents, ({ one }) => ({
+  stage: one(projectStages, { fields: [stageProgressEvents.stageId], references: [projectStages.id] }),
+  actor: one(users, { fields: [stageProgressEvents.actorId], references: [users.id] }),
 }));
 
 /* ------------------------------------------------------------------ *

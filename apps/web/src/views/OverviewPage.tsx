@@ -219,6 +219,7 @@ export function OverviewPage() {
                           <span className={cn("h-1.5 w-1.5 rounded-full", stage.status === "active" ? "bg-indigo-500" : "bg-slate-300")} />
                           <span className="text-slate-700">{stage.name}</span>
                           <span className="text-muted-foreground">{stage.index}/{stage.count}</span>
+                          <span className="tabular-nums text-slate-500" title="Percent complete, set by hand">{stage.progressPct}%</span>
                         </span>
                       ) : (
                         <span className="text-muted-foreground">—</span>

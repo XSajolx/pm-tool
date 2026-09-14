@@ -497,17 +497,11 @@ function ProjectStages({ projectId, canManage }: { projectId: string; canManage:
                   )}
                 </div>
                 <span className={cn("w-fit rounded-full px-2 py-0.5 text-[10px] font-medium", meta.cls)}>{meta.label}</span>
-                <div>
-                  <div className="mb-1 flex justify-between text-[10px] text-muted-foreground">
-                    <span>Tasks</span>
-                    <span className="tabular-nums">
-                      {st.progress.done}/{st.progress.total} · {pct}%
-                    </span>
-                  </div>
-                  <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
-                    <div className={cn("h-full rounded-full", meta.bar)} style={{ width: `${pct}%` }} />
-                  </div>
-                </div>
+                {/* Row 105: progress is a judgement, set by hand */}
+                <StageProgress stage={st} canEdit={canManage} bar={meta.bar} />
+                <p className="text-[10px] text-muted-foreground" title="Task counts are context only - they never drive the percent">
+                  Tasks {st.progress.done}/{st.progress.total}{st.progress.total ? ` (${pct}% ticked)` : ""}
+                </p>
                 <p className="text-[10px] text-muted-foreground">
                   {st.startedAt ? `Started ${fmtShortDate(st.startedAt)}` : "Not started"}
                   {st.completedAt ? ` · Done ${fmtShortDate(st.completedAt)}` : ""}
@@ -588,6 +582,101 @@ function ProjectStages({ projectId, canManage }: { projectId: string; canManage:
             </div>
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Row 105: percent complete typed by the PM, stamped with their name and time.
+ * Lowering it asks for a note; the History toggle shows every change.
+ */
+function StageProgress({ stage, canEdit, bar }: { stage: Stage; canEdit: boolean; bar: string }) {
+  const qc = useQueryClient();
+  const [editing, setEditing] = useState(false);
+  const [pct, setPct] = useState(stage.progressPct);
+  const [note, setNote] = useState("");
+  const [history, setHistory] = useState(false);
+  const save = useMutation({
+    mutationFn: () => api.setStageProgress(stage.id, { pct, note: note.trim() || undefined }),
+    onSuccess: () => {
+      setEditing(false);
+      setNote("");
+      qc.invalidateQueries({ queryKey: ["stages"] });
+      qc.invalidateQueries({ queryKey: ["stage-progress", stage.id] });
+      qc.invalidateQueries({ queryKey: ["project-activity"] });
+      qc.invalidateQueries({ queryKey: ["projects"] });
+    },
+  });
+  const { data: events = [] } = useQuery({ queryKey: ["stage-progress", stage.id], queryFn: () => api.getStageProgressHistory(stage.id), enabled: history });
+  const lowering = pct < stage.progressPct;
+  const err = save.error ? String((save.error as Error).message) : null;
+
+  return (
+    <div data-testid="stage-progress">
+      <div className="mb-1 flex items-center justify-between text-[10px] text-muted-foreground">
+        <span>Progress</span>
+        {canEdit && !editing ? (
+          <button type="button" onClick={() => { setPct(stage.progressPct); setEditing(true); }} className="rounded px-1 font-semibold tabular-nums text-slate-700 hover:bg-slate-100 hover:text-indigo-700" title="Set percent complete">
+            {stage.progressPct}% ✎
+          </button>
+        ) : (
+          <span className="font-semibold tabular-nums text-slate-700">{stage.progressPct}%</span>
+        )}
+      </div>
+      <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+        <div className={cn("h-full rounded-full transition-all", bar)} style={{ width: `${stage.progressPct}%` }} />
+      </div>
+      {editing ? (
+        <form
+          onSubmit={(e) => { e.preventDefault(); save.mutate(); }}
+          className="mt-1.5 space-y-1"
+        >
+          <div className="flex items-center gap-1">
+            <input type="range" min={0} max={100} step={5} value={pct} onChange={(e) => setPct(Number(e.target.value))} className="flex-1 accent-indigo-600" aria-label="Percent complete" />
+            <input type="number" min={0} max={100} value={pct} onChange={(e) => setPct(Math.max(0, Math.min(100, Number(e.target.value) || 0)))} className="w-12 rounded border border-border px-1 py-0.5 text-right text-[11px] tabular-nums outline-none focus:border-indigo-400" />
+            <span className="text-[10px] text-muted-foreground">%</span>
+          </div>
+          <input
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder={lowering ? "Why is it going down? (required)" : "Note (optional)"}
+            className={cn("w-full rounded border px-1.5 py-0.5 text-[11px] outline-none focus:border-indigo-400", lowering && !note.trim() ? "border-amber-300 bg-amber-50/40" : "border-border")}
+          />
+          {err && <p className="text-[10px] text-red-600">{err}</p>}
+          <div className="flex gap-1">
+            <button type="submit" disabled={save.isPending || (lowering && !note.trim())} className="rounded bg-indigo-600 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-indigo-700 disabled:opacity-50">Save</button>
+            <button type="button" onClick={() => setEditing(false)} className="px-1 text-[11px] text-muted-foreground hover:text-slate-700">Cancel</button>
+          </div>
+        </form>
+      ) : (
+        <p className="mt-1 text-[10px] text-muted-foreground">
+          {stage.progressSetBy && stage.progressSetAt ? (
+            <>
+              Set by <span className="text-slate-700">{stage.progressSetBy.name}</span> · {new Date(stage.progressSetAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+              {stage.progressNote ? <span className="block truncate italic" title={stage.progressNote}>“{stage.progressNote}”</span> : null}
+            </>
+          ) : (
+            "Not set yet"
+          )}
+          {" "}
+          <button type="button" onClick={() => setHistory((h) => !h)} className="text-indigo-700 hover:underline">{history ? "Hide history" : "History"}</button>
+        </p>
+      )}
+      {history && (
+        <ul className="mt-1 max-h-28 space-y-0.5 overflow-y-auto rounded border border-border bg-slate-50 p-1.5 text-[10px] text-slate-600">
+          {events.length ? (
+            events.map((e) => (
+              <li key={e.id}>
+                <span className={cn("font-medium tabular-nums", e.toPct < e.fromPct ? "text-red-600" : "text-slate-800")}>{e.fromPct}% → {e.toPct}%</span>
+                {" "}by {e.actor?.name ?? "someone"} · {new Date(e.createdAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+                {e.note ? <span className="block italic">“{e.note}”</span> : null}
+              </li>
+            ))
+          ) : (
+            <li className="text-muted-foreground">No changes yet.</li>
+          )}
+        </ul>
       )}
     </div>
   );

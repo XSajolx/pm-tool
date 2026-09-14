@@ -2,7 +2,7 @@ import { BadRequestException, Inject, Injectable, NotFoundException } from "@nes
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
-import { projectStages, projects, stageTemplates, statuses, tasks } from "../../db/schema.js";
+import { projectStages, projects, stageProgressEvents, stageTemplates, statuses, tasks } from "../../db/schema.js";
 import { ActivityService } from "../activity/activity.service.js";
 import { ChatEventsService } from "../chat/chat-events.service.js";
 
@@ -26,6 +26,7 @@ export class StagesService {
     const rows = await this.db.query.projectStages.findMany({
       where: and(eq(projectStages.projectId, projectId), eq(projectStages.organizationId, orgId)),
       orderBy: [asc(projectStages.position), asc(projectStages.createdAt)],
+      with: { progressSetBy: { columns: { id: true, name: true } } },
     });
     const progress = await this.progressFor(rows.map((r) => r.id));
     return rows.map((r) => ({ ...r, progress: progress.get(r.id) ?? { total: 0, done: 0 } }));
@@ -160,6 +161,65 @@ export class StagesService {
     }
     const progress = await this.progressFor([id]);
     return { ...row!, progress: progress.get(id) ?? { total: 0, done: 0 } };
+  }
+
+  /**
+   * Row 105: percent complete is a judgement call. It's stored with who set it
+   * and when; lowering it needs a note so the trail explains the slip. Nothing
+   * here reads task counts or hours.
+   */
+  async setProgress(orgId: string, userId: string, id: string, pct: number, note?: string) {
+    const stage = await this.db.query.projectStages.findFirst({ where: and(eq(projectStages.id, id), eq(projectStages.organizationId, orgId)) });
+    if (!stage) throw new NotFoundException("Stage not found");
+    const to = Math.max(0, Math.min(100, Math.round(pct)));
+    const from = stage.progressPct;
+    const cleanNote = note?.trim() || null;
+    if (to < from && !cleanNote) throw new BadRequestException("Add a short note when progress goes down");
+    if (to === from && !cleanNote) return this.one(orgId, id);
+    const now = new Date();
+    await this.db
+      .update(projectStages)
+      .set({ progressPct: to, progressSetById: userId, progressSetAt: now, progressNote: cleanNote, updatedAt: now })
+      .where(eq(projectStages.id, id));
+    await this.db.insert(stageProgressEvents).values({ organizationId: orgId, stageId: id, actorId: userId, fromPct: from, toPct: to, note: cleanNote });
+    await this.activity.record({
+      orgId,
+      actorId: userId,
+      entityType: "stage",
+      entityId: id,
+      action: "progress_set",
+      changes: [{ field: "progressPct", from, to }, ...(cleanNote ? [{ field: "note", from: null, to: cleanNote }] : [])],
+    });
+    if (to !== from) {
+      await this.chatEvents.postProjectEvent(orgId, stage.projectId, userId, {
+        type: "stage_changed",
+        text: `set “${stage.name}” to ${to}%${to < from ? ` (was ${from}%)` : ""}${cleanNote ? ` — ${cleanNote}` : ""}`,
+        link: `/projects/${stage.projectId}`,
+        entityId: id,
+      });
+    }
+    return this.one(orgId, id);
+  }
+
+  /** Row 105: the trail behind a stage's percent, newest first. */
+  async progressHistory(orgId: string, id: string) {
+    const rows = await this.db.query.stageProgressEvents.findMany({
+      where: and(eq(stageProgressEvents.stageId, id), eq(stageProgressEvents.organizationId, orgId)),
+      orderBy: [desc(stageProgressEvents.createdAt)],
+      with: { actor: { columns: { id: true, name: true, avatarUrl: true } } },
+      limit: 100,
+    });
+    return rows.map((e) => ({ id: e.id, fromPct: e.fromPct, toPct: e.toPct, note: e.note, createdAt: e.createdAt, actor: e.actor }));
+  }
+
+  private async one(orgId: string, id: string) {
+    const row = await this.db.query.projectStages.findFirst({
+      where: and(eq(projectStages.id, id), eq(projectStages.organizationId, orgId)),
+      with: { progressSetBy: { columns: { id: true, name: true } } },
+    });
+    if (!row) throw new NotFoundException("Stage not found");
+    const progress = await this.progressFor([id]);
+    return { ...row, progress: progress.get(id) ?? { total: 0, done: 0 } };
   }
 
   async remove(orgId: string, userId: string, id: string) {

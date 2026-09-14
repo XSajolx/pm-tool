@@ -15,6 +15,8 @@ const stagePatchSchema = z.object({
   /** Required when reopening a completed stage. */
   note: z.string().max(500).optional(),
 });
+/** Row 105 */
+const progressSchema = z.object({ pct: z.number().int().min(0).max(100), note: z.string().max(500).optional() });
 const templateSchema = z.object({
   name: z.string().min(1).max(120),
   stages: z.array(z.string().min(1).max(120)).min(1).max(30),
@@ -66,6 +68,19 @@ export class StagesController {
   @UsePipes(new ZodValidationPipe(stagePatchSchema))
   update(@Auth() auth: AuthContext, @Param("id") id: string, @Body() dto: z.infer<typeof stagePatchSchema>) {
     return this.stages.update(auth.orgId, auth.userId, id, dto);
+  }
+
+  /** Row 105: hand-set percent complete, with a note when it drops. */
+  @Patch("stages/:id/progress")
+  @Roles("owner", "admin", "member")
+  @UsePipes(new ZodValidationPipe(progressSchema))
+  setProgress(@Auth() auth: AuthContext, @Param("id") id: string, @Body() dto: z.infer<typeof progressSchema>) {
+    return this.stages.setProgress(auth.orgId, auth.userId, id, dto.pct, dto.note);
+  }
+
+  @Get("stages/:id/progress")
+  progressHistory(@Auth() auth: AuthContext, @Param("id") id: string) {
+    return this.stages.progressHistory(auth.orgId, id);
   }
 
   @Get("stages/:id/activity")

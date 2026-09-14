@@ -543,7 +543,21 @@ export interface Stage {
   status: StageStatus;
   startedAt: string | null;
   completedAt: string | null;
+  /** Tasks done in this stage - shown for context only. */
   progress: { total: number; done: number };
+  /** Row 105: percent complete set by hand. */
+  progressPct: number;
+  progressSetAt: string | null;
+  progressSetBy: { id: string; name: string } | null;
+  progressNote: string | null;
+}
+export interface StageProgressEvent {
+  id: string;
+  fromPct: number;
+  toPct: number;
+  note: string | null;
+  createdAt: string;
+  actor: { id: string; name: string; avatarUrl: string | null } | null;
 }
 export interface StageTemplate {
   id: string;
@@ -694,7 +708,7 @@ export interface ProjectStats {
   nextMilestone: { id: string; name: string; targetDate: string | null; overdue: boolean } | null;
   channelId: string | null;
   /** Row 100 */
-  currentStage: { id: string; name: string; status: StageStatus; index: number; count: number } | null;
+  currentStage: { id: string; name: string; status: StageStatus; index: number; count: number; progressPct: number } | null;
 }
 
 export interface Project {
@@ -1551,6 +1565,10 @@ export const api = {
   updateStage: (id: string, body: { name?: string; status?: StageStatus; note?: string }) =>
     request<Stage>(`/stages/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteStage: (id: string) => request<{ id: string }>(`/stages/${id}`, { method: "DELETE" }),
+  /** Row 105 */
+  setStageProgress: (id: string, body: { pct: number; note?: string }) =>
+    request<Stage>(`/stages/${id}/progress`, { method: "PATCH", body: JSON.stringify(body) }),
+  getStageProgressHistory: (id: string) => request<StageProgressEvent[]>(`/stages/${id}/progress`),
   getStageActivity: (id: string) => request<ActivityEntry[]>(`/stages/${id}/activity`),
   /** Row 102 */
   getProjectActivity: (projectId: string, limit = 150) => request<ProjectActivity>(`/projects/${projectId}/activity?limit=${limit}`),
