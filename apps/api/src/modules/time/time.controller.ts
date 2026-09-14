@@ -50,6 +50,8 @@ const codePatchSchema = z.object({ name: z.string().min(1).max(64).optional(), c
 /** Row 75 */
 const submitSchema = z.object({ week: z.string().min(8), approverId: z.string().uuid().optional() });
 const decisionSchema = z.object({ approve: z.boolean(), note: z.string().max(2000).optional() });
+/** Row 97 */
+const nudgeSchema = z.object({ userId: z.string().uuid(), week: z.string().min(8) });
 /** Row 93 */
 const reopenSchema = z.object({ reason: z.string().min(1).max(2000) });
 /** Row 94 */
@@ -210,6 +212,20 @@ export class TimeController {
   @UsePipes(new ZodValidationPipe(decisionSchema))
   decideSubmission(@Auth() auth: AuthContext, @Param("id") id: string, @Body() dto: z.infer<typeof decisionSchema>) {
     return this.time.decideTimesheet(auth.orgId, this.actor(auth), id, dto.approve, dto.note);
+  }
+
+  /** Row 97: week-by-person status board (project managers). */
+  @Get("timesheet/board")
+  @Roles("owner", "admin")
+  board(@Auth() auth: AuthContext, @Query("week") week?: string) {
+    return this.time.teamBoard(auth.orgId, week ?? new Date().toISOString());
+  }
+
+  @Post("timesheet/board/nudge")
+  @Roles("owner", "admin")
+  @UsePipes(new ZodValidationPipe(nudgeSchema))
+  nudge(@Auth() auth: AuthContext, @Body() dto: z.infer<typeof nudgeSchema>) {
+    return this.time.nudge(auth.orgId, this.actor(auth), dto.userId, dto.week);
   }
 
   /** Row 93: unlock an approved week with a reason (admins / the approver). */

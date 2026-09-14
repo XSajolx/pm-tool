@@ -10,6 +10,7 @@ import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
 import { lists, memberships, projects, projectStages, tasks, timeEntries, timesheetEvents, timesheetSubmissions, users } from "../../db/schema.js";
 import { NotificationsService, pendingApproval } from "../notifications/notifications.service.js";
+import { accessEnded } from "../auth/auth.service.js";
 import type { Role } from "../auth/auth.types.js";
 
 export interface Actor {
@@ -544,6 +545,76 @@ export class TimeService {
   }
 
   /** Project must be in this org; task (if given) must live in the project's space. */
+  /**
+   * Row 97: week-by-person status board for project managers. Status is
+   * derived: approved / submitted / rejected / reopened come from the
+   * submission; otherwise "in_progress" when hours exist, "not_started" when not.
+   */
+  async teamBoard(orgId: string, weekOf: string) {
+    const weekStart = startOfWeek(new Date(weekOf));
+    const weekEnd = new Date(weekStart.getTime() + 7 * DAY_MS);
+    const members = await this.db.query.memberships.findMany({ where: eq(memberships.organizationId, orgId), with: { user: { columns: { id: true, name: true, email: true, avatarUrl: true } } } });
+    const active = members.filter((m) => !accessEnded(m) && m.role !== "guest");
+    const ids = active.map((m) => m.userId);
+    if (!ids.length) return { weekStart: weekStart.toISOString(), people: [] };
+    const [hoursRows, subs] = await Promise.all([
+      this.db
+        .select({ userId: timeEntries.userId, seconds: sql<number>`coalesce(sum(${timeEntries.durationSeconds}), 0)::int`, billable: sql<number>`coalesce(sum(case when ${timeEntries.billable} then ${timeEntries.durationSeconds} else 0 end), 0)::int` })
+        .from(timeEntries)
+        .where(and(eq(timeEntries.organizationId, orgId), inArray(timeEntries.userId, ids), gte(timeEntries.startedAt, weekStart), lt(timeEntries.startedAt, weekEnd), isNull(timeEntries.archivedAt)))
+        .groupBy(timeEntries.userId),
+      this.db.query.timesheetSubmissions.findMany({ where: and(eq(timesheetSubmissions.organizationId, orgId), eq(timesheetSubmissions.weekStart, weekStart), inArray(timesheetSubmissions.userId, ids)) }),
+    ]);
+    const hoursBy = new Map(hoursRows.map((h) => [h.userId, h]));
+    const subBy = new Map(subs.map((s) => [s.userId, s]));
+    const order = { rejected: 0, reopened: 1, not_started: 2, in_progress: 3, submitted: 4, approved: 5 } as const;
+    const people = active.map((m) => {
+      const h = hoursBy.get(m.userId);
+      const hours = Math.round(((h?.seconds ?? 0) / 3600) * 10) / 10;
+      const sub = subBy.get(m.userId);
+      const status = (sub?.status as keyof typeof order | undefined) ?? (hours > 0 ? "in_progress" : "not_started");
+      return {
+        userId: m.userId,
+        name: m.user.name,
+        email: m.user.email,
+        avatarUrl: m.user.avatarUrl,
+        role: m.role,
+        hours,
+        billableHours: Math.round(((h?.billable ?? 0) / 3600) * 10) / 10,
+        expected: m.weeklyCapacityHours,
+        status,
+        submissionId: sub?.id ?? null,
+        submittedAt: sub?.submittedAt ?? null,
+        decidedAt: sub?.decidedAt ?? null,
+        note: sub?.note ?? null,
+      };
+    });
+    people.sort((a, b) => order[a.status] - order[b.status] || a.name.localeCompare(b.name));
+    return { weekStart: weekStart.toISOString(), people };
+  }
+
+  /** Row 97: chase one person about one week. */
+  async nudge(orgId: string, actor: Actor, userId: string, weekOf: string) {
+    const weekStart = startOfWeek(new Date(weekOf));
+    const board = await this.teamBoard(orgId, weekOf);
+    const p = board.people.find((x) => x.userId === userId);
+    if (!p) throw new NotFoundException("That person isn't on the board");
+    const [who] = await this.db.select({ name: users.name }).from(users).where(eq(users.id, actor.userId));
+    const missing = Math.max(0, Math.round((p.expected - p.hours) * 10) / 10);
+    await this.notifications.notifyDirect({
+      orgId,
+      receiverId: userId,
+      actorId: actor.userId,
+      entityType: "timesheet",
+      entityId: userId,
+      verb: "timesheet_reminder",
+      title: `${who?.name ?? "Your project manager"} is waiting on your timesheet`,
+      body: `Week of ${weekStart.toLocaleDateString()}: ${p.hours}h of ${p.expected}h logged${missing ? ` (${missing}h to go)` : ""}${p.status === "submitted" || p.status === "approved" ? "" : " - please submit it"}`,
+      data: { weekStart: weekStart.toISOString(), link: "/timesheets" },
+    });
+    return { nudged: userId };
+  }
+
   /**
    * Row 93: a project manager unlocks an approved week with a reason. The
    * hours become editable again, the member is told why, and the week must be

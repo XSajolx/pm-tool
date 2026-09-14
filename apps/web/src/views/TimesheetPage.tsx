@@ -4,6 +4,7 @@ import { api } from "../lib/api.js";
 import { useAuth } from "../lib/auth.js";
 import { fmtDayLabel, fmtHours, fmtShortDate, isoDay } from "../lib/format.js";
 import { cn } from "../lib/utils.js";
+import { TimesheetBoard } from "../components/TimesheetBoard.js";
 
 const WEEK_MS = 7 * 86_400_000;
 
@@ -19,6 +20,8 @@ export function TimesheetPage() {
 
   const [weekOf, setWeekOf] = useState(() => new Date());
   const [forUser, setForUser] = useState<string>("");
+  // Row 97: project managers can flip to the week-by-person board.
+  const [board, setBoard] = useState(false);
   // Row 88: hand-added rows are project or project+task. Row 89: they're remembered per week
   // (browser-side) so a copied set of rows survives a reload even before hours are typed.
   type ExtraRow = { projectId: string; taskId: string | null; taskTitle?: string | null };
@@ -172,6 +175,16 @@ export function TimesheetPage() {
           <ApproveControls submission={sheet.submission} onDone={() => qc.invalidateQueries({ queryKey: ["timesheet"] })} />
         )}
         {isAdmin && (
+          <button
+            type="button"
+            onClick={() => setBoard((b) => !b)}
+            className={cn("rounded-md border px-2.5 py-1 text-xs font-medium", board ? "border-indigo-300 bg-indigo-50 text-indigo-800" : "border-border bg-white text-slate-700 hover:bg-muted", !forUser && !board ? "ml-auto" : "")}
+            title="Who has submitted, who's short, who's approved"
+          >
+            {board ? "← Back to grid" : "Team board"}
+          </button>
+        )}
+        {isAdmin && !board && (
           <select value={forUser} onChange={(e) => setForUser(e.target.value)} className={cn("rounded-md border border-border bg-white px-2 py-1 text-xs text-slate-700", forUser ? "ml-auto" : "")}>
             <option value="">My timesheet</option>
             {members.map((m) => (
@@ -182,14 +195,23 @@ export function TimesheetPage() {
       </div>
 
       <div className="flex-1 overflow-auto p-6">
-        {locked && sheet?.submission && (
+        {board && isAdmin ? (
+          <TimesheetBoard
+            weekIso={weekIso}
+            onOpen={(userId) => {
+              setForUser(userId);
+              setBoard(false);
+            }}
+          />
+        ) : null}
+        {!board && locked && sheet?.submission && (
           <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800">
             🔒 This week is approved{sheet.submission.decidedBy ? ` by ${sheet.submission.decidedBy.name}` : ""}
             {sheet.submission.decidedAt ? ` on ${new Date(sheet.submission.decidedAt).toLocaleDateString()}` : ""} and its hours are locked.
             <span className="text-xs text-green-700">Need a change? Ask a project manager to unlock it.</span>
           </div>
         )}
-        {isLoading || !sheet ? (
+        {board ? null : isLoading || !sheet ? (
           <p className="text-sm text-muted-foreground">Loading…</p>
         ) : (
           <div className="inline-block min-w-full overflow-hidden rounded-lg border border-border bg-white">

@@ -709,6 +709,26 @@ export interface TimeEntry {
   stage?: { id: string; name: string } | null;
 }
 
+/** Row 97 */
+export interface TimesheetBoard {
+  weekStart: string;
+  people: {
+    userId: string;
+    name: string;
+    email: string;
+    avatarUrl: string | null;
+    role: string;
+    hours: number;
+    billableHours: number;
+    expected: number;
+    status: "not_started" | "in_progress" | "submitted" | "approved" | "rejected" | "reopened";
+    submissionId: string | null;
+    submittedAt: string | null;
+    decidedAt: string | null;
+    note: string | null;
+  }[];
+}
+
 /** Row 94 */
 export interface ReminderSlot {
   weekday: number;
@@ -1522,6 +1542,9 @@ export const api = {
   /** Row 75 */
   submitTimesheet: (week: string, approverId?: string) =>
     request<TimesheetSubmission>(`/time/timesheet/submit`, { method: "POST", body: JSON.stringify({ week, approverId }) }),
+  /** Row 97 */
+  getTimesheetBoard: (week: string) => request<TimesheetBoard>(`/time/timesheet/board?week=${encodeURIComponent(week)}`),
+  nudgeTimesheet: (userId: string, week: string) => request<{ nudged: string }>(`/time/timesheet/board/nudge`, { method: "POST", body: JSON.stringify({ userId, week }) }),
   /** Row 94 */
   getTimesheetReminders: () => request<ReminderSlot[]>(`/time/timesheet/reminders`),
   setTimesheetReminders: (slots: ReminderSlot[]) => request<ReminderSlot[]>(`/time/timesheet/reminders`, { method: "PUT", body: JSON.stringify({ slots }) }),
