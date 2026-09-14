@@ -18,6 +18,7 @@ import { TimeModule } from "./modules/time/time.module.js";
 import { ResourcingModule } from "./modules/resourcing/resourcing.module.js";
 import { CrmModule } from "./modules/crm/crm.module.js";
 import { DocumentsModule } from "./modules/documents/documents.module.js";
+import { FilesModule } from "./modules/files/files.module.js";
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { DocumentsModule } from "./modules/documents/documents.module.js";
     TasksModule,
     WorkspaceModule,
     ChatModule,
+    FilesModule,
     ReactionsModule,
     CyclesModule,
     ViewsModule,

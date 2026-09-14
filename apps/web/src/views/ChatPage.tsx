@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, type ChatChannel, type ChatMember, type ChatMessage } from "../lib/api.js";
+import { api, type Attachment, type ChatChannel, type ChatMember, type ChatMessage } from "../lib/api.js";
 import { useAuth } from "../lib/auth.js";
 import { getSocket } from "../lib/socket.js";
 import { ChatActions, PeoplePicker } from "../components/ChatActions.js";
@@ -145,7 +145,9 @@ function MessagePane({ channelId, channel }: { channelId: string; channel?: Chat
   const qc = useQueryClient();
   const meId = useAuth().user!.id;
   const [threadId, setThreadId] = useState<string | null>(null);
+  const [filesOpen, setFilesOpen] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const paneRef = useRef<HTMLDivElement>(null);
 
   const { data: messages = [] } = useQuery({
     queryKey: ["messages", channelId],
@@ -186,6 +188,7 @@ function MessagePane({ channelId, channel }: { channelId: string; channel?: Chat
     socket.emit("join", channelId);
     const onNew = (msg: ChatMessage) => {
       if (msg.channelId !== channelId) return;
+      if (msg.attachments?.length) qc.invalidateQueries({ queryKey: ["channel-files", channelId] });
       if (msg.parentMessageId) {
         const parentId = msg.parentMessageId;
         qc.setQueryData<ThreadData>(["thread", channelId, parentId], (old) =>
@@ -217,9 +220,12 @@ function MessagePane({ channelId, channel }: { channelId: string; channel?: Chat
   }, [messages.length]);
 
   const send = useMutation({
-    mutationFn: ({ body, ids }: { body: string; ids: string[] }) => api.sendMessage(channelId, body, undefined, ids),
+    mutationFn: ({ body, ids, files }: { body: string; ids: string[]; files: string[] }) => api.sendMessage(channelId, body, undefined, ids, files),
     // The socket echoes it too; this just makes sure it shows even if the socket is down.
-    onSuccess: (msg) => qc.setQueryData<ChatMessage[]>(["messages", channelId], (old = []) => (old.some((m) => m.id === msg.id) ? old : [...old, msg])),
+    onSuccess: (msg) => {
+      qc.setQueryData<ChatMessage[]>(["messages", channelId], (old = []) => (old.some((m) => m.id === msg.id) ? old : [...old, msg]));
+      if (msg.attachments?.length) qc.invalidateQueries({ queryKey: ["channel-files", channelId] });
+    },
   });
   const members = channel?.members ?? [];
 
@@ -230,8 +236,8 @@ function MessagePane({ channelId, channel }: { channelId: string; channel?: Chat
 
   return (
     <div className="flex flex-1 overflow-hidden bg-white">
-      <div className="flex min-w-0 flex-1 flex-col">
-        <ChannelHeader channel={channel} title={title} />
+      <div ref={paneRef} className="relative flex min-w-0 flex-1 flex-col">
+        <ChannelHeader channel={channel} title={title} filesOpen={filesOpen} onToggleFiles={() => setFilesOpen((v) => !v)} />
 
         <div className="flex-1 space-y-3 overflow-y-auto px-5 py-4">
           {messages.length === 0 && (
@@ -265,10 +271,18 @@ function MessagePane({ channelId, channel }: { channelId: string; channel?: Chat
           <div ref={bottomRef} />
         </div>
 
-        <MentionComposer members={members} placeholder={`Message ${title}`} pending={send.isPending} onSend={(body, ids) => send.mutate({ body, ids })} />
+        <MentionComposer
+          members={members}
+          channelId={channelId}
+          dropZoneRef={paneRef}
+          placeholder={`Message ${title}`}
+          pending={send.isPending}
+          onSend={(body, ids, files) => send.mutate({ body, ids, files })}
+        />
       </div>
 
       {threadId && <ThreadPane channelId={channelId} messageId={threadId} meId={meId} members={members} onClose={() => setThreadId(null)} />}
+      {filesOpen && !threadId && <FilesPanel channelId={channelId} onClose={() => setFilesOpen(false)} />}
     </div>
   );
 }
@@ -326,7 +340,8 @@ function MessageRow({
             <span className="text-[11px] text-muted-foreground">{fmtTime(m.createdAt)}</span>
           </div>
         )}
-        <MessageBody body={m.body} members={members} meId={meId} />
+        {m.body && <MessageBody body={m.body} members={members} meId={meId} />}
+        {m.attachments && m.attachments.length > 0 && <AttachmentList files={m.attachments} compact={compact} />}
         {onReply && (m.replyCount ?? 0) > 0 && (
           <button type="button" onClick={onReply} className="mt-1 flex items-center gap-1.5 text-xs font-medium text-indigo-600 hover:underline">
             💬 {m.replyCount} {m.replyCount === 1 ? "reply" : "replies"}
@@ -361,7 +376,7 @@ function ThreadPane({ channelId, messageId, meId, members, onClose }: { channelI
   }, [data?.replies.length]);
 
   const reply = useMutation({
-    mutationFn: ({ body, ids }: { body: string; ids: string[] }) => api.sendMessage(channelId, body, messageId, ids),
+    mutationFn: ({ body, ids, files }: { body: string; ids: string[]; files: string[] }) => api.sendMessage(channelId, body, messageId, ids, files),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["thread", channelId, messageId] });
       qc.invalidateQueries({ queryKey: ["messages", channelId] });
@@ -395,7 +410,7 @@ function ThreadPane({ channelId, messageId, meId, members, onClose }: { channelI
         )}
         <div ref={endRef} />
       </div>
-      <MentionComposer members={members} placeholder="Reply in thread…" buttonLabel="Reply" autoFocus pending={reply.isPending} onSend={(body, ids) => reply.mutate({ body, ids })} />
+      <MentionComposer members={members} channelId={channelId} placeholder="Reply in thread…" buttonLabel="Reply" autoFocus pending={reply.isPending} onSend={(body, ids, files) => reply.mutate({ body, ids, files })} />
     </aside>
   );
 }
@@ -413,13 +428,17 @@ const SPECIAL_MENTIONS: Suggestion[] = [
 ];
 
 /**
- * Row 41: a one-line composer with an @mention picker. The picker lists only
- * people who can see this channel, plus @channel and @here. Enter/Tab picks,
- * arrows move, Escape dismisses. Picked ids ride along with the message so
- * the server doesn't have to guess from names.
+ * Row 41 + 43: a one-line composer with an @mention picker and file uploads.
+ * The picker lists only people who can see this channel, plus @channel and
+ * @here. Files arrive by drag-drop anywhere on the pane, paste, or the 📎
+ * button; they upload immediately and go out with the next message.
  */
+type PendingFile = { key: string; name: string; size: number; mimeType: string; uploading: boolean; error?: string; attachment?: Attachment; preview?: string };
+
 function MentionComposer({
   members,
+  channelId,
+  dropZoneRef,
   placeholder,
   onSend,
   pending,
@@ -427,8 +446,10 @@ function MentionComposer({
   buttonLabel = "Send",
 }: {
   members: ChatMember[];
+  channelId: string;
+  dropZoneRef?: React.RefObject<HTMLDivElement>;
   placeholder: string;
-  onSend: (body: string, mentionedUserIds: string[]) => void;
+  onSend: (body: string, mentionedUserIds: string[], attachmentIds: string[]) => void;
   pending?: boolean;
   autoFocus?: boolean;
   buttonLabel?: string;
@@ -438,6 +459,9 @@ function MentionComposer({
   const [ids, setIds] = useState<string[]>([]);
   const [cursor, setCursor] = useState(0);
   const [dismissed, setDismissed] = useState<string | null>(null);
+  const [files, setFiles] = useState<PendingFile[]>([]);
+  const [dragging, setDragging] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
   const token = mentionToken(draft);
   const suggestions: Suggestion[] =
     token === null || dismissed === token
@@ -450,17 +474,89 @@ function MentionComposer({
           ...SPECIAL_MENTIONS.filter((s) => s.name.startsWith(token)),
         ];
   useEffect(() => setCursor(0), [token]);
+  useEffect(() => {
+    setFiles([]);
+    setDraft("");
+    setIds([]);
+  }, [channelId]);
+
+  function addFiles(list: FileList | File[]) {
+    const picked = Array.from(list).filter((f) => f.size > 0);
+    if (!picked.length) return;
+    const entries: PendingFile[] = picked.map((f) => ({
+      key: `${f.name}-${f.size}-${Date.now()}-${Math.random()}`,
+      name: f.name,
+      size: f.size,
+      mimeType: f.type,
+      uploading: true,
+      preview: f.type.startsWith("image/") ? URL.createObjectURL(f) : undefined,
+    }));
+    setFiles((cur) => [...cur, ...entries]);
+    entries.forEach((entry, i) => {
+      api
+        .uploadFile(picked[i]!, { channelId })
+        .then((attachment) => setFiles((cur) => cur.map((f) => (f.key === entry.key ? { ...f, uploading: false, attachment } : f))))
+        .catch((err: Error) => setFiles((cur) => cur.map((f) => (f.key === entry.key ? { ...f, uploading: false, error: err.message.includes("413") ? "Too large (25 MB max)" : "Upload failed" } : f))));
+    });
+  }
+  function removeFile(key: string) {
+    const f = files.find((x) => x.key === key);
+    if (f?.attachment) void api.deleteFile(f.attachment.id).catch(() => undefined);
+    if (f?.preview) URL.revokeObjectURL(f.preview);
+    setFiles((cur) => cur.filter((x) => x.key !== key));
+  }
+
+  // Drag-drop anywhere on the message pane (row 43).
+  useEffect(() => {
+    const zone = dropZoneRef?.current;
+    if (!zone) return;
+    let depth = 0;
+    const enter = (e: DragEvent) => {
+      if (!e.dataTransfer?.types.includes("Files")) return;
+      depth += 1;
+      setDragging(true);
+    };
+    const over = (e: DragEvent) => {
+      if (e.dataTransfer?.types.includes("Files")) e.preventDefault();
+    };
+    const leave = () => {
+      depth = Math.max(0, depth - 1);
+      if (depth === 0) setDragging(false);
+    };
+    const drop = (e: DragEvent) => {
+      if (!e.dataTransfer?.files.length) return;
+      e.preventDefault();
+      depth = 0;
+      setDragging(false);
+      addFiles(e.dataTransfer.files);
+    };
+    zone.addEventListener("dragenter", enter);
+    zone.addEventListener("dragover", over);
+    zone.addEventListener("dragleave", leave);
+    zone.addEventListener("drop", drop);
+    return () => {
+      zone.removeEventListener("dragenter", enter);
+      zone.removeEventListener("dragover", over);
+      zone.removeEventListener("dragleave", leave);
+      zone.removeEventListener("drop", drop);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dropZoneRef, channelId]);
 
   function pick(s: Suggestion) {
     setDraft((d) => d.replace(/@[^\s@]*$/, `@${s.name} `));
     if (!s.special) setIds((v) => (v.includes(s.id) ? v : [...v, s.id]));
   }
+  const uploading = files.some((f) => f.uploading);
+  const ready = files.filter((f) => f.attachment).map((f) => f.attachment!.id);
+  const canSend = (draft.trim().length > 0 || ready.length > 0) && !uploading && !pending;
   function submit() {
-    const body = draft.trim();
-    if (!body || pending) return;
-    onSend(body, ids);
+    if (!canSend) return;
+    onSend(draft.trim(), ids, ready);
+    files.forEach((f) => f.preview && URL.revokeObjectURL(f.preview));
     setDraft("");
     setIds([]);
+    setFiles([]);
   }
 
   return (
@@ -471,6 +567,11 @@ function MentionComposer({
       }}
       className="border-t border-border p-3"
     >
+      {dragging && (
+        <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center bg-indigo-50/80">
+          <div className="rounded-xl border-2 border-dashed border-indigo-400 bg-white px-6 py-4 text-sm font-medium text-indigo-700">📎 Drop files to share them here</div>
+        </div>
+      )}
       <div className="relative">
         {suggestions.length > 0 && (
           <div className="absolute bottom-full left-0 z-20 mb-1 w-64 rounded-md border border-border bg-white py-1 shadow-lg">
@@ -493,13 +594,37 @@ function MentionComposer({
             ))}
           </div>
         )}
+        {files.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-2">
+            {files.map((f) => (
+              <div key={f.key} className={cn("relative flex items-center gap-2 rounded-md border px-2 py-1 text-xs", f.error ? "border-red-300 bg-red-50 text-red-700" : "border-border bg-[#fbfbfa] text-slate-700")}>
+                {f.preview ? <img src={f.preview} alt="" className="h-10 w-10 rounded object-cover" /> : <span className="text-base">📄</span>}
+                <span className="max-w-[160px] truncate">{f.name}</span>
+                <span className="text-[10px] text-muted-foreground">{f.uploading ? "uploading…" : f.error ? f.error : fmtSize(f.size)}</span>
+                <button type="button" onClick={() => removeFile(f.key)} className="ml-1 text-slate-400 hover:text-red-600" aria-label="Remove file">
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
         <div className="flex items-center gap-2 rounded-lg border border-border bg-white px-3 py-2 focus-within:ring-2 focus-within:ring-indigo-500/30">
+          <input ref={fileInput} type="file" multiple hidden onChange={(e) => e.target.files && addFiles(e.target.files)} />
+          <button type="button" onClick={() => fileInput.current?.click()} title="Attach files" className="text-slate-400 hover:text-indigo-600">
+            📎
+          </button>
           <input
             autoFocus={autoFocus}
             value={draft}
             onChange={(e) => {
               setDraft(e.target.value);
               setDismissed(null);
+            }}
+            onPaste={(e) => {
+              if (e.clipboardData.files.length) {
+                e.preventDefault();
+                addFiles(e.clipboardData.files);
+              }
             }}
             onKeyDown={(e) => {
               if (!suggestions.length) return;
@@ -517,15 +642,119 @@ function MentionComposer({
                 setDismissed(token);
               }
             }}
-            placeholder={`${placeholder} · @ to mention`}
+            placeholder={`${placeholder} · @ to mention · drop files`}
             className="min-w-0 flex-1 text-sm outline-none"
           />
-          <button type="submit" disabled={!draft.trim() || pending} className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-indigo-700 disabled:opacity-40">
-            {buttonLabel}
+          <button type="submit" disabled={!canSend} className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-indigo-700 disabled:opacity-40">
+            {uploading ? "Uploading…" : buttonLabel}
           </button>
         </div>
       </div>
     </form>
+  );
+}
+
+function fmtSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/** Row 43: files on a message — images inline, everything else as a card. */
+function AttachmentList({ files, compact }: { files: Attachment[]; compact?: boolean }) {
+  const images = files.filter((f) => f.mimeType.startsWith("image/"));
+  const others = files.filter((f) => !f.mimeType.startsWith("image/"));
+  return (
+    <div className="mt-1.5 space-y-1.5">
+      {images.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {images.map((f) => (
+            <a key={f.id} href={f.url} target="_blank" rel="noreferrer" title={`${f.filename} · ${fmtSize(f.sizeBytes)}`}>
+              <img src={f.url} alt={f.filename} className={cn("rounded-md border border-border object-cover", compact ? "max-h-32" : "max-h-64 max-w-sm")} loading="lazy" />
+            </a>
+          ))}
+        </div>
+      )}
+      {others.map((f) => (
+        <a key={f.id} href={f.url} target="_blank" rel="noreferrer" className="flex w-fit max-w-full items-center gap-2 rounded-md border border-border bg-[#fbfbfa] px-2.5 py-1.5 text-xs text-slate-700 hover:border-indigo-300 hover:bg-indigo-50/40">
+          <span className="text-base">{fileIcon(f.mimeType, f.filename)}</span>
+          <span className="truncate font-medium">{f.filename}</span>
+          <span className="shrink-0 text-muted-foreground">{fmtSize(f.sizeBytes)}</span>
+        </a>
+      ))}
+    </div>
+  );
+}
+
+function fileIcon(mime: string, name: string) {
+  if (mime.includes("pdf")) return "📕";
+  if (mime.includes("zip") || mime.includes("compressed")) return "🗜️";
+  if (mime.includes("sheet") || /\.(xlsx?|csv)$/i.test(name)) return "📊";
+  if (mime.includes("presentation") || /\.pptx?$/i.test(name)) return "📽️";
+  if (mime.includes("word") || /\.docx?$/i.test(name)) return "📝";
+  if (mime.startsWith("video/")) return "🎬";
+  if (mime.startsWith("audio/")) return "🎵";
+  return "📄";
+}
+
+/** Row 43: everything shared in this channel, newest first — images as a grid, files as a list. */
+function FilesPanel({ channelId, onClose }: { channelId: string; onClose: () => void }) {
+  const { data: files = [], isLoading } = useQuery({ queryKey: ["channel-files", channelId], queryFn: () => api.getChannelFiles(channelId) });
+  const images = files.filter((f) => f.mimeType.startsWith("image/"));
+  const others = files.filter((f) => !f.mimeType.startsWith("image/"));
+  return (
+    <aside className="flex w-80 shrink-0 flex-col border-l border-border bg-[#fbfbfa]">
+      <header className="flex items-center justify-between border-b border-border px-4 py-3">
+        <span className="text-sm font-semibold">
+          Files <span className="text-xs font-normal text-muted-foreground">{files.length}</span>
+        </span>
+        <button onClick={onClose} className="rounded p-1 text-slate-400 hover:bg-muted" aria-label="Close files">
+          ✕
+        </button>
+      </header>
+      <div className="flex-1 space-y-4 overflow-y-auto px-4 py-3">
+        {isLoading ? (
+          <p className="text-sm text-muted-foreground">Loading…</p>
+        ) : files.length === 0 ? (
+          <p className="pt-6 text-center text-sm text-muted-foreground">Nothing shared here yet. Drop a file into the conversation.</p>
+        ) : (
+          <>
+            {images.length > 0 && (
+              <section>
+                <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Images</p>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {images.map((f) => (
+                    <a key={f.id} href={f.url} target="_blank" rel="noreferrer" title={`${f.filename} · ${f.uploadedBy?.name ?? ""}`}>
+                      <img src={f.url} alt={f.filename} className="aspect-square w-full rounded-md border border-border object-cover" loading="lazy" />
+                    </a>
+                  ))}
+                </div>
+              </section>
+            )}
+            {others.length > 0 && (
+              <section>
+                <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Files</p>
+                <ul className="space-y-1">
+                  {others.map((f) => (
+                    <li key={f.id}>
+                      <a href={f.url} target="_blank" rel="noreferrer" className="flex items-center gap-2 rounded-md border border-border bg-white px-2 py-1.5 text-xs hover:border-indigo-300">
+                        <span className="text-base">{fileIcon(f.mimeType, f.filename)}</span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate font-medium text-slate-800">{f.filename}</span>
+                          <span className="block truncate text-[10px] text-muted-foreground">
+                            {fmtSize(f.sizeBytes)} · {f.uploadedBy?.name ?? "—"} · {new Date(f.createdAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                          </span>
+                        </span>
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+          </>
+        )}
+      </div>
+    </aside>
   );
 }
 
@@ -568,7 +797,7 @@ function MessageBody({ body, members, meId }: { body: string; members: ChatMembe
  * sense for this kind of channel — invite/leave for named channels, a link to
  * the project team for project channels, nothing for DMs.
  */
-function ChannelHeader({ channel, title }: { channel?: ChatChannel; title: string }) {
+function ChannelHeader({ channel, title, filesOpen, onToggleFiles }: { channel?: ChatChannel; title: string; filesOpen?: boolean; onToggleFiles?: () => void }) {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [showMembers, setShowMembers] = useState(false);
@@ -614,6 +843,11 @@ function ChannelHeader({ channel, title }: { channel?: ChatChannel; title: strin
         )}
         {channel.isPrivate && !isProject && <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-slate-600">Private</span>}
         <div className="ml-auto flex items-center gap-2">
+          {onToggleFiles && (
+            <button type="button" onClick={onToggleFiles} className={cn("rounded-md px-2 py-1 text-xs hover:bg-muted", filesOpen ? "bg-indigo-50 text-indigo-700" : "text-slate-600")} title="Files shared in this channel">
+              📎 Files
+            </button>
+          )}
           <button type="button" onClick={() => setShowMembers((v) => !v)} className="rounded-md px-2 py-1 text-xs text-slate-600 hover:bg-muted">
             👥 {channel.members.length}
           </button>

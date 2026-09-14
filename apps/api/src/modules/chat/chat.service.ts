@@ -3,6 +3,7 @@ import { and, asc, count, eq, gt, inArray, isNull, max, ne, or } from "drizzle-o
 import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
 import { channels, channelMembers, memberships, messages, notificationPreferences, notifications } from "../../db/schema.js";
+import { FilesService } from "../files/files.service.js";
 
 /** "Website Redesign" → "website-redesign" (channel names are slugs). */
 function slug(name: string) {
@@ -18,7 +19,10 @@ function slug(name: string) {
 
 @Injectable()
 export class ChatService {
-  constructor(@Inject(DRIZZLE) private readonly db: DB) {}
+  constructor(
+    @Inject(DRIZZLE) private readonly db: DB,
+    private readonly files: FilesService,
+  ) {}
 
   /**
    * Channels the user belongs to, with members (client derives DM names).
@@ -148,9 +152,10 @@ export class ChatService {
           .groupBy(messages.parentMessageId)
       : [];
     const byParent = new Map(counts.map((c) => [c.parentMessageId!, c]));
+    const files = await this.files.forMessages(ids);
     return rows.map((m) => {
       const c = byParent.get(m.id);
-      return { ...this.shape(m), replyCount: Number(c?.n ?? 0), lastReplyAt: c?.last ?? null };
+      return { ...this.shape(m), replyCount: Number(c?.n ?? 0), lastReplyAt: c?.last ?? null, attachments: files.get(m.id) ?? [] };
     });
   }
 
@@ -167,13 +172,17 @@ export class ChatService {
       with: { author: true },
       orderBy: (m) => [asc(m.createdAt)],
     });
-    return { root: { ...this.shape(root), replyCount: replies.length, lastReplyAt: replies.at(-1)?.createdAt ?? null }, replies: replies.map(this.shape) };
+    const files = await this.files.forMessages([root.id, ...replies.map((r) => r.id)]);
+    return {
+      root: { ...this.shape(root), replyCount: replies.length, lastReplyAt: replies.at(-1)?.createdAt ?? null, attachments: files.get(root.id) ?? [] },
+      replies: replies.map((r) => ({ ...this.shape(r), attachments: files.get(r.id) ?? [] })),
+    };
   }
 
   /** A channel message, or — with `parentMessageId` — a reply in that message's thread (one level deep). */
-  async sendMessage(orgId: string, channelId: string, userId: string, body: string, parentMessageId?: string | null) {
+  async sendMessage(orgId: string, channelId: string, userId: string, body: string, parentMessageId?: string | null, attachmentIds: string[] = []) {
     await this.assertMember(channelId, userId);
-    if (!body?.trim()) throw new BadRequestException("Message can't be empty");
+    if (!body?.trim() && !attachmentIds.length) throw new BadRequestException("Message can't be empty");
     if (parentMessageId) {
       const parent = await this.db.query.messages.findFirst({
         where: and(eq(messages.id, parentMessageId), eq(messages.channelId, channelId)),
@@ -184,13 +193,16 @@ export class ChatService {
     }
     const [row] = await this.db
       .insert(messages)
-      .values({ organizationId: orgId, channelId, authorId: userId, body, parentMessageId: parentMessageId ?? null })
+      .values({ organizationId: orgId, channelId, authorId: userId, body: body ?? "", parentMessageId: parentMessageId ?? null })
       .returning();
+    // Row 43: files were uploaded while composing; bind them to the message now.
+    await this.files.attachToMessage(orgId, channelId, row!.id, attachmentIds);
     const withAuthor = await this.db.query.messages.findFirst({
       where: eq(messages.id, row!.id),
       with: { author: true },
     });
-    return { ...this.shape(withAuthor!), replyCount: 0, lastReplyAt: null };
+    const files = await this.files.forMessages([row!.id]);
+    return { ...this.shape(withAuthor!), replyCount: 0, lastReplyAt: null, attachments: files.get(row!.id) ?? [] };
   }
 
   /**

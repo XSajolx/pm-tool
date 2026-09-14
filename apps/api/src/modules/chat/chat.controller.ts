@@ -31,9 +31,9 @@ export class ChatController {
   async send(
     @Auth() auth: AuthContext,
     @Param("id") id: string,
-    @Body() body: { body: string; parentMessageId?: string | null; mentionedUserIds?: string[] },
+    @Body() body: { body: string; parentMessageId?: string | null; mentionedUserIds?: string[]; attachmentIds?: string[] },
   ) {
-    const msg = await this.chat.sendMessage(auth.orgId, id, auth.userId, body.body, body.parentMessageId);
+    const msg = await this.chat.sendMessage(auth.orgId, id, auth.userId, body.body ?? "", body.parentMessageId, body.attachmentIds ?? []);
     // Replies are broadcast too; the client routes them into the open thread.
     this.gateway.broadcast(id, msg);
     // Row 41: @mentions land in the inbox and are pushed live to whoever is online.

@@ -71,6 +71,36 @@ async function request<T>(path: string, init?: RequestInit, retry = true): Promi
   return res.json() as Promise<T>;
 }
 
+/** Multipart POST (file uploads): no JSON content-type so the browser sets the boundary. */
+async function upload<T>(path: string, form: FormData): Promise<T> {
+  if (!API_CONFIGURED) throw new ApiError(0, "API not connected");
+  const token = await accessToken();
+  const res = await fetch(`${API_URL}/api${path}`, {
+    method: "POST",
+    body: form,
+    headers: {
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+      ...(activeOrgId ? { "x-org-id": activeOrgId } : {}),
+    },
+  });
+  if (!res.ok) throw new ApiError(res.status, `API ${res.status}: ${await res.text()}`);
+  return res.json() as Promise<T>;
+}
+
+/** A shared file (row 43): in chat, or attached to a task. */
+export interface Attachment {
+  id: string;
+  filename: string;
+  mimeType: string;
+  sizeBytes: number;
+  url: string;
+  taskId: string | null;
+  channelId: string | null;
+  messageId: string | null;
+  createdAt: string;
+  uploadedBy: { id: string; name: string } | null;
+}
+
 export interface AuthedUser {
   id: string;
   email: string;
@@ -785,11 +815,21 @@ export const api = {
   getChannels: () => request<ChatChannel[]>(`/chat/channels`),
   getMessages: (channelId: string) =>
     request<ChatMessage[]>(`/chat/channels/${channelId}/messages`),
-  sendMessage: (channelId: string, body: string, parentMessageId?: string, mentionedUserIds?: string[]) =>
+  sendMessage: (channelId: string, body: string, parentMessageId?: string, mentionedUserIds?: string[], attachmentIds?: string[]) =>
     request<ChatMessage>(`/chat/channels/${channelId}/messages`, {
       method: "POST",
-      body: JSON.stringify({ body, parentMessageId, mentionedUserIds }),
+      body: JSON.stringify({ body, parentMessageId, mentionedUserIds, attachmentIds }),
     }),
+  // ---- Files (row 43) ----
+  uploadFile: (file: File, target: { channelId?: string; taskId?: string }) => {
+    const form = new FormData();
+    form.append("file", file, file.name);
+    if (target.channelId) form.append("channelId", target.channelId);
+    if (target.taskId) form.append("taskId", target.taskId);
+    return upload<Attachment>(`/files`, form);
+  },
+  getChannelFiles: (channelId: string) => request<Attachment[]>(`/files?channelId=${channelId}`),
+  deleteFile: (id: string) => request<{ id: string; deleted: boolean }>(`/files/${id}`, { method: "DELETE" }),
   /** Row 40: a message's thread (root + replies). */
   getThread: (channelId: string, messageId: string) =>
     request<{ root: ChatMessage; replies: ChatMessage[] }>(`/chat/channels/${channelId}/messages/${messageId}/replies`),
@@ -1258,4 +1298,6 @@ export interface ChatMessage {
   parentMessageId: string | null;
   replyCount?: number;
   lastReplyAt?: string | null;
+  /** Row 43: files sent with the message. */
+  attachments?: Attachment[];
 }

@@ -120,6 +120,13 @@
       "when": 1789342781262,
       "tag": "0016_project_team_channels",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1789344117953,
+      "tag": "0017_chat_files",
+      "breakpoints": true
     }
   ]
 }

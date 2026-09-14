@@ -15,3 +15,6 @@ coverage/
 .mcp.json
 
 .vercel
+
+# Local file storage (dev); production uses S3/R2
+uploads/

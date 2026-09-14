@@ -346,9 +346,10 @@ export const attachments = pgTable(
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    taskId: uuid("task_id")
-      .notNull()
-      .references(() => tasks.id, { onDelete: "cascade" }),
+    /** Exactly one home: a task, or a chat channel (row 43) — and, once sent, the message. */
+    taskId: uuid("task_id").references(() => tasks.id, { onDelete: "cascade" }),
+    channelId: uuid("channel_id").references((): AnyPgColumn => channels.id, { onDelete: "cascade" }),
+    messageId: uuid("message_id").references((): AnyPgColumn => messages.id, { onDelete: "cascade" }),
     uploadedById: uuid("uploaded_by_id")
       .notNull()
       .references(() => users.id),
@@ -359,8 +360,15 @@ export const attachments = pgTable(
     storageKey: text("storage_key").notNull(),
     ...timestamps,
   },
-  (t) => [index("attachments_task_idx").on(t.taskId)],
+  (t) => [index("attachments_task_idx").on(t.taskId), index("attachments_channel_idx").on(t.channelId), index("attachments_message_idx").on(t.messageId)],
 );
+
+export const attachmentsRelations = relations(attachments, ({ one }) => ({
+  task: one(tasks, { fields: [attachments.taskId], references: [tasks.id] }),
+  channel: one(channels, { fields: [attachments.channelId], references: [channels.id] }),
+  message: one(messages, { fields: [attachments.messageId], references: [messages.id] }),
+  uploader: one(users, { fields: [attachments.uploadedById], references: [users.id] }),
+}));
 
 /* ------------------------------------------------------------------ *
  * Custom fields (schema + values)
