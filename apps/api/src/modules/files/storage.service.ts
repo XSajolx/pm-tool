@@ -57,6 +57,30 @@ export class StorageService {
     }
   }
 
+  /** Where browsers reach this API (for links to streamed files). */
+  publicApiBase() {
+    return (process.env.PUBLIC_API_URL ?? process.env.API_URL ?? `http://localhost:${process.env.API_PORT ?? 3333}`).replace(/\/$/, "");
+  }
+
+  /** Raw bytes for a key in local mode (null when missing); S3 callers use signed URLs instead. */
+  async readLocal(key: string) {
+    const stream = this.localStream(key);
+    if (!stream) return null;
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    return Buffer.concat(chunks);
+  }
+
+  /** Signed GET for S3 keys (1h); null in local mode. */
+  async signedUrl(key: string, filename: string) {
+    if (!this.s3) return null;
+    return getSignedUrl(
+      this.s3,
+      new GetObjectCommand({ Bucket: this.bucket, Key: key, ResponseContentDisposition: `inline; filename="${encodeURIComponent(filename)}"` }),
+      { expiresIn: 3600 },
+    );
+  }
+
   /** A URL the browser can load directly (img src, download link). */
   async url(key: string, id: string, filename: string) {
     if (this.s3) {

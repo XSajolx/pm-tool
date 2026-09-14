@@ -7,6 +7,7 @@ import {
   createRouter,
   RouterProvider,
   Outlet,
+  useLocation,
   useNavigate,
 } from "@tanstack/react-router";
 import { Sidebar } from "./components/Sidebar.js";
@@ -26,6 +27,9 @@ import { DealsPage } from "./views/DealsPage.js";
 import { EstimatesPage } from "./views/EstimatesPage.js";
 import { EstimatePage } from "./views/EstimatePage.js";
 import { MeetingsPage } from "./views/MeetingsPage.js";
+import { ProposalsPage } from "./views/ProposalsPage.js";
+import { ProposalPage } from "./views/ProposalPage.js";
+import { PublicProposalPage } from "./views/PublicProposalPage.js";
 import { SettingsPage } from "./views/SettingsPage.js";
 import { MyWorkPage } from "./views/MyWorkPage.js";
 import { DocsPage, DocPage } from "./views/DocsPage.js";
@@ -47,6 +51,10 @@ import "./doc-editor.css";
  */
 function Protected() {
   const { session, user, memberships, loading } = useAuth();
+  const { pathname } = useLocation();
+
+  // Client-facing pages (proposal links, rows 58-59) live outside the login gate.
+  if (pathname.startsWith("/p/")) return <Outlet />;
 
   if (loading) return <Splash />;
   if (!session) return <AuthPage />;
@@ -176,6 +184,9 @@ const dealsRoute = createRoute({
 const estimatesRoute = createRoute({ getParentRoute: () => rootRoute, path: "/crm/estimates", component: EstimatesPage });
 const estimateRoute = createRoute({ getParentRoute: () => rootRoute, path: "/crm/estimates/$estimateId", component: EstimatePage });
 const meetingsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/crm/meetings", component: MeetingsPage });
+const proposalsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/crm/proposals", component: ProposalsPage });
+const proposalRoute = createRoute({ getParentRoute: () => rootRoute, path: "/crm/proposals/$proposalId", component: ProposalPage });
+const publicProposalRoute = createRoute({ getParentRoute: () => rootRoute, path: "/p/$token", component: PublicProposalPage });
 const settingsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/settings", component: SettingsPage });
 const myWorkRoute = createRoute({ getParentRoute: () => rootRoute, path: "/my-work", component: MyWorkPage });
 
@@ -198,6 +209,9 @@ const routeTree = rootRoute.addChildren([
   estimatesRoute,
   estimateRoute,
   meetingsRoute,
+  proposalsRoute,
+  proposalRoute,
+  publicProposalRoute,
   taskOpenRoute,
   docsRoute,
   docRoute,

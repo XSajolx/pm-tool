@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, type DealStageRow, type StageTemplate, type Status, type Tag, type TaskTemplate } from "../lib/api.js";
+import { api, type DealStageRow, type ProposalTemplate, type StageTemplate, type Status, type Tag, type TaskTemplate } from "../lib/api.js";
+import { ProposalSectionsEditor } from "../components/ProposalSections.js";
 import { useAuth } from "../lib/auth.js";
 import { PRIORITY } from "../components/ui.js";
 import type { Priority } from "../lib/api.js";
@@ -9,7 +10,7 @@ import type { Priority } from "../lib/api.js";
  * Workspace settings. Sections are added as the roadmap lands; each one is a
  * self-contained panel that owns its own queries.
  */
-type Section = "statuses" | "priorities" | "stages" | "tags" | "templates" | "dealstages";
+type Section = "statuses" | "priorities" | "stages" | "tags" | "templates" | "dealstages" | "proposals";
 
 const SECTIONS: { id: Section; label: string; hint: string }[] = [
   { id: "statuses", label: "Task statuses", hint: "Per space: names, colours, order, done state" },
@@ -18,6 +19,7 @@ const SECTIONS: { id: Section; label: string; hint: string }[] = [
   { id: "tags", label: "Tags", hint: "Workspace tags: rename, recolour, merge, retire" },
   { id: "templates", label: "Task list templates", hint: "Saved task sets to kick off new projects" },
   { id: "dealstages", label: "Deal stages", hint: "Pipeline columns: rename, reorder, mark won/lost" },
+  { id: "proposals", label: "Proposal templates", hint: "Fixed sections every proposal starts from" },
 ];
 
 export function SettingsPage() {
@@ -56,6 +58,7 @@ export function SettingsPage() {
           {section === "tags" && <TagSettings canEdit={canEdit} />}
           {section === "templates" && <TaskTemplateSettings canEdit={canEdit} />}
           {section === "dealstages" && <DealStageSettings canEdit={canEdit} />}
+          {section === "proposals" && <ProposalTemplateSettings canEdit={canEdit} />}
         </div>
       </div>
     </div>
@@ -681,5 +684,84 @@ function DealStageSettings({ canEdit }: { canEdit: boolean }) {
         </>
       )}
     </div>
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * Proposal templates (row 56)
+ * ------------------------------------------------------------------ */
+function ProposalTemplateSettings({ canEdit }: { canEdit: boolean }) {
+  const qc = useQueryClient();
+  const { data: templates = [] } = useQuery({ queryKey: ["proposal-templates"], queryFn: api.getProposalTemplates });
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [name, setName] = useState("");
+  const refresh = () => qc.invalidateQueries({ queryKey: ["proposal-templates"] });
+  const create = useMutation({ mutationFn: () => api.createProposalTemplate({ name }), onSuccess: (t) => { setName(""); setOpenId(t.id); refresh(); } });
+  const update = useMutation({ mutationFn: ({ id, body }: { id: string; body: Parameters<typeof api.updateProposalTemplate>[1] }) => api.updateProposalTemplate(id, body), onSuccess: refresh });
+  const remove = useMutation({ mutationFn: (id: string) => api.deleteProposalTemplate(id), onSuccess: refresh });
+  return (
+    <div>
+      <h1 className="text-lg font-semibold text-slate-900">Proposal templates</h1>
+      <p className="mt-1 text-sm text-muted-foreground">Each template is a fixed set of sections — scope, milestones, timeline, exclusions, assumptions, terms — with boilerplate you tweak per deal.</p>
+      <ul className="mt-5 space-y-2">
+        {templates.map((t) => (
+          <ProposalTemplateRow key={t.id} template={t} open={openId === t.id} canEdit={canEdit} onToggle={() => setOpenId(openId === t.id ? null : t.id)} onSave={(b) => update.mutate({ id: t.id, body: b })} onDelete={() => window.confirm(`Delete “${t.name}”?`) && remove.mutate(t.id)} />
+        ))}
+      </ul>
+      {canEdit && (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (name.trim()) create.mutate();
+          }}
+          className="mt-3 flex gap-2"
+        >
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="New template, e.g. Retainer" className="flex-1 rounded-md border border-border px-3 py-1.5 text-sm outline-none focus:border-indigo-500" />
+          <button type="submit" disabled={!name.trim() || create.isPending} className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50">
+            Add template
+          </button>
+        </form>
+      )}
+    </div>
+  );
+}
+
+function ProposalTemplateRow({ template, open, canEdit, onToggle, onSave, onDelete }: { template: ProposalTemplate; open: boolean; canEdit: boolean; onToggle: () => void; onSave: (b: Parameters<typeof api.updateProposalTemplate>[1]) => void; onDelete: () => void }) {
+  const [sections, setSections] = useState(template.sections);
+  useEffect(() => setSections(template.sections), [template]);
+  const dirty = JSON.stringify(sections) !== JSON.stringify(template.sections);
+  return (
+    <li className="rounded-lg border border-border bg-white">
+      <div className="flex items-center gap-3 px-3 py-2">
+        <button type="button" onClick={onToggle} className="text-xs text-slate-400">{open ? "▾" : "▸"}</button>
+        <InlineName value={template.name} disabled={!canEdit} onCommit={(v) => onSave({ name: v })} />
+        <span className="text-xs text-muted-foreground">{template.sections.length} sections</span>
+        {template.isDefault ? (
+          <span className="rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700">Default</span>
+        ) : (
+          canEdit && (
+            <button type="button" onClick={() => onSave({ isDefault: true })} className="text-[11px] text-slate-500 hover:text-indigo-700">
+              Make default
+            </button>
+          )
+        )}
+        {canEdit && (
+          <button type="button" onClick={onDelete} className="ml-auto text-xs text-slate-400 hover:text-red-600">
+            Delete
+          </button>
+        )}
+      </div>
+      {open && (
+        <div className="border-t border-border bg-[#fbfbfa] p-3">
+          <ProposalSectionsEditor sections={sections} onChange={setSections} disabled={!canEdit} />
+          {canEdit && dirty && (
+            <div className="mt-3 flex justify-end gap-2">
+              <button type="button" onClick={() => setSections(template.sections)} className="rounded-md px-3 py-1.5 text-xs text-slate-600 hover:bg-muted">Discard</button>
+              <button type="button" onClick={() => onSave({ sections })} className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white">Save sections</button>
+            </div>
+          )}
+        </div>
+      )}
+    </li>
   );
 }

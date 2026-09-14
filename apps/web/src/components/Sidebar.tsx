@@ -152,6 +152,7 @@ export function Sidebar() {
         <NavLink to="/crm/companies" label="Companies" icon={buildingIcon} />
         <NavLink to="/crm/contacts" label="Contacts" icon={contactIcon} />
         <NavLink to="/crm/deals" label="Deals" icon={dealIcon} />
+        <NavLink to="/crm/proposals" label="Proposals" icon={estimateIcon} />
         <NavLink to="/crm/estimates" label="Estimates" icon={estimateIcon} />
         <NavLink to="/crm/meetings" label="Meetings" icon={meetingIcon} />
       </nav>

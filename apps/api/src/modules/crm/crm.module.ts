@@ -11,8 +11,12 @@ import { NotesController } from "./notes.controller.js";
 import { NotesService } from "./notes.service.js";
 import { MeetingsController } from "./meetings.controller.js";
 import { MeetingsService } from "./meetings.service.js";
+import { ProposalsController } from "./proposals.controller.js";
+import { PublicProposalsController } from "./public-proposals.controller.js";
+import { ProposalsService } from "./proposals.service.js";
 import { ProjectsModule } from "../projects/projects.module.js";
 import { NotificationsModule } from "../notifications/notifications.module.js";
+import { FilesModule } from "../files/files.module.js";
 
 /**
  * One module for the whole CRM surface: companies and contacts are the anchor,
@@ -21,7 +25,7 @@ import { NotificationsModule } from "../notifications/notifications.module.js";
  * the inbox.
  */
 @Module({
-  imports: [ProjectsModule, NotificationsModule],
+  imports: [ProjectsModule, NotificationsModule, FilesModule],
   controllers: [
     CompaniesController,
     ContactsController,
@@ -29,6 +33,8 @@ import { NotificationsModule } from "../notifications/notifications.module.js";
     EstimatesController,
     NotesController,
     MeetingsController,
+    ProposalsController,
+    PublicProposalsController,
   ],
   providers: [
     CompaniesService,
@@ -37,6 +43,7 @@ import { NotificationsModule } from "../notifications/notifications.module.js";
     EstimatesService,
     NotesService,
     MeetingsService,
+    ProposalsService,
   ],
 })
 export class CrmModule {}

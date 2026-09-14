@@ -17,6 +17,7 @@ import { useAuth } from "../lib/auth.js";
 import { fmtMoney, fmtShortDate } from "../lib/format.js";
 import { NotesPanel } from "../components/NotesPanel.js";
 import { CrmTasks } from "../components/CrmTasks.js";
+import { NewProposalDialog, PROPOSAL_STATUS } from "./ProposalsPage.js";
 import { useEscape } from "../lib/useEscape.js";
 import { CrmField, input } from "./CompaniesPage.js";
 import { cn } from "../lib/utils.js";
@@ -405,6 +406,11 @@ function DealDrawer({ dealId, onClose }: { dealId: string; onClose: () => void }
             </div>
 
             <div className="border-t border-border px-5 py-4">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Proposals</p>
+              <DealProposals dealId={dealId} />
+            </div>
+
+            <div className="border-t border-border px-5 py-4">
               <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Tasks</p>
               <CrmTasks link={{ dealId }} compact />
             </div>
@@ -427,6 +433,28 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
     <div className="grid grid-cols-[90px_1fr] items-center gap-2">
       <span className="text-xs font-medium text-muted-foreground">{label}</span>
       {children}
+    </div>
+  );
+}
+
+/** Row 56: proposals attached to this deal, plus "new from template". */
+function DealProposals({ dealId }: { dealId: string }) {
+  const [creating, setCreating] = useState(false);
+  const { data: proposals = [] } = useQuery({ queryKey: ["proposals", { dealId }], queryFn: () => api.getProposals({ dealId }) });
+  return (
+    <div className="space-y-1.5">
+      {proposals.map((p) => (
+        <Link key={p.id} to="/crm/proposals/$proposalId" params={{ proposalId: p.id }} className="flex items-center gap-2 rounded-md border border-border bg-white px-2.5 py-1.5 text-xs hover:border-indigo-300">
+          <span className="font-medium text-indigo-600">{p.number}</span>
+          <span className="min-w-0 flex-1 truncate text-slate-800">{p.title}</span>
+          {p.currentVersion > 0 && <span className="text-muted-foreground">v{p.currentVersion}</span>}
+          <span className={cn("rounded-full px-1.5 py-0.5 text-[10px] font-medium", PROPOSAL_STATUS[p.status].cls)}>{PROPOSAL_STATUS[p.status].label}</span>
+        </Link>
+      ))}
+      <button type="button" onClick={() => setCreating(true)} className="rounded-md border border-dashed border-border px-2.5 py-1 text-xs text-slate-600 hover:bg-muted">
+        + New proposal from template
+      </button>
+      {creating && <NewProposalDialog dealId={dealId} onClose={() => setCreating(false)} />}
     </div>
   );
 }

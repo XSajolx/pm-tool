@@ -1619,6 +1619,149 @@ export const dealsRelations = relations(deals, ({ one, many }) => ({
   owner: one(users, { fields: [deals.ownerId], references: [users.id] }),
 }));
 
+/* ================================================================== *
+ * PROPOSALS (rows 56-59): templated sections → numbered sent versions with
+ * a PDF → per-contact links that track viewed / accepted / declined, with a
+ * typed e-signature on accept.
+ * ================================================================== */
+export interface ProposalSection {
+  key: string;
+  title: string;
+  body: string;
+}
+
+export const proposalStatus = pgEnum("proposal_status", ["draft", "sent", "viewed", "accepted", "declined"]);
+
+export const proposalTemplates = pgTable(
+  "proposal_templates",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 160 }).notNull(),
+    sections: jsonb("sections").$type<ProposalSection[]>().notNull().default([]),
+    isDefault: boolean("is_default").notNull().default(false),
+    ...timestamps,
+  },
+  (t) => [index("proposal_templates_org_idx").on(t.organizationId)],
+);
+
+export const proposals = pgTable(
+  "proposals",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    /** Human key like PRO-0007, sequential per org. */
+    number: varchar("number", { length: 32 }).notNull(),
+    dealId: uuid("deal_id").references(() => deals.id, { onDelete: "set null" }),
+    companyId: uuid("company_id").references(() => companies.id, { onDelete: "set null" }),
+    contactId: uuid("contact_id").references(() => contacts.id, { onDelete: "set null" }),
+    templateId: uuid("template_id").references(() => proposalTemplates.id, { onDelete: "set null" }),
+    title: varchar("title", { length: 255 }).notNull(),
+    status: proposalStatus("status").notNull().default("draft"),
+    /** The working copy; each send snapshots it into a version. */
+    sections: jsonb("sections").$type<ProposalSection[]>().notNull().default([]),
+    currency: varchar("currency", { length: 8 }).notNull().default("USD"),
+    total: doublePrecision("total").notNull().default(0),
+    validUntil: timestamp("valid_until", { withTimezone: true }),
+    currentVersion: integer("current_version").notNull().default(0),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+    declinedAt: timestamp("declined_at", { withTimezone: true }),
+    createdById: uuid("created_by_id").references(() => users.id),
+    ...timestamps,
+  },
+  (t) => [
+    uniqueIndex("proposals_org_number_uq").on(t.organizationId, t.number),
+    index("proposals_deal_idx").on(t.dealId),
+    index("proposals_company_idx").on(t.companyId),
+  ],
+);
+
+/** Row 57: what the client actually saw — frozen on every send. */
+export const proposalVersions = pgTable(
+  "proposal_versions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    proposalId: uuid("proposal_id")
+      .notNull()
+      .references(() => proposals.id, { onDelete: "cascade" }),
+    version: integer("version").notNull(),
+    title: varchar("title", { length: 255 }).notNull(),
+    sections: jsonb("sections").$type<ProposalSection[]>().notNull().default([]),
+    currency: varchar("currency", { length: 8 }).notNull().default("USD"),
+    total: doublePrecision("total").notNull().default(0),
+    validUntil: timestamp("valid_until", { withTimezone: true }),
+    /** Storage key of the rendered PDF. */
+    pdfKey: text("pdf_key"),
+    sentAt: timestamp("sent_at", { withTimezone: true }).defaultNow().notNull(),
+    sentById: uuid("sent_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex("proposal_versions_uq").on(t.proposalId, t.version)],
+);
+
+/** Rows 58-59: one unique link per contact per send; tracks viewed / accepted / declined and the typed signature. */
+export const proposalRecipients = pgTable(
+  "proposal_recipients",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    proposalId: uuid("proposal_id")
+      .notNull()
+      .references(() => proposals.id, { onDelete: "cascade" }),
+    versionId: uuid("version_id")
+      .notNull()
+      .references(() => proposalVersions.id, { onDelete: "cascade" }),
+    contactId: uuid("contact_id").references(() => contacts.id, { onDelete: "set null" }),
+    name: varchar("name", { length: 255 }).notNull(),
+    email: varchar("email", { length: 320 }),
+    token: varchar("token", { length: 64 }).notNull(),
+    sentAt: timestamp("sent_at", { withTimezone: true }).defaultNow().notNull(),
+    viewedAt: timestamp("viewed_at", { withTimezone: true }),
+    lastViewedAt: timestamp("last_viewed_at", { withTimezone: true }),
+    viewCount: integer("view_count").notNull().default(0),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+    declinedAt: timestamp("declined_at", { withTimezone: true }),
+    declineReason: text("decline_reason"),
+    signerName: varchar("signer_name", { length: 255 }),
+    signerTitle: varchar("signer_title", { length: 255 }),
+    signatureIp: varchar("signature_ip", { length: 64 }),
+    signatureUserAgent: text("signature_user_agent"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex("proposal_recipients_token_uq").on(t.token), index("proposal_recipients_proposal_idx").on(t.proposalId)],
+);
+
+export const proposalsRelations = relations(proposals, ({ one, many }) => ({
+  deal: one(deals, { fields: [proposals.dealId], references: [deals.id] }),
+  company: one(companies, { fields: [proposals.companyId], references: [companies.id] }),
+  contact: one(contacts, { fields: [proposals.contactId], references: [contacts.id] }),
+  template: one(proposalTemplates, { fields: [proposals.templateId], references: [proposalTemplates.id] }),
+  createdBy: one(users, { fields: [proposals.createdById], references: [users.id] }),
+  versions: many(proposalVersions),
+  recipients: many(proposalRecipients),
+}));
+
+export const proposalVersionsRelations = relations(proposalVersions, ({ one, many }) => ({
+  proposal: one(proposals, { fields: [proposalVersions.proposalId], references: [proposals.id] }),
+  sentBy: one(users, { fields: [proposalVersions.sentById], references: [users.id] }),
+  recipients: many(proposalRecipients),
+}));
+
+export const proposalRecipientsRelations = relations(proposalRecipients, ({ one }) => ({
+  proposal: one(proposals, { fields: [proposalRecipients.proposalId], references: [proposals.id] }),
+  version: one(proposalVersions, { fields: [proposalRecipients.versionId], references: [proposalVersions.id] }),
+  contact: one(contacts, { fields: [proposalRecipients.contactId], references: [contacts.id] }),
+}));
+
 export const estimatesRelations = relations(estimates, ({ one, many }) => ({
   company: one(companies, { fields: [estimates.companyId], references: [companies.id] }),
   contact: one(contacts, { fields: [estimates.contactId], references: [contacts.id] }),

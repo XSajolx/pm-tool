@@ -71,6 +71,14 @@ async function request<T>(path: string, init?: RequestInit, retry = true): Promi
   return res.json() as Promise<T>;
 }
 
+/** Unauthenticated calls for client-facing pages (proposal links). The token in the URL is the credential. */
+async function publicRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  if (!API_CONFIGURED) throw new ApiError(0, "API not connected");
+  const res = await fetch(`${API_URL}/api${path}`, { ...init, headers: { "content-type": "application/json", ...init?.headers } });
+  if (!res.ok) throw new ApiError(res.status, `API ${res.status}: ${await res.text()}`);
+  return res.json() as Promise<T>;
+}
+
 /** Multipart POST (file uploads): no JSON content-type so the browser sets the boundary. */
 async function upload<T>(path: string, form: FormData): Promise<T> {
   if (!API_CONFIGURED) throw new ApiError(0, "API not connected");
@@ -703,6 +711,94 @@ export interface DealColumn {
   deals: Deal[];
 }
 
+/* ---- Proposals (rows 56-59) ---- */
+export interface ProposalSection {
+  key: string;
+  title: string;
+  body: string;
+}
+export interface ProposalTemplate {
+  id: string;
+  name: string;
+  sections: ProposalSection[];
+  isDefault: boolean;
+}
+export type ProposalStatus = "draft" | "sent" | "viewed" | "accepted" | "declined";
+export interface ProposalRecipient {
+  id: string;
+  contactId: string | null;
+  name: string;
+  email: string | null;
+  token: string;
+  sentAt: string;
+  viewedAt: string | null;
+  lastViewedAt: string | null;
+  viewCount: number;
+  acceptedAt: string | null;
+  declinedAt: string | null;
+  declineReason: string | null;
+  signerName: string | null;
+  signerTitle: string | null;
+}
+export interface ProposalVersion {
+  id: string;
+  version: number;
+  title: string;
+  total: number;
+  currency: string;
+  sentAt: string;
+  sentBy: { id: string; name: string } | null;
+  pdfUrl: string | null;
+  recipients: ProposalRecipient[];
+}
+export interface ProposalSummary {
+  id: string;
+  number: string;
+  title: string;
+  status: ProposalStatus;
+  currency: string;
+  total: number;
+  validUntil: string | null;
+  currentVersion: number;
+  acceptedAt: string | null;
+  declinedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  dealId: string | null;
+  companyId: string | null;
+  contactId: string | null;
+  templateId: string | null;
+  deal: { id: string; title: string } | null;
+  company: { id: string; name: string } | null;
+  contact: { id: string; name: string; email: string | null } | null;
+  recipientSummary?: { sent: number; viewed: number; accepted: number; declined: number };
+}
+export interface Proposal extends ProposalSummary {
+  sections: ProposalSection[];
+  createdBy: { id: string; name: string } | null;
+  versions: ProposalVersion[];
+}
+export interface PublicProposal {
+  token: string;
+  recipient: { name: string; acceptedAt: string | null; declinedAt: string | null; signerName: string | null; signerTitle: string | null };
+  proposal: {
+    number: string;
+    title: string;
+    version: number;
+    latest: boolean;
+    status: ProposalStatus;
+    company: string | null;
+    from: string | null;
+    currency: string;
+    total: number;
+    validUntil: string | null;
+    expired: boolean;
+    sentAt: string;
+    sections: ProposalSection[];
+    pdfUrl: string | null;
+  };
+}
+
 export type EstimateStatus = "draft" | "sent" | "accepted" | "declined" | "expired";
 
 export interface EstimateItem {
@@ -1227,6 +1323,35 @@ export const api = {
     request<DealStageRow[]>(`/crm/deals/stages/${id}${moveTo ? `?moveTo=${moveTo}` : ""}`, { method: "DELETE" }),
   convertDeal: (id: string) => request<Deal>(`/crm/deals/${id}/convert`, { method: "POST" }),
   archiveDeal: (id: string) => request<{ id: string }>(`/crm/deals/${id}`, { method: "DELETE" }),
+
+  // ---- CRM: proposals (rows 56-59) ----
+  getProposalTemplates: () => request<ProposalTemplate[]>(`/crm/proposal-templates`),
+  createProposalTemplate: (body: { name: string; sections?: ProposalSection[]; isDefault?: boolean }) =>
+    request<ProposalTemplate>(`/crm/proposal-templates`, { method: "POST", body: JSON.stringify(body) }),
+  updateProposalTemplate: (id: string, body: Partial<{ name: string; sections: ProposalSection[]; isDefault: boolean }>) =>
+    request<ProposalTemplate>(`/crm/proposal-templates/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  deleteProposalTemplate: (id: string) => request<{ id: string }>(`/crm/proposal-templates/${id}`, { method: "DELETE" }),
+  getProposals: (opts: { dealId?: string; companyId?: string } = {}) => {
+    const q = new URLSearchParams();
+    if (opts.dealId) q.set("dealId", opts.dealId);
+    if (opts.companyId) q.set("companyId", opts.companyId);
+    const qs = q.toString();
+    return request<ProposalSummary[]>(`/crm/proposals${qs ? "?" + qs : ""}`);
+  },
+  createProposal: (body: { dealId: string; templateId?: string; title?: string }) =>
+    request<Proposal>(`/crm/proposals`, { method: "POST", body: JSON.stringify(body) }),
+  getProposal: (id: string) => request<Proposal>(`/crm/proposals/${id}`),
+  updateProposal: (id: string, body: Partial<{ title: string; sections: ProposalSection[]; currency: string; total: number; validUntil: string | null; companyId: string | null; contactId: string | null }>) =>
+    request<Proposal>(`/crm/proposals/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  sendProposal: (id: string, recipients: { contactId?: string; name?: string; email?: string }[]) =>
+    request<Proposal>(`/crm/proposals/${id}/send`, { method: "POST", body: JSON.stringify({ recipients }) }),
+  archiveProposal: (id: string) => request<{ id: string }>(`/crm/proposals/${id}`, { method: "DELETE" }),
+  // public (client-facing, no auth)
+  getPublicProposal: (token: string) => publicRequest<PublicProposal>(`/public/proposals/${token}`),
+  acceptPublicProposal: (token: string, body: { signerName: string; signerTitle?: string; agreed: boolean }) =>
+    publicRequest<PublicProposal>(`/public/proposals/${token}/accept`, { method: "POST", body: JSON.stringify(body) }),
+  declinePublicProposal: (token: string, reason?: string) =>
+    publicRequest<PublicProposal>(`/public/proposals/${token}/decline`, { method: "POST", body: JSON.stringify({ reason }) }),
 
   // ---- CRM: estimates ----
   getEstimates: (opts: { companyId?: string; dealId?: string } = {}) => {
