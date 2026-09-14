@@ -159,6 +159,7 @@ export function Sidebar() {
         <NavLink to="/intake" label="Intake" icon={inboxIcon} />
         <NavLink to="/docs" label="Docs" icon={docIcon} />
         <NavLink to="/dashboards" label="Dashboards" icon={chartIcon} />
+        <NavLink to="/overview" label="Overview" icon={chartIcon} />
       </nav>
 
       {/* CRM */}

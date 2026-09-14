@@ -40,6 +40,7 @@ import { SettingsPage } from "./views/SettingsPage.js";
 import { MyWorkPage } from "./views/MyWorkPage.js";
 import { DocsPage, DocPage } from "./views/DocsPage.js";
 import { DashboardsPage } from "./views/DashboardsPage.js";
+import { OverviewPage } from "./views/OverviewPage.js";
 import { TaskOpenPage } from "./views/TaskOpenPage.js";
 import { SpaceOverviewPage } from "./views/SpaceOverviewPage.js";
 import { AuthPage } from "./views/AuthPage.js";
@@ -194,6 +195,7 @@ const taskOpenRoute = createRoute({ getParentRoute: () => rootRoute, path: "/t/$
 const docsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/docs", component: DocsPage });
 const docRoute = createRoute({ getParentRoute: () => rootRoute, path: "/docs/$docId", component: DocPage });
 const dashboardsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/dashboards", component: DashboardsPage });
+const overviewRoute = createRoute({ getParentRoute: () => rootRoute, path: "/overview", component: OverviewPage });
 const spaceRoute = createRoute({ getParentRoute: () => rootRoute, path: "/s/$spaceId", component: SpaceOverviewPage });
 const chatIndexRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -291,6 +293,7 @@ const routeTree = rootRoute.addChildren([
   docsRoute,
   docRoute,
   dashboardsRoute,
+  overviewRoute,
   spaceRoute,
   settingsRoute,
   myWorkRoute,

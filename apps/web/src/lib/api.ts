@@ -651,6 +651,8 @@ export interface ProjectStats {
   weekSeconds: number;
   nextMilestone: { id: string; name: string; targetDate: string | null; overdue: boolean } | null;
   channelId: string | null;
+  /** Row 100 */
+  currentStage: { id: string; name: string; status: StageStatus; index: number; count: number } | null;
 }
 
 export interface Project {

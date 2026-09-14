@@ -9,6 +9,7 @@ import {
   memberships,
   milestones,
   projectMembers,
+  projectStages,
   projects,
   spaces,
   statuses,
@@ -64,6 +65,8 @@ export interface ProjectStats {
   nextMilestone: { id: string; name: string; targetDate: string | null; overdue: boolean } | null;
   /** The project's chat channel, for the dashboard link. */
   channelId: string | null;
+  /** Row 100: the active stage, else the first not-started one; null when every stage is done. */
+  currentStage: { id: string; name: string; status: "not_started" | "active" | "completed"; index: number; count: number } | null;
 }
 
 @Injectable()
@@ -408,7 +411,7 @@ export class ProjectsService {
   private async statsFor(orgId: string, rows: { id: string; spaceId: string | null }[]) {
     const out = new Map<string, ProjectStats>();
     for (const r of rows) {
-      out.set(r.id, { tasksTotal: 0, tasksDone: 0, tasksOpen: 0, tasksOverdue: 0, loggedSeconds: 0, billableSeconds: 0, weekSeconds: 0, nextMilestone: null, channelId: null });
+      out.set(r.id, { tasksTotal: 0, tasksDone: 0, tasksOpen: 0, tasksOverdue: 0, loggedSeconds: 0, billableSeconds: 0, weekSeconds: 0, nextMilestone: null, channelId: null, currentStage: null });
     }
     if (!rows.length) return out;
 
@@ -494,6 +497,23 @@ export class ProjectsService {
     for (const c of chans) {
       const s = c.projectId ? out.get(c.projectId) : undefined;
       if (s && !s.channelId) s.channelId = c.id;
+    }
+
+    // Row 100: current stage per project (active first, else the first one not started).
+    const stageRows = await this.db
+      .select({ id: projectStages.id, projectId: projectStages.projectId, name: projectStages.name, status: projectStages.status })
+      .from(projectStages)
+      .where(and(inArray(projectStages.projectId, ids), isNull(projectStages.archivedAt)))
+      .orderBy(projectStages.projectId, projectStages.position);
+    const byProject = new Map<string, typeof stageRows>();
+    for (const st of stageRows) byProject.set(st.projectId, [...(byProject.get(st.projectId) ?? []), st]);
+    for (const [pid, list] of byProject) {
+      const s = out.get(pid);
+      if (!s) continue;
+      const idx = list.findIndex((st) => st.status === "active");
+      const pick = idx >= 0 ? idx : list.findIndex((st) => st.status === "not_started");
+      const cur = pick >= 0 ? list[pick] : undefined;
+      if (cur) s.currentStage = { id: cur.id, name: cur.name, status: cur.status, index: pick + 1, count: list.length };
     }
     return out;
   }
