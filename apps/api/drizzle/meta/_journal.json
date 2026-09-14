@@ -421,6 +421,13 @@
       "when": 1789362953203,
       "tag": "0059_notification_defaults",
       "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1789397626954,
+      "tag": "0060_integrations",
+      "breakpoints": true
     }
   ]
 }

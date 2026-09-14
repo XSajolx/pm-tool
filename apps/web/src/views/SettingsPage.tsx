@@ -12,19 +12,21 @@ import { PRIORITY, PRIORITY_DEFAULTS, PRIORITY_PALETTE, applyPriorityConfig } fr
 import { applyBranding } from "../lib/brand.js";
 import { WorkCalendarSettings } from "../components/WorkCalendarSettings.js";
 import { NotificationDefaultsSettings } from "../components/NotificationDefaultsSettings.js";
+import { ConnectionsSettings } from "../components/ConnectionsSettings.js";
 import type { Priority } from "../lib/api.js";
 
 /**
  * Workspace settings. Sections are added as the roadmap lands; each one is a
  * self-contained panel that owns its own queries.
  */
-type Section = "people" | "workhours" | "notifications" | "timecodes" | "statuses" | "priorities" | "stages" | "tags" | "templates" | "dealstages" | "proposals" | "snippets" | "branding" | "dockit" | "sso" | "security";
+type Section = "people" | "workhours" | "notifications" | "connections" | "timecodes" | "statuses" | "priorities" | "stages" | "tags" | "templates" | "dealstages" | "proposals" | "snippets" | "branding" | "dockit" | "sso" | "security";
 
 const SECTIONS: { id: Section; label: string; hint: string }[] = [
   { id: "people", label: "People & roles", hint: "Who's in the workspace and what each role can do" },
   { id: "statuses", label: "Task statuses", hint: "Per space: names, colours, order, done state" },
   { id: "workhours", label: "Working hours & holidays", hint: "Standard week, days off, and each person's hours" },
   { id: "notifications", label: "Notifications", hint: "Defaults for new members, and workspace quiet hours" },
+  { id: "connections", label: "Connections", hint: "Google Drive and Dropbox - link files, never copy them" },
   { id: "timecodes", label: "Time codes & reminders", hint: "Internal codes, and when to nudge unfinished timesheets" },
   { id: "priorities", label: "Priorities", hint: "The four priority levels" },
   { id: "stages", label: "Stage templates", hint: "Default stage sequences for new projects" },
@@ -42,7 +44,10 @@ const SECTIONS: { id: Section; label: string; hint: string }[] = [
 export function SettingsPage() {
   const { role } = useAuth();
   const canEdit = role === "owner" || role === "admin";
-  const [section, setSection] = useState<Section>("statuses");
+  const [section, setSection] = useState<Section>(() => {
+    const wanted = new URLSearchParams(window.location.search).get("section");
+    return SECTIONS.some((x) => x.id === wanted) ? (wanted as Section) : "statuses";
+  });
 
   return (
     <div className="flex h-screen flex-1 overflow-hidden">
@@ -73,6 +78,7 @@ export function SettingsPage() {
           {section === "people" && <PeopleSettings canEdit={canEdit} />}
           {section === "workhours" && <WorkCalendarSettings canEdit={canEdit} />}
           {section === "notifications" && <NotificationDefaultsSettings canEdit={canEdit} />}
+          {section === "connections" && <ConnectionsSettings canEdit={canEdit} />}
           {section === "timecodes" && <TimeCodeSettings canEdit={canEdit} />}
           {section === "priorities" && <PrioritySettings canEdit={canEdit} />}
           {section === "stages" && <StageTemplateSettings canEdit={canEdit} />}

@@ -894,6 +894,22 @@ export interface Timesheet {
   workingDays?: number[];
 }
 
+/** Row 112 */
+export type IntegrationProvider = "google_drive" | "dropbox";
+export interface IntegrationStatus {
+  provider: IntegrationProvider;
+  label: string;
+  configured: boolean;
+  requiredEnv: string[];
+  status: "connected" | "needs_reconnect" | "failing" | "disconnected";
+  accountEmail: string | null;
+  accountName: string | null;
+  connectedBy: { id: string; name: string } | null;
+  connectedAt: string | null;
+  lastCheckedAt: string | null;
+  lastError: string | null;
+}
+
 /** Row 110 */
 export type EmploymentType = "full_time" | "part_time" | "contractor";
 export interface WorkCalendar {
@@ -1719,6 +1735,11 @@ export const api = {
     request<TimesheetSubmission>(`/time/timesheet/submissions/${id}/reopen`, { method: "POST", body: JSON.stringify({ reason }) }),
   getTimesheetEvents: (id: string) =>
     request<{ id: string; kind: string; note: string | null; createdAt: string; actor: { id: string; name: string } | null }[]>(`/time/timesheet/submissions/${id}/events`),
+  /** Row 112 */
+  getIntegrations: () => request<IntegrationStatus[]>(`/integrations`),
+  startIntegration: (provider: IntegrationProvider) => request<{ url: string }>(`/integrations/${provider}/start`, { method: "POST" }),
+  checkIntegration: (provider: IntegrationProvider) => request<IntegrationStatus[]>(`/integrations/${provider}/check`, { method: "POST" }),
+  disconnectIntegration: (provider: IntegrationProvider) => request<IntegrationStatus[]>(`/integrations/${provider}`, { method: "DELETE" }),
   /** Row 110 */
   getWorkCalendar: () => request<WorkCalendar>(`/time/calendar`),
   updateWorkCalendar: (body: { standardWeeklyHours?: number; workingDays?: number[] }) => request<WorkCalendar>(`/time/calendar`, { method: "PATCH", body: JSON.stringify(body) }),

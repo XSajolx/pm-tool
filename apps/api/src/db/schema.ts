@@ -1297,6 +1297,40 @@ export const projectStagesRelations = relations(projectStages, ({ one, many }) =
   progressEvents: many(stageProgressEvents),
 }));
 
+/**
+ * Row 112: one connected account per provider per workspace (Google Drive,
+ * Dropbox). Tokens are encrypted at rest (integrations.service). Files are
+ * only ever linked, never copied.
+ */
+export const integrations = pgTable(
+  "integrations",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    provider: varchar("provider", { length: 32 }).notNull(),
+    /** connected | needs_reconnect | failing | disconnected */
+    status: varchar("status", { length: 24 }).notNull().default("connected"),
+    accountEmail: varchar("account_email", { length: 255 }),
+    accountName: varchar("account_name", { length: 255 }),
+    accessToken: text("access_token"),
+    refreshToken: text("refresh_token"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    scopes: text("scopes"),
+    connectedById: uuid("connected_by_id").references(() => users.id, { onDelete: "set null" }),
+    connectedAt: timestamp("connected_at", { withTimezone: true }),
+    lastCheckedAt: timestamp("last_checked_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    ...timestamps,
+  },
+  (t) => [uniqueIndex("integrations_org_provider_uq").on(t.organizationId, t.provider)],
+);
+
+export const integrationsRelations = relations(integrations, ({ one }) => ({
+  connectedBy: one(users, { fields: [integrations.connectedById], references: [users.id] }),
+}));
+
 /** Row 110: company holidays and closures. A day off on a working day lowers everyone's expected hours that week. */
 export const holidays = pgTable(
   "holidays",
