@@ -1927,6 +1927,10 @@ export const api = {
   getSso: () => request<{ ssoDomain: string | null; googleProviderHint: string }>(`/auth/sso`),
   updateSso: (ssoDomain: string | null) =>
     request<{ ssoDomain: string | null; googleProviderHint: string }>(`/auth/sso`, { method: "PATCH", body: JSON.stringify({ ssoDomain }) }),
+  /** Row 107 */
+  getPriorities: () => request<Partial<Record<Priority, { label: string; color: string }>>>(`/branding/priorities`),
+  updatePriorities: (body: Partial<Record<Priority, { label: string; color: string }>>) =>
+    request<Partial<Record<Priority, { label: string; color: string }>>>(`/branding/priorities`, { method: "PATCH", body: JSON.stringify(body) }),
   getBranding: () => request<{ name: string; brandColor: string; brandLogoUrl: string | null; brandFooter: string | null }>(`/branding`),
   updateBranding: (body: Partial<{ brandColor: string; brandLogoUrl: string | null; brandFooter: string | null }>) =>
     request<{ name: string; brandColor: string; brandLogoUrl: string | null; brandFooter: string | null }>(`/branding`, { method: "PATCH", body: JSON.stringify(body) }),

@@ -8,6 +8,7 @@ import { TimerBar } from "./TimerBar.js";
 import { QuickAdd, useQuickAddShortcut } from "./QuickAdd.js";
 import { InviteDialog, NewSpaceDialog } from "./SidebarDialogs.js";
 import { cn } from "../lib/utils.js";
+import { applyPriorityConfig } from "./ui.js";
 import { roleLabel } from "../lib/roles.js";
 
 export function Sidebar() {
@@ -60,6 +61,11 @@ export function Sidebar() {
       socket.off("chat:read", chatChanged);
     };
   }, [qc]);
+  // Row 107: workspace priority names/colours feed every pill and picker.
+  const { data: priorityCfg } = useQuery({ queryKey: ["priorities"], queryFn: api.getPriorities, staleTime: 5 * 60_000 });
+  useEffect(() => {
+    if (priorityCfg) applyPriorityConfig(priorityCfg);
+  }, [priorityCfg]);
   const [orgMenu, setOrgMenu] = useState(false);
   const [userMenu, setUserMenu] = useState(false);
   const [spaceDialog, setSpaceDialog] = useState(false);

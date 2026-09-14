@@ -14,6 +14,10 @@ const schema = z.object({
   brandFooter: z.string().max(255).nullable().optional(),
 });
 
+/** Row 107: label + palette colour per priority level. */
+const level = z.object({ label: z.string().min(1).max(24), color: z.enum(["red", "orange", "amber", "yellow", "green", "teal", "blue", "indigo", "purple", "pink", "slate"]) }).optional();
+const prioritySchema = z.object({ urgent: level, high: level, normal: level, low: level });
+
 /** Row 67: the workspace's brand — colour, logo, footer — used on PDF exports and client pages. */
 @Controller("branding")
 export class BrandingController {
@@ -31,5 +35,22 @@ export class BrandingController {
   async update(@Auth() auth: AuthContext, @Body() dto: z.infer<typeof schema>) {
     await this.db.update(organizations).set({ ...dto, updatedAt: new Date() }).where(eq(organizations.id, auth.orgId));
     return this.get(auth);
+  }
+
+  /** Row 107: priority names and colours (defaults when nothing is stored). */
+  @Get("priorities")
+  async priorities(@Auth() auth: AuthContext) {
+    const org = await this.db.query.organizations.findFirst({ where: eq(organizations.id, auth.orgId), columns: { priorityLabels: true } });
+    return org?.priorityLabels ?? {};
+  }
+
+  @Patch("priorities")
+  @Roles("owner", "admin")
+  @UsePipes(new ZodValidationPipe(prioritySchema))
+  async setPriorities(@Auth() auth: AuthContext, @Body() dto: z.infer<typeof prioritySchema>) {
+    const org = await this.db.query.organizations.findFirst({ where: eq(organizations.id, auth.orgId), columns: { priorityLabels: true } });
+    const next = { ...(org?.priorityLabels ?? {}), ...dto };
+    await this.db.update(organizations).set({ priorityLabels: next, updatedAt: new Date() }).where(eq(organizations.id, auth.orgId));
+    return next;
   }
 }

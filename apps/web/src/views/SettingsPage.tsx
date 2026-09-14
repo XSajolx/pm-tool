@@ -8,7 +8,7 @@ import { MfaEnroll } from "./MfaPages.js";
 import { ASSIGNABLE_ROLES, PERMISSION_MATRIX, ROLE_DESCRIPTIONS, ROLE_LABELS, type WorkspaceRole } from "../lib/roles.js";
 import type { ReminderSlot } from "../lib/api.js";
 import { supabase } from "../lib/supabase.js";
-import { PRIORITY } from "../components/ui.js";
+import { PRIORITY, PRIORITY_DEFAULTS, PRIORITY_PALETTE, applyPriorityConfig } from "../components/ui.js";
 import type { Priority } from "../lib/api.js";
 
 /**
@@ -67,7 +67,7 @@ export function SettingsPage() {
           {section === "statuses" && <StatusSettings canEdit={canEdit} />}
           {section === "people" && <PeopleSettings canEdit={canEdit} />}
           {section === "timecodes" && <TimeCodeSettings canEdit={canEdit} />}
-          {section === "priorities" && <PrioritySettings />}
+          {section === "priorities" && <PrioritySettings canEdit={canEdit} />}
           {section === "stages" && <StageTemplateSettings canEdit={canEdit} />}
           {section === "tags" && <TagSettings canEdit={canEdit} />}
           {section === "templates" && <TaskTemplateSettings canEdit={canEdit} />}
@@ -304,24 +304,77 @@ function InlineName({ value, disabled, onCommit }: { value: string; disabled: bo
 /* ------------------------------------------------------------------ *
  * Priorities — fixed set, shown for reference
  * ------------------------------------------------------------------ */
-function PrioritySettings() {
+function PrioritySettings({ canEdit }: { canEdit: boolean }) {
+  const qc = useQueryClient();
+  const { data: cfg } = useQuery({ queryKey: ["priorities"], queryFn: api.getPriorities });
+  const [draft, setDraft] = useState<Partial<Record<Priority, { label: string; color: string }>>>({});
+  const save = useMutation({
+    mutationFn: () => api.updatePriorities(draft),
+    onSuccess: (next) => {
+      qc.setQueryData(["priorities"], next);
+      applyPriorityConfig(next);
+      setDraft({});
+    },
+  });
+  const [, force] = useState(0);
+  const current = (p: Priority) => draft[p] ?? cfg?.[p] ?? PRIORITY_DEFAULTS[p];
+  const set = (p: Priority, patch: Partial<{ label: string; color: string }>) => setDraft((d) => ({ ...d, [p]: { ...current(p), ...patch } }));
+  const dirty = Object.keys(draft).length > 0;
+  const reset = useMutation({
+    mutationFn: () => api.updatePriorities(PRIORITY_DEFAULTS),
+    onSuccess: (next) => { qc.setQueryData(["priorities"], next); applyPriorityConfig(next); setDraft({}); force((n) => n + 1); },
+  });
   return (
     <div>
       <h1 className="text-lg font-semibold text-slate-900">Priorities</h1>
       <p className="mb-4 text-xs text-muted-foreground">
-        Four levels, shared by every space so cross-project views stay comparable.
+        Four levels, shared by every space so cross-project views stay comparable. Rename them and pick a colour; the keys (urgent / high / normal / low) stay fixed so sorting, quick-add shortcuts and imports keep working.
       </p>
       <div className="overflow-hidden rounded-lg border border-border bg-white">
-        {(Object.keys(PRIORITY) as Priority[]).map((p) => (
-          <div key={p} className="flex items-center gap-3 border-b border-border px-3 py-2 last:border-b-0">
-            <span className={`inline-flex h-5 w-5 items-center justify-center rounded ${PRIORITY[p].color} ${PRIORITY[p].text} text-[10px] font-bold`}>
-              !
-            </span>
-            <span className="text-sm text-slate-800">{PRIORITY[p].label}</span>
-            <span className="ml-auto text-[11px] text-muted-foreground">{p}</span>
-          </div>
-        ))}
+        {(Object.keys(PRIORITY_DEFAULTS) as Priority[]).map((p) => {
+          const c = current(p);
+          const pal = PRIORITY_PALETTE[c.color] ?? PRIORITY_PALETTE.slate!;
+          return (
+            <div key={p} className="flex flex-wrap items-center gap-3 border-b border-border px-3 py-2 last:border-b-0">
+              <span className={`inline-flex h-5 w-5 items-center justify-center rounded ${pal.color} text-[10px] font-bold text-white`}>!</span>
+              <input
+                value={c.label}
+                disabled={!canEdit}
+                maxLength={24}
+                onChange={(e) => set(p, { label: e.target.value })}
+                className="w-40 rounded-md border border-border bg-white px-2 py-1 text-sm text-slate-800 outline-none focus:border-indigo-400 disabled:opacity-60"
+                aria-label={`${p} label`}
+              />
+              <span className="text-[11px] text-muted-foreground">{p}</span>
+              <div className="ml-auto flex items-center gap-1">
+                {Object.entries(PRIORITY_PALETTE).map(([name, pp]) => (
+                  <button
+                    key={name}
+                    type="button"
+                    disabled={!canEdit}
+                    onClick={() => set(p, { color: name })}
+                    title={name}
+                    aria-label={`${p} colour ${name}`}
+                    className={`h-4 w-4 rounded-full border-2 ${c.color === name ? "border-slate-800" : "border-transparent"} disabled:opacity-60`}
+                    style={{ background: pp.swatch }}
+                  />
+                ))}
+              </div>
+            </div>
+          );
+        })}
       </div>
+      {canEdit && (
+        <div className="mt-3 flex items-center gap-2">
+          <button type="button" disabled={!dirty || save.isPending} onClick={() => save.mutate()} className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50">
+            Save
+          </button>
+          {dirty && <button type="button" onClick={() => setDraft({})} className="text-sm text-muted-foreground hover:text-slate-700">Discard</button>}
+          <button type="button" onClick={() => reset.mutate()} className="ml-auto text-xs text-muted-foreground hover:text-slate-700">Reset to defaults</button>
+        </div>
+      )}
+      {(save.isError || reset.isError) && <p className="mt-2 text-xs text-red-600">{((save.error ?? reset.error) as Error).message}</p>}
+      <p className="mt-4 text-[11px] text-muted-foreground">Preview: {(Object.keys(PRIORITY) as Priority[]).map((p) => <span key={p} className={`mr-2 ${PRIORITY[p].text}`}>● {PRIORITY[p].label}</span>)}</p>
     </div>
   );
 }

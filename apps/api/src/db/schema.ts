@@ -109,6 +109,8 @@ export const organizations = pgTable(
     timesheetReminders: jsonb("timesheet_reminders").$type<{ weekday: number; hour: number; week: "current" | "previous" }[]>(),
     /** Row 106: a milestone this many days out with open linked tasks is "at risk". */
     milestoneRiskDays: integer("milestone_risk_days").notNull().default(7),
+    /** Row 107: how the four priority levels are named and coloured in this workspace. */
+    priorityLabels: jsonb("priority_labels").$type<Partial<Record<"urgent" | "high" | "normal" | "low", { label: string; color: string }>>>(),
     ...timestamps,
   },
   (t) => [uniqueIndex("organizations_slug_uq").on(t.slug)],
