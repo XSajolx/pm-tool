@@ -9,6 +9,7 @@ import {
   Outlet,
   useLocation,
   useNavigate,
+  Link,
 } from "@tanstack/react-router";
 import { Sidebar } from "./components/Sidebar.js";
 import { WorkspacePage } from "./views/WorkspacePage.js";
@@ -20,6 +21,8 @@ import { IntakePage } from "./views/IntakePage.js";
 import { ProjectsPage } from "./views/ProjectsPage.js";
 import { ProjectPage } from "./views/ProjectPage.js";
 import { TimeTrackingPage } from "./views/TimeTrackingPage.js";
+import { QuickLogPage } from "./views/QuickLogPage.js";
+import { useState } from "react";
 import { TimesheetPage } from "./views/TimesheetPage.js";
 import { ResourcingPage } from "./views/ResourcingPage.js";
 import { CompaniesPage } from "./views/CompaniesPage.js";
@@ -54,6 +57,7 @@ import "./doc-editor.css";
  */
 function Protected() {
   const { session, user, memberships, loading, mfa, activeOrgId } = useAuth();
+  const [menuOpen, setMenuOpen] = useState(false);
   const { pathname } = useLocation();
 
   // Client-facing pages (proposal links, rows 58-59) live outside the login gate.
@@ -80,9 +84,41 @@ function Protected() {
         </div>
       )}
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        <Sidebar />
-        <Outlet />
+        {/* Row 96: the sidebar is desktop-only; phones get a slim bar with a drawer and a one-tap "Log time". */}
+        <div className="hidden md:flex">
+          <Sidebar />
+        </div>
+        {menuOpen && (
+          <div className="fixed inset-0 z-40 md:hidden">
+            <div className="absolute inset-0 bg-black/30" onClick={() => setMenuOpen(false)} />
+            <div className="absolute inset-y-0 left-0 shadow-xl" onClick={() => setMenuOpen(false)}>
+              <Sidebar />
+            </div>
+          </div>
+        )}
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <MobileBar onMenu={() => setMenuOpen(true)} />
+          <Outlet />
+        </div>
       </div>
+    </div>
+  );
+}
+
+/** Row 96: phone header - menu, workspace name, Inbox, and the three-tap time logger. */
+function MobileBar({ onMenu }: { onMenu: () => void }) {
+  const { pathname } = useLocation();
+  return (
+    <div className="flex shrink-0 items-center gap-2 border-b border-border bg-[#fbfbfa] px-3 py-2 md:hidden">
+      <button type="button" onClick={onMenu} aria-label="Menu" className="flex h-9 w-9 items-center justify-center rounded-md text-slate-700 hover:bg-muted">
+        ☰
+      </button>
+      <span className="text-sm font-semibold text-slate-800">4S</span>
+      <span className="flex-1" />
+      <Link to="/inbox" className="rounded-md px-2 py-1.5 text-xs font-medium text-slate-700 hover:bg-muted">Inbox</Link>
+      <Link to="/log" className={pathname === "/log" ? "rounded-md bg-indigo-100 px-3 py-1.5 text-xs font-semibold text-indigo-800" : "rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white"}>
+        ⚡ Log time
+      </Link>
     </div>
   );
 }
@@ -189,6 +225,7 @@ const projectRoute = createRoute({
   path: "/projects/$projectId",
   component: ProjectPage,
 });
+const quickLogRoute = createRoute({ getParentRoute: () => rootRoute, path: "/log", component: QuickLogPage });
 const timeRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/time",
@@ -235,6 +272,7 @@ const routeTree = rootRoute.addChildren([
   projectsRoute,
   projectRoute,
   timeRoute,
+  quickLogRoute,
   timesheetRoute,
   resourcingRoute,
   companiesRoute,
