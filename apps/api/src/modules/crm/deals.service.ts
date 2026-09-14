@@ -2,9 +2,10 @@ import { BadRequestException, Inject, Injectable, Logger, NotFoundException, typ
 import { and, asc, eq, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
-import { companies, contacts, dealStages, deals } from "../../db/schema.js";
+import { companies, contacts, dealStages, deals, proposals } from "../../db/schema.js";
 import { ActivityService } from "../activity/activity.service.js";
 import { ProjectsService } from "../projects/projects.service.js";
+import { MilestonesService } from "../projects/milestones.service.js";
 import { NotificationsService } from "../notifications/notifications.service.js";
 
 /** Row 55: an open deal nobody has touched for this long is flagged stale. */
@@ -56,6 +57,7 @@ export class DealsService implements OnModuleInit, OnModuleDestroy {
     @Inject(DRIZZLE) private readonly db: DB,
     private readonly activity: ActivityService,
     private readonly projects: ProjectsService,
+    private readonly milestones: MilestonesService,
     private readonly notifications: NotificationsService,
   ) {}
 
@@ -327,20 +329,42 @@ export class DealsService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Won deal → delivery project. The project inherits the client and the deal
-   * value as its budget; the deal keeps a link so both sides can navigate.
+   * Row 60: won deal → delivery project in one click. The project takes the
+   * client (so its contacts come along), the deal owner as lead, the deal
+   * value as budget, the org's default stage sequence, and milestones parsed
+   * from the accepted (or latest) proposal's "Milestones" section — so
+   * nothing is re-keyed. The deal keeps a link so both sides can navigate.
    */
   async convertToProject(orgId: string, userId: string, id: string) {
     const deal = await this.get(orgId, id);
     if (deal.project) throw new BadRequestException("This deal already has a project");
 
+    const proposal = await this.db.query.proposals.findFirst({
+      where: and(eq(proposals.dealId, id), eq(proposals.organizationId, orgId), isNull(proposals.archivedAt)),
+      orderBy: (p, { desc }) => [desc(p.acceptedAt), desc(p.updatedAt)],
+    });
+    const start = new Date();
     const project = await this.projects.create(orgId, userId, {
       name: deal.title,
       clientName: deal.company?.name,
       companyId: deal.company?.id ?? null,
-      budgetAmount: deal.value || undefined,
-      currency: deal.currency,
+      leadId: deal.owner?.id ?? userId,
+      budgetAmount: (proposal?.status === "accepted" ? proposal.total : deal.value) || undefined,
+      currency: proposal?.currency ?? deal.currency,
+      startDate: start.toISOString(),
+      endDate: deal.expectedCloseDate ? new Date(deal.expectedCloseDate).toISOString() : null,
+      description: proposal ? `From proposal ${proposal.number}${proposal.acceptedAt ? " (accepted)" : ""}.` : undefined,
     });
+
+    // Milestones from the proposal, spaced evenly across the timeline when there is one.
+    const names = proposal ? milestonesFromProposal(proposal.sections) : [];
+    if (names.length) {
+      const end = deal.expectedCloseDate ? new Date(deal.expectedCloseDate) : null;
+      for (let i = 0; i < names.length; i++) {
+        const targetDate = end && end > start ? new Date(start.getTime() + ((end.getTime() - start.getTime()) * (i + 1)) / names.length).toISOString() : null;
+        await this.milestones.create(orgId, userId, project.id, { name: names[i]!, targetDate, clientVisible: true });
+      }
+    }
 
     const patch: Record<string, unknown> = { projectId: project.id, updatedAt: new Date() };
     if (deal.stage?.kind !== "won") {
@@ -389,6 +413,20 @@ export class DealsService implements OnModuleInit, OnModuleDestroy {
       if (!c) throw new BadRequestException("Contact not found in this organization");
     }
   }
+}
+
+/**
+ * "1. Kickoff & discovery" / "- Design sign-off" / "Launch" → milestone names.
+ * Reads the section titled Milestones (or the first section mentioning them).
+ */
+export function milestonesFromProposal(sections: { title: string; body: string }[]) {
+  const sec = sections.find((s) => /milestone/i.test(s.title)) ?? sections.find((s) => /milestone/i.test(s.body));
+  if (!sec) return [];
+  return sec.body
+    .split(/\r?\n/)
+    .map((l) => l.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, "").trim())
+    .filter((l) => l.length >= 2 && l.length <= 120)
+    .slice(0, 20);
 }
 
 export function shapeStage(s: StageRow) {

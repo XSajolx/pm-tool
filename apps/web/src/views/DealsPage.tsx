@@ -394,7 +394,7 @@ function DealDrawer({ dealId, onClose }: { dealId: string; onClose: () => void }
                   </p>
                 ) : isAdmin ? (
                   <div className="flex items-center gap-3">
-                    <p className="flex-1 text-xs text-muted-foreground">Create a project from this deal. Marks it won and carries the value over as the budget.</p>
+                    <p className="flex-1 text-xs text-muted-foreground">Create a project from this deal: client and contacts, {deal.owner?.name ?? "the owner"} as lead, the value as budget, default stages and milestones from the proposal. Marks the deal won.</p>
                     <button onClick={() => convert.mutate()} disabled={convert.isPending} className="shrink-0 rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50">
                       {convert.isPending ? "Converting…" : "Convert to project"}
                     </button>
