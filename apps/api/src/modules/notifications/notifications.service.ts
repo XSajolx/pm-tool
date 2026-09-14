@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
-import { and, desc, eq, gt, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNotNull, isNull, notInArray, or, sql, type SQL } from "drizzle-orm";
 import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
 import {
@@ -32,7 +32,43 @@ const PREFERENCE_FOR_VERB: Record<string, keyof PreferenceFlags> = {
  */
 const ALWAYS_PRIMARY = new Set(["assigned", "mentioned", "comment_assigned"]);
 
-export type InboxTab = "primary" | "other" | "replies" | "later" | "cleared";
+/**
+ * Row 71: the inbox is split by *type* rather than by primary/other.
+ *   all        -> every live item
+ *   mentions   -> you were @mentioned or assigned a comment
+ *   assigned   -> a task was assigned to you
+ *   approvals  -> things waiting on (or answering) a sign-off: doc reviews,
+ *                 proposal decisions, timesheets...
+ *   alerts     -> everything else: follow-ups, status changes, reminders
+ *   replies    -> comments and mentions (the Replies section)
+ *   later / cleared -> snoozed / archived
+ */
+export type InboxTab = "all" | "mentions" | "assigned" | "approvals" | "alerts" | "replies" | "later" | "cleared";
+export type TypedTab = "mentions" | "assigned" | "approvals" | "alerts";
+
+const TAB_VERBS: Record<Exclude<TypedTab, "alerts">, string[]> = {
+  mentions: ["mentioned", "comment_assigned"],
+  assigned: ["assigned"],
+  approvals: [
+    "doc_review_requested",
+    "doc_approved",
+    "doc_rejected",
+    "proposal_accepted",
+    "proposal_declined",
+    "timesheet_submitted",
+    "timesheet_approved",
+    "timesheet_rejected",
+    "milestone_signoff",
+  ],
+};
+const TYPED_VERBS = [...TAB_VERBS.mentions, ...TAB_VERBS.assigned, ...TAB_VERBS.approvals];
+
+/** The verb filter for a typed tab; `undefined` means no extra filter (All). */
+export function tabVerbFilter(tab: string): SQL | undefined {
+  if (tab === "alerts") return notInArray(notifications.verb, TYPED_VERBS);
+  const verbs = TAB_VERBS[tab as Exclude<TypedTab, "alerts">];
+  return verbs ? inArray(notifications.verb, verbs) : undefined;
+}
 
 interface PreferenceFlags {
   propertyChange: boolean;
@@ -283,7 +319,7 @@ export class NotificationsService {
    *   cleared          → archived
    * "Live" means not archived and not currently snoozed.
    */
-  async list(orgId: string, userId: string, tab: InboxTab = "primary") {
+  async list(orgId: string, userId: string, tab: InboxTab = "all") {
     const mine = and(
       eq(notifications.organizationId, orgId),
       eq(notifications.receiverId, userId),
@@ -304,7 +340,7 @@ export class NotificationsService {
             )
           : tab === "replies"
             ? and(mine, live, inArray(notifications.verb, ["commented", "mentioned"]))
-            : and(mine, live, eq(notifications.category, tab));
+            : and(mine, live, tabVerbFilter(tab));
 
     const rows = await this.db
       .select()
@@ -328,8 +364,10 @@ export class NotificationsService {
     const [row] = await this.db
       .select({
         total: sql<number>`count(*)::int`,
-        primary: sql<number>`count(*) filter (where ${notifications.category} = 'primary')::int`,
-        other: sql<number>`count(*) filter (where ${notifications.category} = 'other')::int`,
+        mentions: sql<number>`count(*) filter (where ${inArray(notifications.verb, TAB_VERBS.mentions)})::int`,
+        assigned: sql<number>`count(*) filter (where ${inArray(notifications.verb, TAB_VERBS.assigned)})::int`,
+        approvals: sql<number>`count(*) filter (where ${inArray(notifications.verb, TAB_VERBS.approvals)})::int`,
+        alerts: sql<number>`count(*) filter (where ${notInArray(notifications.verb, TYPED_VERBS)})::int`,
         replies: sql<number>`count(*) filter (where ${notifications.verb} in ('commented','mentioned'))::int`,
       })
       .from(notifications)
@@ -337,8 +375,11 @@ export class NotificationsService {
 
     return {
       count: row?.total ?? 0,
-      primary: row?.primary ?? 0,
-      other: row?.other ?? 0,
+      all: row?.total ?? 0,
+      mentions: row?.mentions ?? 0,
+      assigned: row?.assigned ?? 0,
+      approvals: row?.approvals ?? 0,
+      alerts: row?.alerts ?? 0,
       replies: row?.replies ?? 0,
     };
   }
@@ -353,7 +394,8 @@ export class NotificationsService {
     return row ?? null;
   }
 
-  async markAllRead(orgId: string, userId: string) {
+  /** Row 71: "Mark all read" - everything, or just the open tab. */
+  async markAllRead(orgId: string, userId: string, tab?: TypedTab | "all") {
     await this.db
       .update(notifications)
       .set({ readAt: new Date() })
@@ -362,6 +404,7 @@ export class NotificationsService {
           eq(notifications.organizationId, orgId),
           eq(notifications.receiverId, userId),
           isNull(notifications.readAt),
+          tab ? tabVerbFilter(tab) : undefined,
         ),
       );
     return { ok: true };
@@ -377,7 +420,7 @@ export class NotificationsService {
   }
 
   /** "Clear all": archive everything live in one tab (or all tabs). */
-  async clearAll(orgId: string, userId: string, category?: "primary" | "other") {
+  async clearAll(orgId: string, userId: string, tab?: TypedTab | "all") {
     await this.db
       .update(notifications)
       .set({ archivedAt: new Date(), readAt: new Date() })
@@ -386,7 +429,7 @@ export class NotificationsService {
           eq(notifications.organizationId, orgId),
           eq(notifications.receiverId, userId),
           isNull(notifications.archivedAt),
-          ...(category ? [eq(notifications.category, category)] : []),
+          tab ? tabVerbFilter(tab) : undefined,
         ),
       );
     return { ok: true };

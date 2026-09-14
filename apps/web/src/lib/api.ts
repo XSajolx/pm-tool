@@ -351,7 +351,9 @@ export interface ActivityEntry {
   actor: { id: string; name: string; avatarUrl: string | null } | null;
 }
 
-export type InboxTab = "primary" | "other" | "replies" | "later" | "cleared";
+/** Row 71: inbox tabs by type (plus the Replies section and the two parked tabs). */
+export type InboxTab = "all" | "mentions" | "assigned" | "approvals" | "alerts" | "replies" | "later" | "cleared";
+export type TypedInboxTab = "all" | "mentions" | "assigned" | "approvals" | "alerts";
 
 export interface AppNotification {
   id: string;
@@ -375,8 +377,11 @@ export interface AppNotification {
 
 export interface UnreadCounts {
   count: number;
-  primary: number;
-  other: number;
+  all: number;
+  mentions: number;
+  assigned: number;
+  approvals: number;
+  alerts: number;
   replies: number;
 }
 
@@ -1146,22 +1151,25 @@ export const api = {
     }),
 
   // ---- Notifications ----
-  getNotifications: (tab: InboxTab = "primary") =>
+  getNotifications: (tab: InboxTab = "all") =>
     request<AppNotification[]>(`/notifications?tab=${tab}`),
   getUnreadCount: () => request<UnreadCounts>(`/notifications/unread-count`),
   toggleNotificationImportant: (id: string) =>
     request<AppNotification>(`/notifications/${id}/important`, { method: "PATCH" }),
   restoreNotification: (id: string) =>
     request<AppNotification>(`/notifications/${id}/restore`, { method: "PATCH" }),
-  clearAllNotifications: (category?: "primary" | "other") =>
+  clearAllNotifications: (tab?: TypedInboxTab) =>
     request<{ ok: boolean }>(`/notifications/clear-all`, {
       method: "POST",
-      body: JSON.stringify(category ? { category } : {}),
+      body: JSON.stringify(tab ? { tab } : {}),
     }),
   markNotificationRead: (id: string) =>
     request<AppNotification>(`/notifications/${id}/read`, { method: "PATCH" }),
-  markAllNotificationsRead: () =>
-    request<{ ok: boolean }>(`/notifications/read-all`, { method: "POST" }),
+  markAllNotificationsRead: (tab?: TypedInboxTab) =>
+    request<{ ok: boolean }>(`/notifications/read-all`, {
+      method: "POST",
+      body: JSON.stringify(tab ? { tab } : {}),
+    }),
   archiveNotification: (id: string) =>
     request<AppNotification>(`/notifications/${id}/archive`, { method: "PATCH" }),
   snoozeNotification: (id: string, until: string) =>

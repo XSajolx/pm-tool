@@ -14,8 +14,9 @@ const preferencesSchema = z.object({
 });
 
 const snoozeSchema = z.object({ until: z.string().datetime() });
-const tabSchema = z.enum(["primary", "other", "replies", "later", "cleared"]);
-const clearSchema = z.object({ category: z.enum(["primary", "other"]).optional() });
+const tabSchema = z.enum(["all", "mentions", "assigned", "approvals", "alerts", "replies", "later", "cleared"]);
+const typedTab = z.enum(["all", "mentions", "assigned", "approvals", "alerts"]);
+const clearSchema = z.object({ tab: typedTab.optional() });
 
 /**
  * The inbox. Everything is implicitly scoped to the caller — there is no way to
@@ -26,14 +27,14 @@ const clearSchema = z.object({ category: z.enum(["primary", "other"]).optional()
 export class NotificationsController {
   constructor(private readonly notifications: NotificationsService) {}
 
-  /** `?tab=` picks primary (default) / other / replies / later / cleared. */
+  /** `?tab=` picks all (default) / mentions / assigned / approvals / alerts / replies / later / cleared. */
   @Get()
   list(@Auth() auth: AuthContext, @Query("tab") tab?: string) {
     const parsed = tabSchema.safeParse(tab);
     return this.notifications.list(
       auth.orgId,
       auth.userId,
-      (parsed.success ? parsed.data : "primary") as InboxTab,
+      (parsed.success ? parsed.data : "all") as InboxTab,
     );
   }
 
@@ -57,16 +58,18 @@ export class NotificationsController {
     return this.notifications.updatePreferences(auth.orgId, auth.userId, dto);
   }
 
+  /** Row 71: mark everything read - optionally just one tab. */
   @Post("read-all")
-  markAllRead(@Auth() auth: AuthContext) {
-    return this.notifications.markAllRead(auth.orgId, auth.userId);
+  @UsePipes(new ZodValidationPipe(clearSchema))
+  markAllRead(@Auth() auth: AuthContext, @Body() dto: z.infer<typeof clearSchema>) {
+    return this.notifications.markAllRead(auth.orgId, auth.userId, dto.tab);
   }
 
   /** Archive everything live — optionally just one tab. */
   @Post("clear-all")
   @UsePipes(new ZodValidationPipe(clearSchema))
   clearAll(@Auth() auth: AuthContext, @Body() dto: z.infer<typeof clearSchema>) {
-    return this.notifications.clearAll(auth.orgId, auth.userId, dto.category);
+    return this.notifications.clearAll(auth.orgId, auth.userId, dto.tab);
   }
 
   @Patch(":id/read")

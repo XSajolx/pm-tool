@@ -6,6 +6,7 @@ import {
   type AppNotification,
   type InboxTab,
   type MyTask,
+  type TypedInboxTab,
   type TaskComment,
 } from "../lib/api.js";
 import { relativeTime } from "../components/TaskCollaboration.js";
@@ -33,12 +34,18 @@ const VERB_LABEL: Record<string, string> = {
   updated: "made changes",
 };
 
-const TABS: { key: InboxTab; label: string }[] = [
-  { key: "primary", label: "Primary" },
-  { key: "other", label: "Other" },
+/** Row 71: tabs by type. The typed ones carry an unread count; Later/Cleared are parking spots. */
+const TABS: { key: InboxTab; label: string; hint?: string }[] = [
+  { key: "all", label: "All" },
+  { key: "mentions", label: "Mentions", hint: "@you and assigned comments" },
+  { key: "assigned", label: "Assigned", hint: "tasks handed to you" },
+  { key: "approvals", label: "Approvals", hint: "reviews & sign-offs" },
+  { key: "alerts", label: "Alerts", hint: "follow-ups, status changes" },
   { key: "later", label: "Later" },
   { key: "cleared", label: "Cleared" },
 ];
+const TYPED_TABS = new Set<InboxTab>(["all", "mentions", "assigned", "approvals", "alerts"]);
+const isTyped = (t: InboxTab): t is TypedInboxTab => TYPED_TABS.has(t);
 
 /**
  * ClickUp-style Home: a sub-navigation column (Inbox, Replies, Assigned
@@ -110,21 +117,24 @@ export function HomePage() {
  * ------------------------------------------------------------------ */
 
 function InboxSection() {
-  const [tab, setTab] = useState<InboxTab>("primary");
+  const [tab, setTab] = useState<InboxTab>("all");
   const { data: counts } = useQuery({ queryKey: ["unread-count"], queryFn: api.getUnreadCount });
   const qc = useQueryClient();
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ["notifications"] });
+    qc.invalidateQueries({ queryKey: ["unread-count"] });
+  };
 
   const clearAll = useMutation({
-    mutationFn: () =>
-      api.clearAllNotifications(tab === "primary" || tab === "other" ? tab : undefined),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["notifications"] });
-      qc.invalidateQueries({ queryKey: ["unread-count"] });
-    },
+    mutationFn: () => api.clearAllNotifications(isTyped(tab) ? tab : undefined),
+    onSuccess: refresh,
+  });
+  const readAll = useMutation({
+    mutationFn: () => api.markAllNotificationsRead(isTyped(tab) ? tab : undefined),
+    onSuccess: refresh,
   });
 
-  const tabCount = (key: InboxTab) =>
-    key === "primary" ? counts?.primary : key === "other" ? counts?.other : undefined;
+  const tabCount = (key: InboxTab) => (isTyped(key) ? counts?.[key] : undefined);
 
   return (
     <div className="flex min-w-0 flex-1 flex-col">
@@ -140,18 +150,25 @@ function InboxSection() {
                 : "border-transparent text-slate-500 hover:text-slate-700",
             )}
           >
-            <span className="text-sm font-medium">{t.label}</span>
-            <span className="text-[11px] text-muted-foreground">
-              {tabCount(t.key) ? `${tabCount(t.key)} unread` : " "}
+            <span className="flex items-center gap-1.5 text-sm font-medium">
+              {t.label}
+              {tabCount(t.key) ? (
+                <span className="rounded-full bg-indigo-600 px-1.5 text-[10px] font-semibold leading-4 text-white">
+                  {tabCount(t.key)}
+                </span>
+              ) : null}
             </span>
+            <span className="text-[11px] text-muted-foreground">{t.hint ?? " "}</span>
           </button>
         ))}
       </div>
 
       <NotificationList
         tab={tab}
-        showClearAll={tab === "primary" || tab === "other"}
+        showClearAll={isTyped(tab)}
         onClearAll={() => clearAll.mutate()}
+        onReadAll={() => readAll.mutate()}
+        unread={tabCount(tab) ?? 0}
       />
     </div>
   );
@@ -164,7 +181,7 @@ function RepliesSection() {
         <h2 className="text-sm font-semibold text-slate-800">Replies</h2>
         <p className="text-xs text-muted-foreground">Comments and mentions on tasks you follow</p>
       </div>
-      <NotificationList tab="replies" showClearAll={false} onClearAll={() => undefined} />
+      <NotificationList tab="replies" showClearAll={false} onClearAll={() => undefined} onReadAll={() => undefined} unread={0} />
     </div>
   );
 }
@@ -177,10 +194,15 @@ function NotificationList({
   tab,
   showClearAll,
   onClearAll,
+  onReadAll,
+  unread,
 }: {
   tab: InboxTab;
   showClearAll: boolean;
   onClearAll: () => void;
+  onReadAll: () => void;
+  /** Unread count for this tab - enables "Mark all read". */
+  unread: number;
 }) {
   const qc = useQueryClient();
   const navigate = useNavigate();
@@ -245,6 +267,19 @@ function NotificationList({
           {settingsOpen && <PreferencesPopover onClose={() => setSettingsOpen(false)} />}
         </div>
 
+        {showClearAll && (
+          <button
+            onClick={onReadAll}
+            disabled={!unread}
+            title="Mark every notification in this tab as read"
+            className="flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1 text-xs font-medium text-slate-600 transition hover:bg-muted disabled:opacity-40"
+          >
+            <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none">
+              <path d="M2 12l5 5L17 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+            </svg>
+            Mark all read
+          </button>
+        )}
         {showClearAll && (
           <button
             onClick={onClearAll}
