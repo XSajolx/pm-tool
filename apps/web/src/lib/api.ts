@@ -379,6 +379,19 @@ export interface ActivityEntry {
   actor: { id: string; name: string; avatarUrl: string | null } | null;
 }
 
+/** Row 104: a submitted week waiting on me. */
+export interface PendingTimesheet {
+  id: string;
+  userId: string;
+  user: { id: string; name: string; avatarUrl: string | null };
+  weekStart: string;
+  totalSeconds: number;
+  expectedHours: number;
+  note: string | null;
+  submittedAt: string;
+  approverId: string | null;
+}
+
 /** Row 103: hours this week per person. */
 export interface WorkloadPerson {
   userId: string;
@@ -1631,6 +1644,8 @@ export const api = {
     request<TimesheetSubmission>(`/time/timesheet/submissions/${id}/reopen`, { method: "POST", body: JSON.stringify({ reason }) }),
   getTimesheetEvents: (id: string) =>
     request<{ id: string; kind: string; note: string | null; createdAt: string; actor: { id: string; name: string } | null }[]>(`/time/timesheet/submissions/${id}/events`),
+  /** Row 104 */
+  getPendingTimesheets: () => request<PendingTimesheet[]>(`/time/timesheet/pending`),
   decideTimesheet: (id: string, body: { approve: boolean; note?: string }) =>
     request<TimesheetSubmission>(`/time/timesheet/submissions/${id}/decision`, { method: "POST", body: JSON.stringify(body) }),
   setTimesheetCell: (body: { projectId: string; taskId?: string | null; date: string; hours: number; userId?: string }) =>

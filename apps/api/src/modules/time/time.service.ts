@@ -115,6 +115,37 @@ export class TimeService {
     return row!;
   }
 
+  /** Row 104: timesheets waiting on this person (their approvees; admins see every submitted week). */
+  async pendingSubmissions(orgId: string, actor: Actor) {
+    const admin = actor.role === "owner" || actor.role === "admin";
+    const subs = await this.db.query.timesheetSubmissions.findMany({
+      where: and(
+        eq(timesheetSubmissions.organizationId, orgId),
+        eq(timesheetSubmissions.status, "submitted"),
+        ...(admin ? [] : [eq(timesheetSubmissions.approverId, actor.userId)]),
+      ),
+      with: { user: { columns: { id: true, name: true, avatarUrl: true } } },
+      orderBy: (t, { asc }) => [asc(t.submittedAt)],
+    });
+    if (!subs.length) return [];
+    const caps = await this.db.query.memberships.findMany({
+      where: and(eq(memberships.organizationId, orgId), inArray(memberships.userId, [...new Set(subs.map((x) => x.userId))])),
+      columns: { userId: true, weeklyCapacityHours: true },
+    });
+    const capBy = new Map(caps.map((c) => [c.userId, c.weeklyCapacityHours]));
+    return subs.map((x) => ({
+      id: x.id,
+      userId: x.userId,
+      user: x.user,
+      weekStart: x.weekStart.toISOString(),
+      totalSeconds: x.totalSeconds,
+      expectedHours: capBy.get(x.userId) ?? 0,
+      note: x.note,
+      submittedAt: x.submittedAt.toISOString(),
+      approverId: x.approverId,
+    }));
+  }
+
   async decideTimesheet(orgId: string, actor: Actor, id: string, approve: boolean, note?: string) {
     const sub = await this.db.query.timesheetSubmissions.findFirst({ where: and(eq(timesheetSubmissions.id, id), eq(timesheetSubmissions.organizationId, orgId)) });
     if (!sub) throw new NotFoundException("Submission not found");

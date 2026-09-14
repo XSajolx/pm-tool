@@ -249,6 +249,12 @@ export class TimeController {
     return this.time.submitWeek(auth.orgId, this.actor(auth), dto.week, dto.approverId);
   }
 
+  /** Row 104: what's waiting on me. */
+  @Get("timesheet/pending")
+  pending(@Auth() auth: AuthContext) {
+    return this.time.pendingSubmissions(auth.orgId, this.actor(auth));
+  }
+
   @Post("timesheet/submissions/:id/decision")
   @Roles(...WRITERS)
   @UsePipes(new ZodValidationPipe(decisionSchema))

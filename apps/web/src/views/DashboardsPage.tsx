@@ -5,6 +5,7 @@ import { api } from "../lib/api.js";
 import { fmtDuration, fmtMoney, fmtShortDate } from "../lib/format.js";
 import { cn } from "../lib/utils.js";
 import { TeamWorkloadWidget } from "../components/TeamWorkloadWidget.js";
+import { PendingApprovalsWidget } from "../components/PendingApprovalsWidget.js";
 
 /**
  * A view over everything else. Nothing here has its own storage — every tile is
@@ -131,9 +132,10 @@ export function DashboardsPage() {
           </Panel>
         </div>
 
-        {/* Row 103 */}
-        <div className="mt-6">
+        {/* Row 103 + 104 */}
+        <div className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-[3fr_2fr]">
           <TeamWorkloadWidget />
+          <PendingApprovalsWidget />
         </div>
 
         {overdue.length > 0 && (
