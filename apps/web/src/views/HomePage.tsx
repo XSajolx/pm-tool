@@ -33,6 +33,8 @@ const VERB_LABEL: Record<string, string> = {
   digest: "— your summary",
   project_activity: "",
   doc_edited: "edited",
+  doc_commented: "commented on",
+  doc_comment_replied: "replied to your comment on",
   doc_shared: "shared",
   doc_superseded: "superseded this with",
   due_soon: "— due soon",

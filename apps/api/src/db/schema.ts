@@ -1284,6 +1284,38 @@ export const integrationsRelations = relations(integrations, ({ one }) => ({
 }));
 
 /**
+ * Row 16: comments on docs. A root comment usually anchors to highlighted text
+ * (the editor keeps a mark carrying the comment id; `quote` is the text at the
+ * time). Replies hang off `parentId`; resolving closes the whole thread.
+ */
+export const docComments = pgTable(
+  "doc_comments",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    documentId: uuid("document_id")
+      .notNull()
+      .references((): AnyPgColumn => documents.id, { onDelete: "cascade" }),
+    authorId: uuid("author_id").references(() => users.id, { onDelete: "set null" }),
+    parentId: uuid("parent_id").references((): AnyPgColumn => docComments.id, { onDelete: "cascade" }),
+    quote: text("quote"),
+    body: text("body").notNull(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    resolvedById: uuid("resolved_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("doc_comments_doc_idx").on(t.documentId, t.createdAt)],
+);
+
+export const docCommentsRelations = relations(docComments, ({ one }) => ({
+  author: one(users, { fields: [docComments.authorId], references: [users.id] }),
+  resolvedBy: one(users, { fields: [docComments.resolvedById], references: [users.id], relationName: "doc_comment_resolver" }),
+}));
+
+/**
  * Row 124: a Drive / Dropbox (or any) file linked to a task, doc, project,
  * contact or company. The file stays where it lives; we keep the link plus
  * the metadata the provider told us last time we looked.

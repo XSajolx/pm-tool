@@ -161,3 +161,7 @@
 .doc-prose .doc-mention a { color: inherit; text-decoration: none; }
 .doc-prose .doc-mention a:hover { text-decoration: underline; }
 .doc-prose .doc-mention.ProseMirror-selectednode { outline: 2px solid #6366f1; }
+
+/* Row 16: comment highlights */
+.doc-prose .doc-comment-mark { background: #fef3c7; border-bottom: 2px solid #f59e0b; cursor: pointer; }
+.doc-prose .doc-comment-mark:hover { background: #fde68a; }

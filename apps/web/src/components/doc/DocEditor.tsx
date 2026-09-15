@@ -27,6 +27,7 @@ import { SnippetBlock } from "./SnippetBlock.js";
 import { FileBlock, ImageBlock } from "./MediaBlocks.js";
 import { ListEmbed, TaskEmbed } from "./EmbedBlocks.js";
 import { Mention, MentionMenu, insertMention, readMentionState, useMentionItems, type MentionState } from "./Mention.js";
+import { CommentMark } from "./CommentMark.js";
 import { api } from "../../lib/api.js";
 
 export interface DocEditorProps {
@@ -39,6 +40,8 @@ export interface DocEditorProps {
   settings: DocSettings;
   onSave: (patch: { content: Record<string, unknown>; body: string }) => void;
   onDirtyChange?: (dirty: boolean) => void;
+  /** Row 16: the selection toolbar's "Comment" - the page opens its composer with this quote. */
+  onComment?: (sel: { from: number; to: number; quote: string }) => void;
 }
 
 /** The block set a doc can contain — shared with read-only renderers (share page, row 65). */
@@ -80,6 +83,7 @@ export function docExtensions(opts: { placeholder?: boolean } = {}) {
     TaskEmbed,
     ListEmbed,
     Mention,
+    CommentMark,
   ];
 }
 
@@ -105,7 +109,7 @@ export function bodyToContent(body: string): Record<string, unknown> {
 
 const SAVE_DELAY_MS = 800;
 
-export function DocEditor({ docId, title, content, body, settings, onSave, onDirtyChange }: DocEditorProps) {
+export function DocEditor({ docId, title, content, body, settings, onSave, onDirtyChange, onComment }: DocEditorProps) {
   const [slash, setSlash] = useState<SlashState | null>(null);
   const [taskFrom, setTaskFrom] = useState<string | null>(null);
   const slashRef = useRef<SlashState | null>(null);
@@ -126,7 +130,28 @@ export function DocEditor({ docId, title, content, body, settings, onSave, onDir
       pickRef.current.click();
     };
     window.addEventListener("pm-doc-pick-file", onPick);
-    return () => window.removeEventListener("pm-doc-pick-file", onPick);
+    // Row 16: the comments panel asks the editor to mark / unmark text.
+    const onMark = (e: Event) => {
+      const d = (e as CustomEvent<{ from: number; to: number; commentId: string }>).detail;
+      editorRef.current?.chain().setTextSelection({ from: d.from, to: d.to }).setCommentMark(d.commentId).run();
+    };
+    const onUnmark = (e: Event) => {
+      const d = (e as CustomEvent<{ commentId: string }>).detail;
+      editorRef.current?.chain().unsetCommentMark(d.commentId).run();
+    };
+    const onClick = (e: MouseEvent) => {
+      const el = (e.target as HTMLElement).closest?.("[data-comment-id]") as HTMLElement | null;
+      if (el?.dataset.commentId) window.dispatchEvent(new CustomEvent("pm-doc-comment-focus", { detail: { commentId: el.dataset.commentId } }));
+    };
+    window.addEventListener("pm-doc-comment-mark", onMark);
+    window.addEventListener("pm-doc-comment-unmark", onUnmark);
+    document.addEventListener("click", onClick);
+    return () => {
+      window.removeEventListener("pm-doc-pick-file", onPick);
+      window.removeEventListener("pm-doc-comment-mark", onMark);
+      window.removeEventListener("pm-doc-comment-unmark", onUnmark);
+      document.removeEventListener("click", onClick);
+    };
   }, []);
   slashRef.current = slash;
   const saveTimer = useRef<number | null>(null);
@@ -251,6 +276,10 @@ export function DocEditor({ docId, title, content, body, settings, onSave, onDir
       <BubbleMenu editor={editor} tippyOptions={{ duration: 100, maxWidth: "none" }} shouldShow={({ editor, from, to }) => from !== to && !editor.isActive("codeBlock")}>
         <SelectionToolbar
           editor={editor}
+          onComment={onComment ? () => {
+            const { from, to } = editor.state.selection;
+            onComment({ from, to, quote: editor.state.doc.textBetween(from, to, "\n").trim().slice(0, 500) });
+          } : undefined}
           onSaveSnippet={async () => {
             const name = window.prompt("Name this snippet (e.g. Payment terms)");
             if (!name?.trim()) return;
@@ -328,7 +357,7 @@ export function DocEditor({ docId, title, content, body, settings, onSave, onDir
  * ------------------------------------------------------------------ */
 const TEXT_COLORS = ["#0f172a", "#dc2626", "#ea580c", "#ca8a04", "#16a34a", "#2563eb", "#7c3aed", "#db2777"];
 
-function SelectionToolbar({ editor, onMakeTask, onSaveSnippet }: { editor: Editor; onMakeTask?: () => void; onSaveSnippet?: () => void }) {
+function SelectionToolbar({ editor, onMakeTask, onSaveSnippet, onComment }: { editor: Editor; onMakeTask?: () => void; onSaveSnippet?: () => void; onComment?: () => void }) {
   const [linkOpen, setLinkOpen] = useState(false);
   const [linkValue, setLinkValue] = useState("");
 
@@ -445,6 +474,7 @@ function SelectionToolbar({ editor, onMakeTask, onSaveSnippet }: { editor: Edito
         </>
       )}
       {onSaveSnippet && <Btn label="⟲ Snippet" title="Save this selection as a reusable snippet (row 66)" onClick={onSaveSnippet} />}
+      {onComment && <Btn label="💬 Comment" title="Leave a comment on this text (row 16)" onClick={onComment} className="font-medium text-amber-700" />}
     </div>
   );
 }

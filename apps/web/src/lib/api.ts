@@ -539,6 +539,23 @@ export interface TrashItem {
   daysLeft: number;
 }
 
+/** Row 16 */
+export interface DocComment {
+  id: string;
+  documentId: string;
+  parentId: string | null;
+  quote: string | null;
+  body: string;
+  author: { id: string; name: string; avatarUrl: string | null } | null;
+  resolvedAt: string | null;
+  resolvedBy: { id: string; name: string } | null;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface DocThread extends DocComment {
+  replies: DocComment[];
+}
+
 /** Row 124 */
 export type LinkedEntity = "task" | "document" | "project" | "contact" | "company";
 export interface LinkedFile {
@@ -1947,6 +1964,13 @@ export const api = {
   restoreFromTrash: (type: TrashType, id: string) => request<{ restored: boolean }>(`/trash/${type}/${id}/restore`, { method: "POST" }),
   purgeFromTrash: (type: TrashType, id: string) => request<{ purged: boolean }>(`/trash/${type}/${id}`, { method: "DELETE" }),
   trashProject: (id: string) => request<{ id: string; trashed: boolean }>(`/projects/${id}/trash`, { method: "POST" }),
+  /** Row 16 */
+  getDocComments: (docId: string) => request<DocThread[]>(`/documents/${docId}/comments`),
+  createDocComment: (docId: string, body: { body: string; quote?: string | null; parentId?: string | null }) =>
+    request<DocComment>(`/documents/${docId}/comments`, { method: "POST", body: JSON.stringify(body) }),
+  resolveDocComment: (docId: string, commentId: string, resolved: boolean) =>
+    request<DocComment>(`/documents/${docId}/comments/${commentId}/resolve`, { method: "POST", body: JSON.stringify({ resolved }) }),
+  deleteDocComment: (docId: string, commentId: string) => request<{ id: string }>(`/documents/${docId}/comments/${commentId}`, { method: "DELETE" }),
   /** Row 124 */
   getLinkedFiles: (entityType: LinkedEntity, entityId: string) => request<LinkedFile[]>(`/linked-files?entityType=${entityType}&entityId=${entityId}`),
   addLinkedFile: (body: { entityType: LinkedEntity; entityId: string; url: string; name?: string | null }) => request<LinkedFile[]>(`/linked-files`, { method: "POST", body: JSON.stringify(body) }),

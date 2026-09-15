@@ -90,6 +90,7 @@ export function describe(e: ProjectActivityEntry, data: ProjectActivity): string
     case "document":
       switch (e.action) {
         case "created": return "created the doc";
+        case "commented": return "commented on the doc";
         case "edited": return c0?.field === "title" ? `renamed the doc to “${String(c0.to)}” from` : "edited the doc";
         case "review_requested": return "sent for review the doc";
         case "approved": return "approved the doc";

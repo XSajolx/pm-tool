@@ -109,6 +109,8 @@ const TYPE_FOR_VERB: Record<string, NotifType> = {
   posted: "chat",
   project_activity: "following",
   doc_edited: "following",
+  doc_commented: "comment",
+  doc_comment_replied: "mention",
   doc_shared: "following",
   doc_superseded: "following",
 };

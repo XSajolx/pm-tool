@@ -9,6 +9,7 @@ import { useEscape } from "../lib/useEscape.js";
 import { relativeTime } from "../components/TaskCollaboration.js";
 import { NotFound } from "../components/NotFound.js";
 import { DocEditor } from "../components/doc/DocEditor.js";
+import { DocCommentsPanel } from "../components/doc/DocCommentsPanel.js";
 import { LinkedFiles } from "../components/LinkedFiles.js";
 
 /* ------------------------------------------------------------------ *
@@ -284,6 +285,16 @@ export function DocPage() {
 
   const [title, setTitle] = useState("");
   const [panelOpen, setPanelOpen] = useState(false);
+  // Row 16: comments panel + the selection waiting for a comment.
+  const [commentsOpen, setCommentsOpen] = useState(false);
+  const [pendingComment, setPendingComment] = useState<{ from: number; to: number; quote: string } | null>(null);
+  const [focusComment, setFocusComment] = useState<string | null>(null);
+  const { data: commentThreads = [] } = useQuery({ queryKey: ["doc-comments", docId], queryFn: () => api.getDocComments(docId), enabled: Boolean(docId) });
+  useEffect(() => {
+    const onFocus = (e: Event) => { setFocusComment((e as CustomEvent<{ commentId: string }>).detail.commentId); setCommentsOpen(true); };
+    window.addEventListener("pm-doc-comment-focus", onFocus);
+    return () => window.removeEventListener("pm-doc-comment-focus", onFocus);
+  }, []);
   const [dirty, setDirty] = useState(false);
   const titleRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
@@ -389,6 +400,15 @@ export function DocPage() {
             PDF
           </button>
           <ClientVisibleToggle doc={doc} />
+          <button
+            type="button"
+            onClick={() => setCommentsOpen((o) => !o)}
+            className={`rounded-md border px-2.5 py-1 text-xs transition ${commentsOpen ? "border-indigo-300 bg-indigo-50 text-indigo-700" : "border-border text-slate-600 hover:bg-muted"}`}
+            title="Comments on this doc (row 16)"
+            data-testid="doc-comments-toggle"
+          >
+            💬 {commentThreads.filter((t) => !t.resolvedAt).length || ""}
+          </button>
           <ShareButton doc={doc} />
           <button
             type="button"
@@ -470,6 +490,7 @@ export function DocPage() {
                 settings={settings}
                 onDirtyChange={setDirty}
                 onSave={(patch) => save.mutate(patch)}
+                onComment={(sel) => { setPendingComment(sel); setCommentsOpen(true); }}
               />
             </div>
 
@@ -496,6 +517,9 @@ export function DocPage() {
         </div>
       </div>
 
+      {commentsOpen && (
+        <DocCommentsPanel docId={doc.id} pending={pendingComment} onClearPending={() => setPendingComment(null)} onClose={() => setCommentsOpen(false)} focusId={focusComment} />
+      )}
       {panelOpen && (
         <DocSidePanel
           doc={doc}

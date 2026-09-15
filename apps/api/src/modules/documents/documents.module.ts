@@ -1,4 +1,6 @@
 import { Module } from "@nestjs/common";
+import { DocCommentsController } from "./doc-comments.controller.js";
+import { DocCommentsService } from "./doc-comments.service.js";
 import { DocumentsController } from "./documents.controller.js";
 import { PublicDocumentsController } from "./public-documents.controller.js";
 import { SnippetsController } from "./snippets.controller.js";
@@ -12,8 +14,8 @@ import { NotificationsModule } from "../notifications/notifications.module.js";
 
 @Module({
   imports: [ChatModule, NotificationsModule],
-  controllers: [DocumentsController, PublicDocumentsController, SnippetsController, BrandingController, DocTemplatesController],
-  providers: [DocumentsService, SnippetsService, DocTemplatesService],
+  controllers: [DocumentsController, PublicDocumentsController, SnippetsController, BrandingController, DocTemplatesController, DocCommentsController],
+  providers: [DocumentsService, SnippetsService, DocTemplatesService, DocCommentsService],
   exports: [DocumentsService, DocTemplatesService],
 })
 export class DocumentsModule {}
