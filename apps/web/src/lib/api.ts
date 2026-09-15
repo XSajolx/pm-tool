@@ -1537,11 +1537,12 @@ export const api = {
       body: JSON.stringify({ body, parentMessageId, mentionedUserIds, attachmentIds }),
     }),
   // ---- Files (row 43) ----
-  uploadFile: (file: File, target: { channelId?: string; taskId?: string }) => {
+  uploadFile: (file: File, target: { channelId?: string; taskId?: string; documentId?: string }) => {
     const form = new FormData();
     form.append("file", file, file.name);
     if (target.channelId) form.append("channelId", target.channelId);
     if (target.taskId) form.append("taskId", target.taskId);
+    if (target.documentId) form.append("documentId", target.documentId);
     return upload<Attachment>(`/files`, form);
   },
   getChannelFiles: (channelId: string) => request<Attachment[]>(`/files?channelId=${channelId}`),

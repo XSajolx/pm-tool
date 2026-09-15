@@ -111,3 +111,19 @@
 .doc-prose .snippet-pick select { font-size: 1em; text-transform: none; letter-spacing: 0; border: 1px solid #e2e8f0; border-radius: 4px; padding: 0.1em 0.4em; background: white; color: #0f172a; }
 .doc-prose .snippet-loading { font-size: 0.85em; color: #94a3b8; }
 .doc-prose .snippet-block.ProseMirror-selectednode { outline: 2px solid #6366f1; }
+
+/* Row 13: images and files in docs */
+.doc-prose .doc-image { margin: 0.75em 0; position: relative; }
+.doc-prose .doc-image img { display: block; max-width: 100%; height: auto; border-radius: 8px; border: 1px solid #e2e8f0; }
+.doc-prose .doc-image.ProseMirror-selectednode img { outline: 2px solid #6366f1; }
+.doc-prose .doc-image-tools { display: none; position: absolute; top: 6px; left: 6px; gap: 4px; align-items: center; background: rgba(255,255,255,0.95); border: 1px solid #e2e8f0; border-radius: 6px; padding: 2px 4px; font-size: 0.72em; }
+.doc-prose .doc-image:hover .doc-image-tools, .doc-prose .doc-image.ProseMirror-selectednode .doc-image-tools { display: flex; }
+.doc-prose .doc-image-tools button { border: 1px solid #e2e8f0; border-radius: 4px; background: white; color: #475569; padding: 0 0.4em; }
+.doc-prose .doc-image-tools button.on { background: #eef2ff; color: #4338ca; border-color: #c7d2fe; }
+.doc-prose .doc-image-tools input { border: 1px solid #e2e8f0; border-radius: 4px; padding: 0 0.4em; min-width: 12em; color: #0f172a; }
+.doc-prose .doc-image-caption { margin-top: 0.25em; font-size: 0.8em; color: #64748b; text-align: center; }
+.doc-prose .doc-file { margin: 0.5em 0; }
+.doc-prose .doc-file a { display: inline-flex; align-items: center; gap: 0.5em; border: 1px solid #e2e8f0; border-radius: 8px; background: #fbfbfa; padding: 0.35em 0.75em; color: #0f172a; text-decoration: none; font-size: 0.9em; }
+.doc-prose .doc-file a:hover { border-color: #a5b4fc; background: #eef2ff; }
+.doc-prose .doc-file-size { color: #94a3b8; font-size: 0.85em; }
+.doc-prose .doc-file.ProseMirror-selectednode a { outline: 2px solid #6366f1; }

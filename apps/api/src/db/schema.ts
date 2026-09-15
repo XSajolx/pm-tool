@@ -375,6 +375,8 @@ export const attachments = pgTable(
       .references(() => organizations.id, { onDelete: "cascade" }),
     /** Exactly one home: a task, or a chat channel (row 43) — and, once sent, the message. */
     taskId: uuid("task_id").references(() => tasks.id, { onDelete: "cascade" }),
+    /** Row 13: images and files dropped into a doc. */
+    documentId: uuid("document_id").references((): AnyPgColumn => documents.id, { onDelete: "cascade" }),
     channelId: uuid("channel_id").references((): AnyPgColumn => channels.id, { onDelete: "cascade" }),
     messageId: uuid("message_id").references((): AnyPgColumn => messages.id, { onDelete: "cascade" }),
     uploadedById: uuid("uploaded_by_id")

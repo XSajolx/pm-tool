@@ -32,7 +32,7 @@ export class FilesController {
   @Post()
   @Roles("owner", "admin", "member")
   @UseInterceptors(FileInterceptor("file", { limits: { fileSize: MAX_BYTES } }))
-  upload(@Auth() auth: AuthContext, @UploadedFile() file: UploadedFileLike | undefined, @Body() body: { channelId?: string; taskId?: string }) {
+  upload(@Auth() auth: AuthContext, @UploadedFile() file: UploadedFileLike | undefined, @Body() body: { channelId?: string; taskId?: string; documentId?: string }) {
     if (!file) throw new BadRequestException("No file in the request");
     return this.files.upload(auth.orgId, auth.userId, file, body);
   }

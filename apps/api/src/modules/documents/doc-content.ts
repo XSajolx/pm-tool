@@ -110,6 +110,12 @@ export function toLines(node: PmNode, depth = 0, out: Line[] = [], listCtx?: { o
       case "horizontalRule":
         out.push({ text: "————————————", style: "p" });
         break;
+      case "imageBlock":
+        out.push({ text: `[Image${c.attrs?.alt ? `: ${String(c.attrs.alt)}` : ""}]`, style: "callout" });
+        break;
+      case "fileBlock":
+        out.push({ text: `[File: ${String(c.attrs?.name ?? "attachment")}]`, style: "callout" });
+        break;
       default:
         if (c.content) toLines(c, depth, out);
         else if (c.text) out.push({ text: c.text, style: "p" });

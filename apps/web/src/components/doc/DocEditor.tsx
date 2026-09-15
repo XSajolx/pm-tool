@@ -24,6 +24,7 @@ import { Callout, CodeBlockWithCopy, Toggle, ToggleContent, ToggleSummary } from
 import { SlashMenu, filterSlashItems, readSlashState, runSlashItem, type SlashState } from "./SlashMenu.js";
 import { QuickAdd } from "../QuickAdd.js";
 import { SnippetBlock } from "./SnippetBlock.js";
+import { FileBlock, ImageBlock } from "./MediaBlocks.js";
 import { api } from "../../lib/api.js";
 
 export interface DocEditorProps {
@@ -72,7 +73,20 @@ export function docExtensions(opts: { placeholder?: boolean } = {}) {
     ToggleSummary,
     ToggleContent,
     SnippetBlock,
+    ImageBlock,
+    FileBlock,
   ];
+}
+
+/** Row 13: upload one file for a doc and insert it as an image or a file block. */
+export async function uploadIntoDoc(editor: Editor, docId: string, file: File, at?: number) {
+  const uploaded = await api.uploadFile(file, { documentId: docId });
+  const isImage = uploaded.mimeType.startsWith("image/");
+  const node = isImage
+    ? { type: "imageBlock", attrs: { src: uploaded.url, alt: null, fileId: uploaded.id, width: null } }
+    : { type: "fileBlock", attrs: { url: uploaded.url, name: uploaded.filename, size: uploaded.sizeBytes, mime: uploaded.mimeType, fileId: uploaded.id } };
+  if (typeof at === "number") editor.chain().focus().insertContentAt(at, node).run();
+  else editor.chain().focus().insertContent(node).run();
 }
 
 /** Legacy plain-text docs become one paragraph per line. */
@@ -90,6 +104,18 @@ export function DocEditor({ docId, title, content, body, settings, onSave, onDir
   const [slash, setSlash] = useState<SlashState | null>(null);
   const [taskFrom, setTaskFrom] = useState<string | null>(null);
   const slashRef = useRef<SlashState | null>(null);
+  const pickRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    // Row 13: slash items can't open a picker themselves (no DOM access), so they ask via an event.
+    const onPick = (e: Event) => {
+      const kind = (e as CustomEvent<{ kind: "image" | "file" }>).detail?.kind;
+      if (!pickRef.current) return;
+      pickRef.current.accept = kind === "image" ? "image/*" : "";
+      pickRef.current.click();
+    };
+    window.addEventListener("pm-doc-pick-file", onPick);
+    return () => window.removeEventListener("pm-doc-pick-file", onPick);
+  }, []);
   slashRef.current = slash;
   const saveTimer = useRef<number | null>(null);
   const dirtyRef = useRef(false);
@@ -111,6 +137,22 @@ export function DocEditor({ docId, title, content, body, settings, onSave, onDir
       content: content ?? (body ? bodyToContent(body) : undefined),
       editorProps: {
         attributes: { class: "doc-prose", spellcheck: "true" },
+        // Row 13: paste a screenshot or drop files straight into the page.
+        handlePaste: (_view, event) => {
+          const files = Array.from(event.clipboardData?.files ?? []);
+          if (!files.length || !editorRef.current) return false;
+          event.preventDefault();
+          for (const f of files) void uploadIntoDoc(editorRef.current, docId, f);
+          return true;
+        },
+        handleDrop: (view, event) => {
+          const files = Array.from(event.dataTransfer?.files ?? []);
+          if (!files.length || !editorRef.current) return false;
+          event.preventDefault();
+          const pos = view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos;
+          for (const f of files) void uploadIntoDoc(editorRef.current, docId, f, pos);
+          return true;
+        },
         handleKeyDown: (_view, event) => {
           const state = slashRef.current;
           if (!state) return false;
@@ -210,6 +252,18 @@ export function DocEditor({ docId, title, content, body, settings, onSave, onDir
         <TableToolbar editor={editor} />
       </BubbleMenu>
       <EditorContent editor={editor} />
+      {/* Row 13: the slash menu's Image / File items open this picker */}
+      <input
+        ref={pickRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          const files = Array.from(e.target.files ?? []);
+          e.target.value = "";
+          if (editorRef.current) for (const f of files) void uploadIntoDoc(editorRef.current, docId, f);
+        }}
+      />
       {slash && (
         <SlashMenu
           state={slash}

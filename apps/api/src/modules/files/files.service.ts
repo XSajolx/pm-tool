@@ -3,7 +3,7 @@ import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
-import { attachments, channelMembers, tasks } from "../../db/schema.js";
+import { attachments, channelMembers, documents, tasks } from "../../db/schema.js";
 import { StorageService } from "./storage.service.js";
 
 export interface UploadedFileLike {
@@ -23,8 +23,13 @@ export class FilesService {
     private readonly storage: StorageService,
   ) {}
 
-  async upload(orgId: string, userId: string, file: UploadedFileLike, target: { channelId?: string; taskId?: string }) {
-    if (!target.channelId && !target.taskId) throw new BadRequestException("channelId or taskId is required");
+  async upload(orgId: string, userId: string, file: UploadedFileLike, target: { channelId?: string; taskId?: string; documentId?: string }) {
+    if (!target.channelId && !target.taskId && !target.documentId) throw new BadRequestException("channelId, taskId or documentId is required");
+    if (target.documentId) {
+      // Row 13: the doc must be one of ours.
+      const d = await this.db.query.documents.findFirst({ where: and(eq(documents.id, target.documentId), eq(documents.organizationId, orgId)), columns: { id: true } });
+      if (!d) throw new NotFoundException("Document not found");
+    }
     if (target.channelId) {
       const m = await this.db.query.channelMembers.findFirst({
         where: and(eq(channelMembers.channelId, target.channelId), eq(channelMembers.userId, userId), eq(channelMembers.organizationId, orgId)),
@@ -38,7 +43,7 @@ export class FilesService {
     const id = randomUUID();
     const filename = file.originalname.replace(/[^\w.\-() ]+/g, "_").slice(0, 200) || "file";
     const mimeType = file.mimetype || "application/octet-stream";
-    const key = `${orgId}/${target.channelId ? `chat/${target.channelId}` : `tasks/${target.taskId}`}/${id}-${filename}`;
+    const key = `${orgId}/${target.channelId ? `chat/${target.channelId}` : target.taskId ? `tasks/${target.taskId}` : `docs/${target.documentId}`}/${id}-${filename}`;
     await this.storage.put(key, file.buffer, mimeType);
     const [row] = await this.db
       .insert(attachments)
@@ -46,6 +51,7 @@ export class FilesService {
         id,
         organizationId: orgId,
         taskId: target.taskId ?? null,
+        documentId: target.documentId ?? null,
         channelId: target.channelId ?? null,
         uploadedById: userId,
         filename,
