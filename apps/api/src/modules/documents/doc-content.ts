@@ -116,6 +116,12 @@ export function toLines(node: PmNode, depth = 0, out: Line[] = [], listCtx?: { o
       case "fileBlock":
         out.push({ text: `[File: ${String(c.attrs?.name ?? "attachment")}]`, style: "callout" });
         break;
+      case "taskEmbed":
+        out.push({ text: "[Embedded task - open the doc in the app for the live card]", style: "callout" });
+        break;
+      case "listEmbed":
+        out.push({ text: "[Embedded task list - open the doc in the app for the live view]", style: "callout" });
+        break;
       default:
         if (c.content) toLines(c, depth, out);
         else if (c.text) out.push({ text: c.text, style: "p" });

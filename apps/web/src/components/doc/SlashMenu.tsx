@@ -42,6 +42,8 @@ export const SLASH_ITEMS: SlashItem[] = [
   { id: "divider", label: "Divider", hint: "Horizontal rule", icon: "—", group: "Blocks", keywords: "hr line", run: (e) => e.chain().focus().setHorizontalRule().run() },
   { id: "image", label: "Image", hint: "Upload a picture or paste a screenshot", icon: "🖼", group: "Blocks", keywords: "picture photo screenshot upload png jpg", run: () => window.dispatchEvent(new CustomEvent("pm-doc-pick-file", { detail: { kind: "image" } })) },
   { id: "file", label: "File", hint: "Attach a PDF, sheet or any file", icon: "📎", group: "Blocks", keywords: "attachment upload pdf document", run: () => window.dispatchEvent(new CustomEvent("pm-doc-pick-file", { detail: { kind: "file" } })) },
+  { id: "taskEmbed", label: "Task", hint: "Live task card - status, owner, due date", icon: "☐", group: "Blocks", keywords: "embed task card link ticket", run: (e) => e.chain().focus().insertTaskEmbed(null).run() },
+  { id: "listEmbed", label: "Task list", hint: "Every task in a list, live", icon: "▤", group: "Blocks", keywords: "embed list board tasks", run: (e) => e.chain().focus().insertListEmbed(null).run() },
   { id: "snippet", label: "Snippet", hint: "Reusable block that stays in sync", icon: "⟲", group: "Blocks", keywords: "reuse boilerplate template terms", run: (e) => e.chain().focus().insertSnippet(null).run() },
 ];
 

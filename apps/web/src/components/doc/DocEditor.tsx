@@ -25,6 +25,7 @@ import { SlashMenu, filterSlashItems, readSlashState, runSlashItem, type SlashSt
 import { QuickAdd } from "../QuickAdd.js";
 import { SnippetBlock } from "./SnippetBlock.js";
 import { FileBlock, ImageBlock } from "./MediaBlocks.js";
+import { ListEmbed, TaskEmbed } from "./EmbedBlocks.js";
 import { api } from "../../lib/api.js";
 
 export interface DocEditorProps {
@@ -75,6 +76,8 @@ export function docExtensions(opts: { placeholder?: boolean } = {}) {
     SnippetBlock,
     ImageBlock,
     FileBlock,
+    TaskEmbed,
+    ListEmbed,
   ];
 }
 
