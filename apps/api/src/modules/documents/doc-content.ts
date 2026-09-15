@@ -44,9 +44,19 @@ export function expandSnippets<T extends PmNode>(node: T, lookup: Map<string, Pm
   return copy as T;
 }
 
+/** Row 15: every user mentioned anywhere in the doc. */
+export function mentionedUserIds(node: PmNode | null | undefined, out = new Set<string>()): Set<string> {
+  if (!node) return out;
+  if (node.type === "mention" && node.attrs?.kind === "user" && typeof node.attrs.id === "string") out.add(node.attrs.id);
+  for (const c of node.content ?? []) mentionedUserIds(c, out);
+  return out;
+}
+
 /** Plain text of a node (block separator = newline). */
 export function textOf(node: PmNode): string {
   if (node.text) return node.text;
+  // Row 15: mentions read as "@Name" in search, PDFs and share pages.
+  if (node.type === "mention") return `@${String(node.attrs?.label ?? "")}`;
   if (!node.content) return "";
   const parts = node.content.map(textOf);
   const blockish = ["paragraph", "heading", "listItem", "taskItem", "blockquote", "codeBlock", "callout", "tableRow", "toggleSummary", "toggleContent", "toggle", "bulletList", "orderedList", "taskList", "table"];

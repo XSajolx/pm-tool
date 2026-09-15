@@ -2,14 +2,14 @@ import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundEx
 import { and, desc, eq, ilike, inArray, isNull, or, gt } from "drizzle-orm";
 import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
-import { companies, deals, documentAccess, documentLinks, documentStars, documentVisits, documents, projectMembers, projects, tasks, type DocumentSettings } from "../../db/schema.js";
+import { companies, deals, documentAccess, documentLinks, documentStars, documentVisits, documents, projectMembers, projects, tasks, users, type DocumentSettings } from "../../db/schema.js";
 import type { Role } from "../auth/auth.types.js";
 import { ChatEventsService } from "../chat/chat-events.service.js";
 import { ActivityService } from "../activity/activity.service.js";
 import { NotificationsService, pendingApproval } from "../notifications/notifications.service.js";
 import { notifications } from "../../db/schema.js";
 import { randomBytes } from "node:crypto";
-import { expandSnippets, snippetIds, stripInternal, textOf, toLines, type PmNode } from "./doc-content.js";
+import { expandSnippets, mentionedUserIds, snippetIds, stripInternal, textOf, toLines, type PmNode } from "./doc-content.js";
 import { renderDocPdf } from "../crm/pdf.js";
 import { organizations } from "../../db/schema.js";
 import { SnippetsService } from "./snippets.service.js";
@@ -218,6 +218,29 @@ export class DocumentsService {
         action: "edited",
         changes: dto.title && dto.title !== current.title ? [{ field: "title", from: current.title, to: dto.title }] : [],
       });
+    }
+    // Row 15: anyone newly @-mentioned gets an inbox item (once per mention, not per keystroke).
+    if (dto.content !== undefined) {
+      const before = mentionedUserIds(current.content as PmNode | null);
+      const after = mentionedUserIds(dto.content as PmNode | null);
+      const fresh = [...after].filter((uid) => !before.has(uid) && uid !== userId);
+      if (fresh.length) {
+        const [actor] = await this.db.select({ name: users.name }).from(users).where(eq(users.id, userId));
+        for (const receiverId of fresh) {
+          await this.notifications.notifyDirect({
+            orgId,
+            receiverId,
+            actorId: userId,
+            entityType: "document",
+            entityId: id,
+            verb: "mentioned",
+            title: `${actor?.name ?? "Someone"} mentioned you in “${dto.title ?? current.title}”`,
+            body: null,
+            data: { documentId: id },
+            category: "primary",
+          });
+        }
+      }
     }
     if (contentChanged) await this.pingFollowers(orgId, userId, id, "doc_edited", current.title, dto.title && dto.title !== current.title ? `Renamed to "${dto.title}"` : "Content changed");
     return this.get(orgId, id);

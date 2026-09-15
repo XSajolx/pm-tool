@@ -26,6 +26,7 @@ import { QuickAdd } from "../QuickAdd.js";
 import { SnippetBlock } from "./SnippetBlock.js";
 import { FileBlock, ImageBlock } from "./MediaBlocks.js";
 import { ListEmbed, TaskEmbed } from "./EmbedBlocks.js";
+import { Mention, MentionMenu, insertMention, readMentionState, useMentionItems, type MentionState } from "./Mention.js";
 import { api } from "../../lib/api.js";
 
 export interface DocEditorProps {
@@ -78,6 +79,7 @@ export function docExtensions(opts: { placeholder?: boolean } = {}) {
     FileBlock,
     TaskEmbed,
     ListEmbed,
+    Mention,
   ];
 }
 
@@ -107,6 +109,13 @@ export function DocEditor({ docId, title, content, body, settings, onSave, onDir
   const [slash, setSlash] = useState<SlashState | null>(null);
   const [taskFrom, setTaskFrom] = useState<string | null>(null);
   const slashRef = useRef<SlashState | null>(null);
+  // Row 15: "@" mentions - same state machine as "/" blocks.
+  const [mention, setMention] = useState<MentionState | null>(null);
+  const mentionRef = useRef<MentionState | null>(null);
+  mentionRef.current = mention;
+  const mentionItems = useMentionItems(mention?.query ?? "");
+  const mentionItemsRef = useRef(mentionItems);
+  mentionItemsRef.current = mentionItems;
   const pickRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     // Row 13: slash items can't open a picker themselves (no DOM access), so they ask via an event.
@@ -157,6 +166,26 @@ export function DocEditor({ docId, title, content, body, settings, onSave, onDir
           return true;
         },
         handleKeyDown: (_view, event) => {
+          // Row 15: the mention popup owns the arrow / enter keys while open.
+          const m = mentionRef.current;
+          if (m) {
+            const items = mentionItemsRef.current;
+            if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+              event.preventDefault();
+              if (items.length) setMention({ ...m, index: (m.index + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length });
+              return true;
+            }
+            if ((event.key === "Enter" || event.key === "Tab") && items[m.index]) {
+              event.preventDefault();
+              insertMention(editorRef.current!, m, items[m.index]!);
+              setMention(null);
+              return true;
+            }
+            if (event.key === "Escape") {
+              setMention(null);
+              return true;
+            }
+          }
           const state = slashRef.current;
           if (!state) return false;
           const items = filterSlashItems(state.query);
@@ -188,9 +217,11 @@ export function DocEditor({ docId, title, content, body, settings, onSave, onDir
         if (saveTimer.current) window.clearTimeout(saveTimer.current);
         saveTimer.current = window.setTimeout(() => flush(editor), SAVE_DELAY_MS);
         setSlash((prev) => readSlashState(editor, prev));
+        setMention((prev) => readMentionState(editor, prev, mentionItemsRef.current.length));
       },
       onSelectionUpdate: ({ editor }) => {
         setSlash((prev) => readSlashState(editor, prev));
+        setMention((prev) => readMentionState(editor, prev, mentionItemsRef.current.length));
       },
       onBlur: ({ editor }) => {
         // Save immediately on blur so nothing is lost when the user navigates away.
@@ -267,6 +298,17 @@ export function DocEditor({ docId, title, content, body, settings, onSave, onDir
           if (editorRef.current) for (const f of files) void uploadIntoDoc(editorRef.current, docId, f);
         }}
       />
+      {mention && !slash && (
+        <MentionMenu
+          state={mention}
+          items={mentionItems}
+          onHover={(index) => setMention({ ...mention, index })}
+          onPick={(item) => {
+            insertMention(editor, mention, item);
+            setMention(null);
+          }}
+        />
+      )}
       {slash && (
         <SlashMenu
           state={slash}

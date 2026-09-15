@@ -152,3 +152,12 @@
 .doc-prose .doc-task-select { font-size: 0.75em; border: 1px solid #e2e8f0; border-radius: 999px; padding: 0.05em 0.4em; background: white; }
 .doc-prose .doc-task-people, .doc-prose .doc-task-due { font-size: 0.75em; color: #64748b; white-space: nowrap; }
 .doc-prose .doc-task-due.overdue { color: #dc2626; }
+
+/* Row 15: mentions */
+.doc-prose .doc-mention { display: inline-block; border-radius: 4px; padding: 0 0.3em; font-weight: 500; line-height: 1.4; }
+.doc-prose .doc-mention-user { background: #eef2ff; color: #4338ca; }
+.doc-prose .doc-mention-task { background: #f0fdf4; color: #15803d; }
+.doc-prose .doc-mention-document { background: #fff7ed; color: #c2410c; }
+.doc-prose .doc-mention a { color: inherit; text-decoration: none; }
+.doc-prose .doc-mention a:hover { text-decoration: underline; }
+.doc-prose .doc-mention.ProseMirror-selectednode { outline: 2px solid #6366f1; }
