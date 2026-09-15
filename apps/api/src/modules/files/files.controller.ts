@@ -15,6 +15,7 @@ import {
 import { FileInterceptor } from "@nestjs/platform-express";
 import type { Response } from "express";
 import { FilesService, type UploadedFileLike } from "./files.service.js";
+import { ProjectAccessService } from "../access/project-access.service.js";
 import { Auth, Public, Roles } from "../auth/auth.decorators.js";
 import type { AuthContext } from "../auth/auth.types.js";
 
@@ -22,7 +23,10 @@ const MAX_BYTES = 25 * 1024 * 1024;
 
 @Controller("files")
 export class FilesController {
-  constructor(private readonly files: FilesService) {}
+  constructor(
+    private readonly files: FilesService,
+    private readonly access: ProjectAccessService,
+  ) {}
 
   /** Multipart upload: field "file" plus channelId or taskId (row 43). */
   @Post()
@@ -34,8 +38,13 @@ export class FilesController {
   }
 
   @Get()
-  list(@Auth() auth: AuthContext, @Query("channelId") channelId?: string) {
-    if (!channelId) throw new BadRequestException("channelId is required");
+  async list(@Auth() auth: AuthContext, @Query("channelId") channelId?: string, @Query("taskId") taskId?: string) {
+    if (taskId) {
+      // Row 2: task attachments follow task visibility (row 84).
+      await this.access.assertTask(auth.orgId, auth, taskId);
+      return this.files.listForTask(auth.orgId, taskId);
+    }
+    if (!channelId) throw new BadRequestException("channelId or taskId is required");
     return this.files.listForChannel(auth.orgId, channelId, auth.userId);
   }
 

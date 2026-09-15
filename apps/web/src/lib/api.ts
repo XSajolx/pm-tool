@@ -1546,6 +1546,8 @@ export const api = {
   },
   getChannelFiles: (channelId: string) => request<Attachment[]>(`/files?channelId=${channelId}`),
   deleteFile: (id: string) => request<{ id: string; deleted: boolean }>(`/files/${id}`, { method: "DELETE" }),
+  /** Row 2 */
+  getTaskFiles: (taskId: string) => request<Attachment[]>(`/files?taskId=${taskId}`),
   /** Row 40: a message's thread (root + replies). */
   getThread: (channelId: string, messageId: string) =>
     request<{ root: ChatMessage; replies: ChatMessage[] }>(`/chat/channels/${channelId}/messages/${messageId}/replies`),

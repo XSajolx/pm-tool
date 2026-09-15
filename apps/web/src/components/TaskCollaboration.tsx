@@ -11,6 +11,7 @@ import { Avatar } from "./ui.js";
 import { MuteButton } from "./MuteButton.js";
 import { FollowButton } from "./FollowButton.js";
 import { TaskTimerButton } from "./TaskTimerButton.js";
+import { TaskAttachments } from "./TaskAttachments.js";
 import { cn } from "../lib/utils.js";
 
 const QUICK_EMOJI = ["👍", "🎉", "🚀", "👀", "🔥"];
@@ -197,6 +198,9 @@ export function TaskCollaboration({ taskId, listId, statuses }: Props) {
           <p className="text-sm text-muted-foreground">No linked tasks.</p>
         )}
       </div>
+
+      {/* Row 2: attachments */}
+      <TaskAttachments taskId={taskId} />
 
       {/* Comments / activity */}
       <div className="border-t border-border">

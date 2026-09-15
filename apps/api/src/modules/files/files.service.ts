@@ -73,6 +73,17 @@ export class FilesService {
     return Promise.all(rows.filter((r) => r.messageId).map((r) => this.shape(r)));
   }
 
+  /** Row 2: everything attached to a task (uploads from the task panel and from inbound email). */
+  async listForTask(orgId: string, taskId: string) {
+    const rows = await this.db.query.attachments.findMany({
+      where: and(eq(attachments.organizationId, orgId), eq(attachments.taskId, taskId), isNull(attachments.archivedAt)),
+      with: { uploader: { columns: { id: true, name: true } } },
+      orderBy: [desc(attachments.createdAt)],
+      limit: 500,
+    });
+    return Promise.all(rows.map((r) => this.shape(r)));
+  }
+
   /** Attachments for a set of messages, grouped by message id. */
   async forMessages(messageIds: string[]) {
     const out = new Map<string, Awaited<ReturnType<FilesService["shape"]>>[]>();
