@@ -1284,6 +1284,37 @@ export const integrationsRelations = relations(integrations, ({ one }) => ({
 }));
 
 /**
+ * Row 21: version history. A snapshot of title + content is taken before an
+ * edit lands (at most one per editor per 10 minutes), on demand with a label,
+ * and before every restore - so nothing is ever lost.
+ */
+export const documentVersions = pgTable(
+  "document_versions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    documentId: uuid("document_id")
+      .notNull()
+      .references((): AnyPgColumn => documents.id, { onDelete: "cascade" }),
+    title: varchar("title", { length: 255 }).notNull(),
+    content: jsonb("content").$type<Record<string, unknown>>(),
+    body: text("body").notNull().default(""),
+    /** auto | manual | restore */
+    reason: varchar("reason", { length: 16 }).notNull().default("auto"),
+    label: varchar("label", { length: 120 }),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("document_versions_doc_idx").on(t.documentId, t.createdAt)],
+);
+
+export const documentVersionsRelations = relations(documentVersions, ({ one }) => ({
+  createdBy: one(users, { fields: [documentVersions.createdById], references: [users.id] }),
+}));
+
+/**
  * Row 16: comments on docs. A root comment usually anchors to highlighted text
  * (the editor keeps a mark carrying the comment id; `quote` is the text at the
  * time). Replies hang off `parentId`; resolving closes the whole thread.

@@ -6,6 +6,7 @@ import { companies, deals, documentAccess, documentLinks, documentStars, documen
 import type { Role } from "../auth/auth.types.js";
 import { ChatEventsService } from "../chat/chat-events.service.js";
 import { ActivityService } from "../activity/activity.service.js";
+import { DocVersionsService } from "./doc-versions.service.js";
 import { NotificationsService, pendingApproval } from "../notifications/notifications.service.js";
 import { notifications } from "../../db/schema.js";
 import { randomBytes } from "node:crypto";
@@ -44,6 +45,7 @@ export class DocumentsService {
     private readonly notifications: NotificationsService,
     private readonly snippets: SnippetsService,
     private readonly activity: ActivityService,
+    private readonly versions: DocVersionsService,
   ) {}
 
   /** Row 65 + 66: what leaves the team — internal blocks gone, snippets expanded. */
@@ -204,6 +206,8 @@ export class DocumentsService {
     // Row 63: an approved doc that changes is no longer the approved version.
     const contentChanged = (dto.content !== undefined && JSON.stringify(dto.content) !== JSON.stringify(current.content)) || (dto.body !== undefined && dto.body !== current.body) || (dto.title !== undefined && dto.title !== current.title);
     const reopen = current.reviewStatus === "approved" && contentChanged ? { reviewStatus: "draft" as const, reviewNote: "Edited after approval — needs sign-off again." } : {};
+    // Row 21: keep what is about to be overwritten (throttled per editor).
+    if (contentChanged) await this.versions.autoSnapshot(orgId, id, userId, { title: current.title, content: current.content, body: current.body });
     await this.db
       .update(documents)
       .set({ ...dto, settings, ...reopen, updatedById: userId, updatedAt: new Date() })

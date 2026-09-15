@@ -10,6 +10,7 @@ import { relativeTime } from "../components/TaskCollaboration.js";
 import { NotFound } from "../components/NotFound.js";
 import { DocEditor } from "../components/doc/DocEditor.js";
 import { DocCommentsPanel } from "../components/doc/DocCommentsPanel.js";
+import { DocHistoryPanel } from "../components/doc/DocHistoryPanel.js";
 import { LinkedFiles } from "../components/LinkedFiles.js";
 
 /* ------------------------------------------------------------------ *
@@ -287,6 +288,9 @@ export function DocPage() {
   const [panelOpen, setPanelOpen] = useState(false);
   // Row 16: comments panel + the selection waiting for a comment.
   const [commentsOpen, setCommentsOpen] = useState(false);
+  // Row 21
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [editorKey, setEditorKey] = useState(0);
   const [pendingComment, setPendingComment] = useState<{ from: number; to: number; quote: string } | null>(null);
   const [focusComment, setFocusComment] = useState<string | null>(null);
   const { data: commentThreads = [] } = useQuery({ queryKey: ["doc-comments", docId], queryFn: () => api.getDocComments(docId), enabled: Boolean(docId) });
@@ -412,6 +416,15 @@ export function DocPage() {
           <ShareButton doc={doc} />
           <button
             type="button"
+            onClick={() => setHistoryOpen((o) => !o)}
+            className={`rounded-md border px-2.5 py-1 text-xs transition ${historyOpen ? "border-indigo-300 bg-indigo-50 text-indigo-700" : "border-border text-slate-600 hover:bg-muted"}`}
+            title="Version history (row 21)"
+            data-testid="doc-history-toggle"
+          >
+            ⟲ History
+          </button>
+          <button
+            type="button"
             onClick={() => setPanelOpen((o) => !o)}
             className={`rounded-md border px-2.5 py-1 text-xs transition ${panelOpen ? "border-indigo-300 bg-indigo-50 text-indigo-700" : "border-border text-slate-600 hover:bg-muted"}`}
           >
@@ -483,6 +496,7 @@ export function DocPage() {
             <div className="mt-3"><LinkedFiles entityType="document" entityId={doc.id} compact /></div>
             <div className="mt-4">
               <DocEditor
+                key={editorKey}
                 docId={doc.id}
                 title={doc.title}
                 content={doc.content}
@@ -517,6 +531,13 @@ export function DocPage() {
         </div>
       </div>
 
+      {historyOpen && (
+        <DocHistoryPanel
+          docId={doc.id}
+          onClose={() => setHistoryOpen(false)}
+          onRestored={() => { qc.invalidateQueries({ queryKey: ["document", doc.id] }); setEditorKey((k) => k + 1); }}
+        />
+      )}
       {commentsOpen && (
         <DocCommentsPanel docId={doc.id} pending={pendingComment} onClearPending={() => setPendingComment(null)} onClose={() => setCommentsOpen(false)} focusId={focusComment} />
       )}

@@ -539,6 +539,20 @@ export interface TrashItem {
   daysLeft: number;
 }
 
+/** Row 21 */
+export interface DocVersion {
+  id: string;
+  documentId: string;
+  title: string;
+  reason: "auto" | "manual" | "restore";
+  label: string | null;
+  createdBy: { id: string; name: string } | null;
+  createdAt: string;
+  words: number;
+  content?: Record<string, unknown> | null;
+  body?: string;
+}
+
 /** Row 16 */
 export interface DocComment {
   id: string;
@@ -1964,6 +1978,11 @@ export const api = {
   restoreFromTrash: (type: TrashType, id: string) => request<{ restored: boolean }>(`/trash/${type}/${id}/restore`, { method: "POST" }),
   purgeFromTrash: (type: TrashType, id: string) => request<{ purged: boolean }>(`/trash/${type}/${id}`, { method: "DELETE" }),
   trashProject: (id: string) => request<{ id: string; trashed: boolean }>(`/projects/${id}/trash`, { method: "POST" }),
+  /** Row 21 */
+  getDocVersions: (docId: string) => request<DocVersion[]>(`/documents/${docId}/versions`),
+  getDocVersion: (docId: string, versionId: string) => request<DocVersion>(`/documents/${docId}/versions/${versionId}`),
+  saveDocVersion: (docId: string, label?: string | null) => request<DocVersion>(`/documents/${docId}/versions`, { method: "POST", body: JSON.stringify({ label: label ?? null }) }),
+  restoreDocVersion: (docId: string, versionId: string) => request<{ restored: string }>(`/documents/${docId}/versions/${versionId}/restore`, { method: "POST" }),
   /** Row 16 */
   getDocComments: (docId: string) => request<DocThread[]>(`/documents/${docId}/comments`),
   createDocComment: (docId: string, body: { body: string; quote?: string | null; parentId?: string | null }) =>
