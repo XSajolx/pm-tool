@@ -44,6 +44,8 @@ import { OverviewPage } from "./views/OverviewPage.js";
 import { PortalPreviewPage } from "./views/PortalPreviewPage.js";
 import { PortalPage } from "./views/PortalPage.js";
 import { TrashPage } from "./views/TrashPage.js";
+import { QuickAdd } from "./components/QuickAdd.js";
+import { GlobalSearch } from "./components/GlobalSearch.js";
 import { TaskOpenPage } from "./views/TaskOpenPage.js";
 import { SpaceOverviewPage } from "./views/SpaceOverviewPage.js";
 import { AuthPage } from "./views/AuthPage.js";
@@ -113,13 +115,20 @@ function Protected() {
 /** Row 96: phone header - menu, workspace name, Inbox, and the three-tap time logger. */
 function MobileBar({ onMenu }: { onMenu: () => void }) {
   const { pathname } = useLocation();
+  // Row 128: create a task and search from the phone bar, no sidebar needed.
+  const [quickAdd, setQuickAdd] = useState(false);
+  const [search, setSearch] = useState(false);
   return (
     <div className="flex shrink-0 items-center gap-2 border-b border-border bg-[#fbfbfa] px-3 py-2 md:hidden">
+      <QuickAdd open={quickAdd} onClose={() => setQuickAdd(false)} />
+      {search && <GlobalSearch onClose={() => setSearch(false)} />}
       <button type="button" onClick={onMenu} aria-label="Menu" className="flex h-9 w-9 items-center justify-center rounded-md text-slate-700 hover:bg-muted">
         ☰
       </button>
       <span className="text-sm font-semibold text-slate-800">4S</span>
       <span className="flex-1" />
+      <button type="button" onClick={() => setSearch(true)} aria-label="Search" className="rounded-md px-2 py-1.5 text-sm text-slate-700 hover:bg-muted">⌕</button>
+      <button type="button" onClick={() => setQuickAdd(true)} className="rounded-md border border-indigo-300 px-2 py-1.5 text-xs font-medium text-indigo-700 hover:bg-indigo-50" data-testid="mobile-new-task">＋ Task</button>
       <Link to="/inbox" className="rounded-md px-2 py-1.5 text-xs font-medium text-slate-700 hover:bg-muted">Inbox</Link>
       <Link to="/log" className={pathname === "/log" ? "rounded-md bg-indigo-100 px-3 py-1.5 text-xs font-semibold text-indigo-800" : "rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white"}>
         ⚡ Log time

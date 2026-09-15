@@ -73,7 +73,7 @@ export function TaskDetail({ taskId, listId, spaceId, statuses, members, onClose
       {/* backdrop */}
       <div className="fixed inset-0 z-40 bg-black/20" onClick={onClose} />
       {/* panel */}
-      <aside className="fixed right-0 top-0 z-50 flex h-screen w-[440px] flex-col border-l border-border bg-white shadow-xl">
+      <aside className="fixed right-0 top-0 z-50 flex h-screen w-full max-w-[440px] flex-col border-l border-border bg-white shadow-xl" data-testid="task-panel">
         <header className="flex items-center justify-between border-b border-border px-4 py-3">
           <span className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
             {task?.reference}

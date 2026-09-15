@@ -44,7 +44,9 @@ export function ChatPage() {
 
   // Auto-select the first channel when none is chosen.
   useEffect(() => {
-    if (!channelId && channels[0]) {
+    // Row 128: on a phone the channel list is its own screen, so don't jump into a channel uninvited.
+    const desktop = typeof window === "undefined" || window.matchMedia("(min-width: 768px)").matches;
+    if (!channelId && channels[0] && desktop) {
       navigate({ to: "/chat/$channelId", params: { channelId: channels[0].id } });
     }
   }, [channelId, channels, navigate]);
@@ -69,7 +71,7 @@ export function ChatPage() {
   return (
     <div className="flex h-screen flex-1 overflow-hidden">
       {/* Channel list */}
-      <div className="flex w-60 shrink-0 flex-col border-r border-border bg-[#fbfbfa]">
+      <div className={`${channelId ? "hidden md:flex" : "flex"} w-full shrink-0 flex-col border-r border-border bg-[#fbfbfa] md:w-60`} data-testid="chat-channel-list">
         <div className="flex items-center border-b border-border px-4 py-3 text-sm font-semibold">
           Chat
           <button
@@ -288,6 +290,8 @@ function MessagePane({ channelId, channel }: { channelId: string; channel?: Chat
   return (
     <div className="flex flex-1 overflow-hidden bg-white">
       <div ref={paneRef} className="relative flex min-w-0 flex-1 flex-col">
+        {/* Row 128: phones get a way back to the channel list */}
+        <Link to="/chat" className="border-b border-border px-4 py-1.5 text-xs font-medium text-indigo-700 md:hidden" data-testid="chat-back">‹ Channels</Link>
         <ChannelHeader channel={channel} title={title} panel={panel} onTogglePanel={(p) => setPanel((cur) => (cur === p ? null : p))} />
 
         <div className="flex-1 space-y-3 overflow-y-auto px-5 py-4">

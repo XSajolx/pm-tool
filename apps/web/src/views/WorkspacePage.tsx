@@ -166,7 +166,7 @@ export function WorkspacePage() {
 
   return (
     <div className="flex h-screen flex-1 flex-col overflow-hidden">
-      <div className="flex items-center gap-2 border-b border-border px-5 py-2.5">
+      <div className="flex flex-wrap items-center gap-2 border-b border-border px-5 py-2.5">
         <span className="text-sm text-muted-foreground">{ctx?.space.name ?? "Space"}</span>
         <span className="text-muted-foreground">/</span>
         <span className="text-sm font-semibold text-slate-800">{ctx?.listName ?? "List"}</span>
@@ -279,7 +279,7 @@ export function WorkspacePage() {
       </div>
 
       {/* Quick add */}
-      <div className="flex items-center gap-2 border-b border-border px-5 py-2">
+      <div className="flex flex-wrap items-center gap-2 border-b border-border px-5 py-2">
         <input
           value={draft}
           onChange={(e) => setDraft(e.target.value)}

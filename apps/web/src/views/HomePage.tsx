@@ -430,7 +430,7 @@ function NotificationRow({
     <li
       onClick={onOpen}
       className={cn(
-        "group grid cursor-pointer grid-cols-[auto_minmax(0,1.1fr)_auto_minmax(0,1.4fr)_auto_auto_auto] items-center gap-3 border-b border-border px-4 py-2.5 last:border-b-0 transition hover:bg-[#fbfbfa]",
+        "group flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-1 border-b border-border px-4 py-2.5 last:border-b-0 transition hover:bg-[#fbfbfa] md:grid md:grid-cols-[auto_minmax(0,1.1fr)_auto_minmax(0,1.4fr)_auto_auto_auto]",
         unread && "bg-indigo-50/30",
       )}
     >
@@ -985,7 +985,7 @@ function MyTasksSection() {
                 {g.items.map((t) => (
                   <li
                     key={t.id}
-                    className="grid grid-cols-[auto_minmax(0,1fr)_auto_auto_auto] items-center gap-3 border-b border-border px-4 py-2.5 last:border-b-0 hover:bg-[#fbfbfa]"
+                    className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border px-4 py-2.5 last:border-b-0 hover:bg-[#fbfbfa] md:grid md:grid-cols-[auto_minmax(0,1fr)_auto_auto_auto]"
                   >
                     <span className="w-12 text-[11px] text-muted-foreground">{t.reference ?? ""}</span>
                     <Link
