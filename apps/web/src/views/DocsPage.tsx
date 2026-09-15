@@ -11,6 +11,8 @@ import { NotFound } from "../components/NotFound.js";
 import { DocEditor } from "../components/doc/DocEditor.js";
 import { DocCommentsPanel } from "../components/doc/DocCommentsPanel.js";
 import { DocHistoryPanel } from "../components/doc/DocHistoryPanel.js";
+import { getSocket } from "../lib/socket.js";
+import { Avatar } from "../components/ui.js";
 import { LinkedFiles } from "../components/LinkedFiles.js";
 
 /* ------------------------------------------------------------------ *
@@ -291,6 +293,41 @@ export function DocPage() {
   // Row 21
   const [historyOpen, setHistoryOpen] = useState(false);
   const [editorKey, setEditorKey] = useState(0);
+  // Row 23: who else has this doc open, and whether someone saved while we had unsaved edits.
+  const [others, setOthers] = useState<{ userId: string; name: string }[]>([]);
+  const [remoteChange, setRemoteChange] = useState<{ byName: string; updatedAt: string } | null>(null);
+  const dirtyRef = useRef(false);
+  useEffect(() => {
+    if (!docId) return;
+    const socket = getSocket();
+    const join = () => socket.emit("doc:join", docId);
+    const onPresence = (p: { docId: string; people: { userId: string; name: string }[] }) => {
+      if (p.docId === docId) setOthers(p.people.filter((x) => x.userId !== user?.id));
+    };
+    const onChanged = async (p: { docId: string; byUserId: string; byName: string; updatedAt: string }) => {
+      if (p.docId !== docId || p.byUserId === user?.id) return;
+      if (dirtyRef.current) {
+        setRemoteChange({ byName: p.byName, updatedAt: p.updatedAt });
+        return;
+      }
+      const fresh = await api.getDocument(docId);
+      qc.setQueryData(["document", docId], fresh);
+      window.dispatchEvent(new CustomEvent("pm-doc-remote-content", { detail: { docId, content: fresh.content, body: fresh.body } }));
+      qc.invalidateQueries({ queryKey: ["doc-versions", docId] });
+    };
+    join();
+    socket.on("connect", join);
+    socket.on("doc:presence", onPresence);
+    socket.on("doc:changed", onChanged);
+    return () => {
+      socket.emit("doc:leave", docId);
+      socket.off("connect", join);
+      socket.off("doc:presence", onPresence);
+      socket.off("doc:changed", onChanged);
+      setOthers([]);
+      setRemoteChange(null);
+    };
+  }, [docId, user?.id, qc]);
   const [pendingComment, setPendingComment] = useState<{ from: number; to: number; quote: string } | null>(null);
   const [focusComment, setFocusComment] = useState<string | null>(null);
   const { data: commentThreads = [] } = useQuery({ queryKey: ["doc-comments", docId], queryFn: () => api.getDocComments(docId), enabled: Boolean(docId) });
@@ -376,6 +413,12 @@ export function DocPage() {
           )}
           <span className="text-muted-foreground">/</span>
           <span className="truncate text-sm font-semibold text-slate-800">{doc.title}</span>
+          {others.length > 0 && (
+            <span className="inline-flex items-center gap-1 rounded-full border border-green-200 bg-green-50 px-2 py-0.5 text-[11px] text-green-800" title={`${others.map((o) => o.name).join(", ")} ${others.length === 1 ? "has" : "have"} this doc open`} data-testid="doc-presence">
+              <span className="flex -space-x-1">{others.slice(0, 3).map((o) => <Avatar key={o.userId} user={{ id: o.userId, name: o.name, avatarUrl: null, email: "", role: "member" }} size={16} />)}</span>
+              {others.length === 1 ? `${others[0]!.name.split(" ")[0]} is here` : `${others.length} here`}
+            </span>
+          )}
           <StarButton doc={doc} />
           <FollowButton entityType="document" entityId={doc.id} compact />
           <MuteButton entityType="document" entityId={doc.id} compact />
@@ -492,6 +535,26 @@ export function DocPage() {
                 ))}
               </p>
             )}
+            {remoteChange && (
+              <div className="mt-3 flex flex-wrap items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900" data-testid="doc-remote-change">
+                <span><strong>{remoteChange.byName}</strong> saved this doc {relativeTime(remoteChange.updatedAt)} while you were editing. Your next save will overwrite theirs.</span>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const fresh = await api.getDocument(doc.id);
+                    qc.setQueryData(["document", doc.id], fresh);
+                    setRemoteChange(null);
+                    setDirty(false);
+                    dirtyRef.current = false;
+                    setEditorKey((k) => k + 1);
+                  }}
+                  className="rounded-md border border-amber-300 bg-white px-2 py-0.5 font-medium hover:bg-amber-100"
+                >
+                  Load their version (drops my unsaved edits)
+                </button>
+                <button type="button" onClick={() => setRemoteChange(null)} className="text-amber-700 hover:underline">Keep mine</button>
+              </div>
+            )}
             {/* Row 124 */}
             <div className="mt-3"><LinkedFiles entityType="document" entityId={doc.id} compact /></div>
             <div className="mt-4">
@@ -502,7 +565,7 @@ export function DocPage() {
                 content={doc.content}
                 body={doc.body}
                 settings={settings}
-                onDirtyChange={setDirty}
+                onDirtyChange={(d) => { setDirty(d); dirtyRef.current = d; if (!d) setRemoteChange((c) => c); }}
                 onSave={(patch) => save.mutate(patch)}
                 onComment={(sel) => { setPendingComment(sel); setCommentsOpen(true); }}
               />

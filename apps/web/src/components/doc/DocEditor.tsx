@@ -143,11 +143,24 @@ export function DocEditor({ docId, title, content, body, settings, onSave, onDir
       const el = (e.target as HTMLElement).closest?.("[data-comment-id]") as HTMLElement | null;
       if (el?.dataset.commentId) window.dispatchEvent(new CustomEvent("pm-doc-comment-focus", { detail: { commentId: el.dataset.commentId } }));
     };
+    // Row 23: a teammate saved. If nothing is pending here, swap the content in place (caret stays where it was when possible).
+    const onRemote = (e: Event) => {
+      const d = (e as CustomEvent<{ docId: string; content: Record<string, unknown> | null; body: string }>).detail;
+      const ed = editorRef.current;
+      if (!ed || d.docId !== docId || dirtyRef.current) return;
+      const { from } = ed.state.selection;
+      ed.commands.setContent(d.content ?? bodyToContent(d.body), false);
+      try {
+        ed.commands.setTextSelection(Math.min(from, ed.state.doc.content.size));
+      } catch { /* selection out of range after a big change */ }
+    };
+    window.addEventListener("pm-doc-remote-content", onRemote);
     window.addEventListener("pm-doc-comment-mark", onMark);
     window.addEventListener("pm-doc-comment-unmark", onUnmark);
     document.addEventListener("click", onClick);
     return () => {
       window.removeEventListener("pm-doc-pick-file", onPick);
+      window.removeEventListener("pm-doc-remote-content", onRemote);
       window.removeEventListener("pm-doc-comment-mark", onMark);
       window.removeEventListener("pm-doc-comment-unmark", onUnmark);
       document.removeEventListener("click", onClick);

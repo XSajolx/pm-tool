@@ -213,6 +213,9 @@ export class DocumentsService {
       .set({ ...dto, settings, ...reopen, updatedById: userId, updatedAt: new Date() })
       .where(eq(documents.id, id));
     if (contentChanged) {
+      // Row 23: other people with this doc open refresh (or get a heads-up if they're mid-edit).
+      const [who] = await this.db.select({ name: users.name }).from(users).where(eq(users.id, userId));
+      this.chatEvents.docChanged(id, { byUserId: userId, byName: who?.name ?? "Someone", title: dto.title ?? current.title, updatedAt: new Date().toISOString() });
       // Row 102: one activity row per edit; the project feed shows the latest per editor.
       await this.activity.record({
         orgId,

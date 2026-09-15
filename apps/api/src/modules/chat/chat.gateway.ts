@@ -62,7 +62,49 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   handleDisconnect(client: Socket) {
+    const docs = [...client.rooms].filter((r) => r.startsWith("doc:"));
     this.identities.delete(client.id);
+    // Row 23: tell the others in each doc that this person left.
+    for (const room of docs) setTimeout(() => void this.emitDocPresence(room), 0);
+  }
+
+  /* ---------------- Row 23: live docs ---------------- */
+
+  /**
+   * Presence + change signals only. Content never travels over the socket:
+   * a changed doc is re-fetched over REST, which enforces doc permissions.
+   */
+  @SubscribeMessage("doc:join")
+  async docJoin(@ConnectedSocket() client: Socket, @MessageBody() docId: string) {
+    const me = this.identities.get(client.id);
+    if (!me || typeof docId !== "string" || !/^[0-9a-f-]{36}$/i.test(docId)) return { error: "unauthorized" };
+    const room = `doc:${docId}`;
+    await client.join(room);
+    await this.emitDocPresence(room);
+    return { joined: docId };
+  }
+
+  @SubscribeMessage("doc:leave")
+  async docLeave(@ConnectedSocket() client: Socket, @MessageBody() docId: string) {
+    const room = `doc:${docId}`;
+    await client.leave(room);
+    await this.emitDocPresence(room);
+  }
+
+  /** Who has this doc open right now (one entry per person, however many tabs). */
+  private async emitDocPresence(room: string) {
+    const sockets = await this.server.in(room).fetchSockets();
+    const people = new Map<string, { userId: string; name: string }>();
+    for (const sck of sockets) {
+      const id = this.identities.get(sck.id);
+      if (id) people.set(id.userId, id);
+    }
+    this.server.to(room).emit("doc:presence", { docId: room.slice(4), people: [...people.values()] });
+  }
+
+  /** After a save: everyone else viewing the doc refreshes (or is warned if mid-edit). */
+  emitDocChanged(docId: string, payload: { byUserId: string; byName: string; title: string; updatedAt: string }) {
+    this.server.to(`doc:${docId}`).emit("doc:changed", { docId, ...payload });
   }
 
   @SubscribeMessage("join")

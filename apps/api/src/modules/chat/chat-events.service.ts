@@ -35,6 +35,15 @@ export class ChatEventsService {
 
   private readonly listeners: ProjectEventListener[] = [];
 
+  /** Row 23: live-doc signal, fanned out by the gateway. */
+  docChanged(docId: string, payload: { byUserId: string; byName: string; title: string; updatedAt: string }) {
+    try {
+      this.gateway.emitDocChanged(docId, payload);
+    } catch (err) {
+      this.logger.warn(`doc change not broadcast: ${(err as Error).message}`);
+    }
+  }
+
   /** Row 77: other modules (notifications) subscribe to every project event without a circular import. */
   onProjectEvent(fn: ProjectEventListener) {
     this.listeners.push(fn);

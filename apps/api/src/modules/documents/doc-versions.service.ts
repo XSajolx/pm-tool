@@ -4,6 +4,8 @@ import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
 import { documentVersions, documents } from "../../db/schema.js";
 import { ActivityService } from "../activity/activity.service.js";
+import { ChatEventsService } from "../chat/chat-events.service.js";
+import { users } from "../../db/schema.js";
 
 const AUTO_GAP_MS = 10 * 60 * 1000;
 
@@ -13,6 +15,7 @@ export class DocVersionsService {
   constructor(
     @Inject(DRIZZLE) private readonly db: DB,
     private readonly activity: ActivityService,
+    private readonly chatEvents: ChatEventsService,
   ) {}
 
   private shape(v: typeof documentVersions.$inferSelect & { createdBy?: { id: string; name: string } | null }, withContent = false) {
@@ -75,6 +78,8 @@ export class DocVersionsService {
     if (!doc) throw new NotFoundException("Document not found");
     await this.db.insert(documentVersions).values({ organizationId: orgId, documentId: docId, title: doc.title, content: doc.content, body: doc.body, reason: "restore", label: "Before restore", createdById: userId });
     await this.db.update(documents).set({ title: v.title, content: v.content, body: v.body, updatedById: userId, updatedAt: new Date() }).where(eq(documents.id, docId));
+    const [who] = await this.db.select({ name: users.name }).from(users).where(eq(users.id, userId));
+    this.chatEvents.docChanged(docId, { byUserId: userId, byName: who?.name ?? "Someone", title: v.title, updatedAt: new Date().toISOString() });
     await this.activity.record({ orgId, actorId: userId, entityType: "document", entityId: docId, action: "version_restored", changes: [{ field: "version", from: null, to: `${v.label ?? v.reason} · ${v.createdAt.toISOString()}` }] });
     return { restored: id };
   }
