@@ -16,13 +16,14 @@ import { ConnectionsSettings } from "../components/ConnectionsSettings.js";
 import { CustomFieldSettings } from "../components/CustomFieldSettings.js";
 import { AuditLogSettings } from "../components/AuditLogSettings.js";
 import { DataExportSettings } from "../components/DataExportSettings.js";
+import { ClickUpImportSettings } from "../components/ClickUpImportSettings.js";
 import type { Priority } from "../lib/api.js";
 
 /**
  * Workspace settings. Sections are added as the roadmap lands; each one is a
  * self-contained panel that owns its own queries.
  */
-type Section = "people" | "workhours" | "notifications" | "connections" | "fields" | "audit" | "export" | "timecodes" | "statuses" | "priorities" | "stages" | "tags" | "templates" | "dealstages" | "proposals" | "snippets" | "branding" | "dockit" | "sso" | "security";
+type Section = "people" | "workhours" | "notifications" | "connections" | "fields" | "audit" | "export" | "import" | "timecodes" | "statuses" | "priorities" | "stages" | "tags" | "templates" | "dealstages" | "proposals" | "snippets" | "branding" | "dockit" | "sso" | "security";
 
 const SECTIONS: { id: Section; label: string; hint: string }[] = [
   { id: "people", label: "People & roles", hint: "Who's in the workspace and what each role can do" },
@@ -45,6 +46,7 @@ const SECTIONS: { id: Section; label: string; hint: string }[] = [
   { id: "dockit", label: "Doc starter kit", hint: "Docs every new project starts with" },
   { id: "audit", label: "Audit log", hint: "Who changed what and when" },
   { id: "export", label: "Data export", hint: "Whole workspace or one project as JSON + CSV" },
+  { id: "import", label: "Import from ClickUp", hint: "Upload a CSV export, map lists and statuses, preview, import" },
 ];
 
 export function SettingsPage() {
@@ -100,6 +102,7 @@ export function SettingsPage() {
           {section === "dockit" && <DocKitSettings canEdit={canEdit} />}
           {section === "audit" && (canEdit ? <AuditLogSettings /> : <p className="text-sm text-muted-foreground">Only owners and admins can read the audit log.</p>)}
           {section === "export" && (canEdit ? <DataExportSettings /> : <p className="text-sm text-muted-foreground">Only owners and admins can export data.</p>)}
+          {section === "import" && (canEdit ? <ClickUpImportSettings /> : <p className="text-sm text-muted-foreground">Only owners and admins can import data.</p>)}
         </div>
       </div>
     </div>

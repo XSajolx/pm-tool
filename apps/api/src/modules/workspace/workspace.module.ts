@@ -7,5 +7,6 @@ import { NotificationsModule } from "../notifications/notifications.module.js";
   imports: [NotificationsModule],
   controllers: [WorkspaceController],
   providers: [WorkspaceService],
+  exports: [WorkspaceService],
 })
 export class WorkspaceModule {}

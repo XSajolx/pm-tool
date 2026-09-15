@@ -496,6 +496,36 @@ export interface PortalProject {
   docs: { id: string; title: string; icon: string | null; updatedAt: string; reviewStatus: string; shareToken: string | null; clientApprovedAt?: string | null; clientApprovedBy?: string | null; clientDecision?: "approved" | "changes_requested" | null }[];
   generatedAt: string;
 }
+/** Row 126 */
+export interface ClickUpPreview {
+  importId: string;
+  filename: string;
+  totalRows: number;
+  subtasks: number;
+  alreadyImported: number;
+  columns: string[];
+  lists: { key: string; space: string; folder: string; list: string; count: number; already: number; sample: string[]; statuses: { name: string; count: number }[]; suggestedListId: string | null; suggestedSpaceId: string | null }[];
+  assignees: { label: string; count: number; userId: string | null }[];
+  tags: { name: string; count: number }[];
+  spaces: { id: string; name: string }[];
+  existingLists: { id: string; name: string; spaceId: string }[];
+  members: { id: string; name: string }[];
+}
+export interface ClickUpListMapping {
+  listId?: string;
+  createIn?: { spaceId?: string; newSpaceName?: string; listName: string };
+  statuses?: Record<string, string>;
+}
+export interface ClickUpResult {
+  created: number;
+  skipped: number;
+  subtasks: number;
+  assigned: number;
+  tagged: number;
+  unmappedLists: string[];
+  errors: string[];
+}
+
 /** Row 125 */
 export type TrashType = "task" | "document" | "project";
 export interface TrashItem {
@@ -1898,6 +1928,17 @@ export const api = {
     request<TimesheetSubmission>(`/time/timesheet/submissions/${id}/reopen`, { method: "POST", body: JSON.stringify({ reason }) }),
   getTimesheetEvents: (id: string) =>
     request<{ id: string; kind: string; note: string | null; createdAt: string; actor: { id: string; name: string } | null }[]>(`/time/timesheet/submissions/${id}/events`),
+  /** Row 126 */
+  previewClickUp: async (file: File) => {
+    const token = await accessToken();
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetch(`${API_URL}/api/import/clickup/preview`, { method: "POST", body: form, headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), ...(activeOrgId ? { "x-org-id": activeOrgId } : {}) } });
+    if (!res.ok) throw new ApiError(res.status, `API ${res.status}: ${await res.text()}`);
+    return (await res.json()) as ClickUpPreview;
+  },
+  runClickUpImport: (body: { importId: string; mapping: Record<string, ClickUpListMapping>; assignees?: Record<string, string | null> }) =>
+    request<ClickUpResult>(`/import/clickup/run`, { method: "POST", body: JSON.stringify(body) }),
   /** Row 125 */
   getTrash: () => request<TrashItem[]>(`/trash`),
   restoreFromTrash: (type: TrashType, id: string) => request<{ restored: boolean }>(`/trash/${type}/${id}/restore`, { method: "POST" }),

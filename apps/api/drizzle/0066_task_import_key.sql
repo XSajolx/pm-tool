@@ -1,0 +1,1 @@
+ALTER TABLE "tasks" ADD COLUMN "import_key" varchar(80);

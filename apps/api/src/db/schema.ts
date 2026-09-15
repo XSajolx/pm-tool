@@ -263,6 +263,8 @@ export const tasks = pgTable(
     timeEstimateMinutes: integer("time_estimate_minutes"),
     /** Row 119: shown on the client portal when true (default off). tasks_client_visible */
     clientVisible: boolean("client_visible").notNull().default(false),
+    /** Row 126: "clickup:<task id>" for imported tasks, so a second import of the same export skips them. */
+    importKey: varchar("import_key", { length: 80 }),
     createdById: uuid("created_by_id").references(() => users.id),
     ...timestamps,
   },
