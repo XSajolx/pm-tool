@@ -7,6 +7,7 @@ import { fmtDuration, fmtShortDate } from "../lib/format.js";
 import { useAuth } from "../lib/auth.js";
 import { PROJECT_STATUS } from "./ProjectsPage.js";
 import { cn } from "../lib/utils.js";
+import { ExportCsvButton } from "../components/ExportCsvButton.js";
 
 /**
  * Row 100: one page listing every project with status, PM, current stage,
@@ -117,7 +118,25 @@ export function OverviewPage() {
         <span className="text-xs text-muted-foreground">
           {rows.length} project{rows.length === 1 ? "" : "s"} · {totals.open} open · {totals.overdue} overdue · {fmtDuration(totals.week)} this week
         </span>
-        <Link to="/projects" className="ml-auto text-xs text-indigo-700 hover:underline">Project cards →</Link>
+        <span className="ml-auto" />
+        <ExportCsvButton
+          rows={rows}
+          filename="projects-overview"
+          columns={[
+            { header: "Project", value: (p) => p.name },
+            { header: "Client", value: (p) => p.company?.name ?? p.clientName ?? "" },
+            { header: "Status", value: (p) => p.status },
+            { header: "PM", value: (p) => p.lead?.name ?? "" },
+            { header: "Current stage", value: (p) => p.stats.currentStage?.name ?? "" },
+            { header: "Stage %", value: (p) => p.stats.currentStage?.progressPct ?? "" },
+            { header: "Open tasks", value: (p) => p.stats.tasksOpen },
+            { header: "Overdue tasks", value: (p) => p.stats.tasksOverdue },
+            { header: "Hours this week", value: (p) => Math.round((p.stats.weekSeconds / 3600) * 100) / 100 },
+            { header: "Next milestone", value: (p) => p.stats.nextMilestone?.name ?? "" },
+            { header: "Milestone due", value: (p) => p.stats.nextMilestone?.targetDate?.slice(0, 10) ?? "" },
+          ]}
+        />
+        <Link to="/projects" className="text-xs text-indigo-700 hover:underline">Project cards →</Link>
       </div>
 
       {/* Filters */}

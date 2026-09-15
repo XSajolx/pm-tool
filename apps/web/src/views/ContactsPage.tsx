@@ -5,6 +5,7 @@ import { api } from "../lib/api.js";
 import { CrmField, input } from "./CompaniesPage.js";
 import { CustomFieldsPanel } from "../components/CustomFieldsPanel.js";
 import { LinkedFiles } from "../components/LinkedFiles.js";
+import { ExportCsvButton } from "../components/ExportCsvButton.js";
 
 /** People. Each optionally belongs to a company; one per company can be primary. */
 export function ContactsPage() {
@@ -29,7 +30,22 @@ export function ContactsPage() {
           placeholder="Search…"
           className="ml-2 w-56 rounded-md border border-border bg-white px-2.5 py-1 text-sm outline-none focus:border-indigo-500"
         />
-        <button onClick={() => setCreating(true)} className="ml-auto rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-indigo-700">
+        {/* Row 127 */}
+        <span className="ml-auto" />
+        <ExportCsvButton
+          rows={contacts}
+          filename="contacts"
+          columns={[
+            { header: "First name", value: (c) => c.firstName },
+            { header: "Last name", value: (c) => c.lastName ?? "" },
+            { header: "Email", value: (c) => c.email ?? "" },
+            { header: "Phone", value: (c) => c.phone ?? "" },
+            { header: "Title", value: (c) => c.title ?? "" },
+            { header: "Company", value: (c) => c.company?.name ?? "" },
+            { header: "Primary", value: (c) => (c.isPrimary ? "yes" : "") },
+          ]}
+        />
+        <button onClick={() => setCreating(true)} className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-indigo-700">
           New contact
         </button>
       </div>

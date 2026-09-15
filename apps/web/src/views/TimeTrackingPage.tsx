@@ -4,6 +4,7 @@ import { api, type TimeEntry } from "../lib/api.js";
 import { useAuth } from "../lib/auth.js";
 import { fmtDuration, isoDay } from "../lib/format.js";
 import { cn } from "../lib/utils.js";
+import { ExportCsvButton } from "../components/ExportCsvButton.js";
 
 const DAYS_BACK = 14;
 
@@ -43,6 +44,23 @@ export function TimeTrackingPage() {
         <span className="ml-auto text-sm tabular-nums text-slate-700">
           Total <span className="font-semibold">{fmtDuration(weekTotal)}</span>
         </span>
+        {/* Row 127 */}
+        <ExportCsvButton
+          rows={entries}
+          filename="time-entries"
+          columns={[
+            { header: "Date", value: (e) => e.startedAt.slice(0, 10) },
+            { header: "Person", value: (e) => e.user?.name ?? "" },
+            { header: "Project", value: (e) => e.project.name },
+            { header: "Task", value: (e) => (e.task ? `${e.task.reference ? `${e.task.reference} ` : ""}${e.task.title}` : "") },
+            { header: "Description", value: (e) => e.description ?? "" },
+            { header: "Started", value: (e) => e.startedAt },
+            { header: "Ended", value: (e) => e.endedAt ?? "" },
+            { header: "Hours", value: (e) => Math.round((e.durationSeconds / 3600) * 100) / 100 },
+            { header: "Billable", value: (e) => (e.billable ? "yes" : "no") },
+            { header: "Source", value: (e) => e.source },
+          ]}
+        />
       </div>
 
       <ManualEntryForm />

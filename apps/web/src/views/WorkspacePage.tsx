@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type BulkTaskPatch, type Member, type Priority, type Status, type Tag, type Task, type TaskPatch, type SpaceTree } from "../lib/api.js";
 import { Button, PRIORITY } from "../components/ui.js";
 import { TaskDetail } from "../components/TaskDetail.js";
+import { ExportCsvButton } from "../components/ExportCsvButton.js";
 import { ViewsAndCycles } from "../components/ViewsAndCycles.js";
 import { BoardView } from "./BoardView.js";
 import { ListView } from "./ListView.js";
@@ -212,6 +213,25 @@ export function WorkspacePage() {
           {view === "list" && (
             <FilterSelect label="Group" value={groupBy} onChange={(v) => setGroupBy(v as GroupBy)} options={GROUP_OPTIONS} neutral="status" />
           )}
+          {/* Row 127: exactly the filtered set on screen */}
+          <ExportCsvButton
+            rows={filtered}
+            filename="tasks"
+            columns={[
+              { header: "Reference", value: (t) => t.reference },
+              { header: "Title", value: (t) => t.title },
+              { header: "Status", value: (t) => statuses.find((st) => st.id === t.statusId)?.name ?? "" },
+              { header: "Priority", value: (t) => t.priority ?? "" },
+              { header: "Assignees", value: (t) => t.assignees.map((a) => a.user.name).join("; ") },
+              { header: "Tags", value: (t) => (t.tags ?? []).map((g) => g.name).join("; ") },
+              { header: "Start date", value: (t) => t.startDate?.slice(0, 10) ?? "" },
+              { header: "Due date", value: (t) => t.dueDate?.slice(0, 10) ?? "" },
+              { header: "Estimate (h)", value: (t) => (t.timeEstimateMinutes ? Math.round((t.timeEstimateMinutes / 60) * 100) / 100 : "") },
+              { header: "Logged (h)", value: (t) => (t.loggedSeconds ? Math.round((t.loggedSeconds / 3600) * 100) / 100 : "") },
+              { header: "Done", value: (t) => (statuses.find((st) => st.id === t.statusId)?.category === "done" ? "yes" : "") },
+              { header: "Description", value: (t) => t.description ?? "" },
+            ]}
+          />
           {(view === "list" || view === "table") && (
             <>
               <FilterSelect label="Sort" value={sort} onChange={(v) => setSort(v as SortKey)} options={SORT_OPTIONS} neutral="manual" />
