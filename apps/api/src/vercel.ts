@@ -1,3 +1,4 @@
+import "./vercel-env.js";
 import "reflect-metadata";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import express from "express";
