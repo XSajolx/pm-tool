@@ -83,6 +83,13 @@ export class ProposalsController {
     return this.proposals.send(auth.orgId, auth.userId, id, dto.recipients);
   }
 
+  @Post("proposals/:id/save-template")
+  @Roles("owner", "admin")
+  @UsePipes(new ZodValidationPipe(z.object({ name: z.string().min(1).max(160), isDefault: z.boolean().optional() })))
+  saveTemplate(@Auth() auth: AuthContext, @Param("id") id: string, @Body() dto: { name: string; isDefault?: boolean }) {
+    return this.proposals.saveAsTemplate(auth.orgId, id, dto);
+  }
+
   @Get("proposals/:id/versions/:version/pdf")
   async pdf(@Auth() auth: AuthContext, @Param("id") id: string, @Param("version") version: string, @Res() res: Response) {
     const { bytes, filename } = await this.proposals.versionPdf(auth.orgId, id, Number(version));

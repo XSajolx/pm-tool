@@ -23,6 +23,8 @@ import { StorageService } from "../files/storage.service.js";
 import { DealsService } from "./deals.service.js";
 import { NotesService } from "./notes.service.js";
 import { renderPdf } from "./pdf.js";
+import { PLACEHOLDERS, renderSections } from "./merge-fields.js";
+export { PLACEHOLDERS, renderSections };
 
 export type ContractKind = "service_agreement" | "nda" | "retainer" | "contractor" | "custom";
 export type ContractStatus = "draft" | "sent" | "viewed" | "signed" | "declined" | "expired";
@@ -77,23 +79,6 @@ export const KIND_LABEL: Record<ContractKind, string> = {
   contractor: "Independent contractor agreement",
   custom: "Custom",
 };
-
-/** Placeholders the editor advertises; anything else is left as written. */
-export const PLACEHOLDERS = [
-  ["{{client}}", "Client company name"],
-  ["{{client_address}}", "Client address"],
-  ["{{contact}}", "Client signer / contact name"],
-  ["{{contact_email}}", "Contact email"],
-  ["{{our_company}}", "Our company name"],
-  ["{{project}}", "Project name"],
-  ["{{fee}}", "Fee with currency"],
-  ["{{currency}}", "Currency code"],
-  ["{{start_date}}", "Start date"],
-  ["{{end_date}}", "End date"],
-  ["{{date}}", "Date the contract is sent"],
-  ["{{number}}", "Contract number"],
-  ["{{title}}", "Contract title"],
-] as const;
 
 const S = (key: string, title: string, body: string): ProposalSection => ({ key, title, body });
 
@@ -667,18 +652,6 @@ export class ContractsService {
     ];
     for (const [id, find, label] of checks) if (id && !(await find())) throw new BadRequestException(`${label} not found in this organization`);
   }
-}
-
-/** {{key}} → value; unknown keys stay visible so nothing silently disappears. */
-export function renderSections(sections: ProposalSection[], ctx: Record<string, string>): ProposalSection[] {
-  return sections.map((s) => ({ ...s, title: fill(s.title, ctx), body: fill(s.body, ctx) }));
-}
-
-function fill(text: string, ctx: Record<string, string>) {
-  return text.replace(/\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/g, (m, key: string) => {
-    const v = ctx[key];
-    return v === undefined ? m : v || "________";
-  });
 }
 
 function validateSignature(input: SignInput) {

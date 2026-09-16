@@ -10,6 +10,8 @@ import { StorageService } from "../files/storage.service.js";
 import { DealsService } from "./deals.service.js";
 import { NotesService } from "./notes.service.js";
 import { renderPdf } from "./pdf.js";
+import { money, renderSections } from "./merge-fields.js";
+import { companies, organizations } from "../../db/schema.js";
 
 /** Row 56: the fixed skeleton every proposal starts from. */
 export const DEFAULT_PROPOSAL_SECTIONS: ProposalSection[] = [
@@ -214,6 +216,24 @@ export class ProposalsService {
     if (!resolved.length) throw new BadRequestException("Pick at least one recipient");
 
     const version = p.currentVersion + 1;
+    // Row 159: merge fields are resolved into the frozen version, never into the working copy.
+    const org = await this.db.query.organizations.findFirst({ where: eq(organizations.id, orgId), columns: { name: true } });
+    const companyRow = p.companyId ? await this.db.query.companies.findFirst({ where: eq(companies.id, p.companyId), columns: { name: true, address: true } }) : null;
+    const rendered = renderSections(p.sections, {
+      client: companyRow?.name ?? p.company?.name ?? "",
+      client_address: companyRow?.address ?? "",
+      contact: resolved[0]?.name ?? "",
+      contact_email: resolved[0]?.email ?? "",
+      our_company: org?.name ?? "",
+      project: "",
+      fee: money(p.total, p.currency),
+      currency: p.currency,
+      start_date: "",
+      end_date: "",
+      date: new Date().toISOString().slice(0, 10),
+      number: p.number,
+      title: p.title,
+    });
     const pdf = renderPdf({
       title: p.title,
       subtitle: [p.number, `Version ${version}`, p.company?.name].filter(Boolean).join("  ·  "),
@@ -222,7 +242,7 @@ export class ProposalsService {
         p.validUntil ? `Valid until ${p.validUntil.toISOString().slice(0, 10)}` : "",
         `Prepared ${new Date().toISOString().slice(0, 10)}`,
       ].filter(Boolean),
-      sections: p.sections.map((s) => ({ title: s.title, body: s.body })),
+      sections: rendered.map((s) => ({ title: s.title, body: s.body })),
       footer: `${p.number} v${version}`,
     });
     const pdfKey = `${orgId}/proposals/${p.id}/${p.number}-v${version}.pdf`;
@@ -230,7 +250,7 @@ export class ProposalsService {
 
     const [ver] = await this.db
       .insert(proposalVersions)
-      .values({ organizationId: orgId, proposalId: p.id, version, title: p.title, sections: p.sections, currency: p.currency, total: p.total, validUntil: p.validUntil, pdfKey, sentById: userId })
+      .values({ organizationId: orgId, proposalId: p.id, version, title: p.title, sections: rendered, currency: p.currency, total: p.total, validUntil: p.validUntil, pdfKey, sentById: userId })
       .returning();
     await this.db.insert(proposalRecipients).values(
       resolved.map((rc) => ({ organizationId: orgId, proposalId: p.id, versionId: ver!.id, contactId: rc.contactId, name: rc.name, email: rc.email, token: randomBytes(24).toString("hex") })),
@@ -246,6 +266,13 @@ export class ProposalsService {
       await this.activity.record({ orgId, actorId: userId, entityType: "deal", entityId: p.dealId, action: "proposal_sent", changes: [{ field: "version", from: null, to: String(version) }] });
     }
     return this.get(orgId, p.id);
+  }
+
+  /** Row 159: the working copy (placeholders intact) becomes a reusable template. */
+  async saveAsTemplate(orgId: string, id: string, dto: { name: string; isDefault?: boolean }) {
+    const p = await this.db.query.proposals.findFirst({ where: and(eq(proposals.id, id), eq(proposals.organizationId, orgId)) });
+    if (!p) throw new NotFoundException("Proposal not found");
+    return this.createTemplate(orgId, { name: dto.name, sections: p.sections, isDefault: dto.isDefault });
   }
 
   async versionPdf(orgId: string, id: string, version: number) {

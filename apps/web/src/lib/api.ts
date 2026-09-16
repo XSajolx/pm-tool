@@ -2482,6 +2482,8 @@ export const api = {
   sendProposal: (id: string, recipients: { contactId?: string; name?: string; email?: string }[]) =>
     request<Proposal>(`/crm/proposals/${id}/send`, { method: "POST", body: JSON.stringify({ recipients }) }),
   archiveProposal: (id: string) => request<{ id: string }>(`/crm/proposals/${id}`, { method: "DELETE" }),
+  /** Row 159 */
+  saveProposalAsTemplate: (id: string, body: { name: string; isDefault?: boolean }) => request<ProposalTemplate>(`/crm/proposals/${id}/save-template`, { method: "POST", body: JSON.stringify(body) }),
   // public (client-facing, no auth)
   getPublicProposal: (token: string) => publicRequest<PublicProposal>(`/public/proposals/${token}`),
   acceptPublicProposal: (token: string, body: { signerName: string; signerTitle?: string; agreed: boolean }) =>

@@ -25,6 +25,7 @@ export function ProposalPage() {
   const [sections, setSections] = useState<ProposalSection[] | null>(null);
   const [preview, setPreview] = useState(false);
   const [sending, setSending] = useState(false);
+  const [saveTpl, setSaveTpl] = useState(false);
 
   useEffect(() => {
     if (p && sections === null) setSections(p.sections);
@@ -56,6 +57,9 @@ export function ProposalPage() {
               {save.isPending ? "Saving…" : "Save sections"}
             </button>
           )}
+          <button type="button" onClick={() => setSaveTpl(true)} className="rounded-md border border-border px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-muted" title="Save these sections as a reusable template (row 159)">
+            Save as template
+          </button>
           <button type="button" onClick={() => setPreview((v) => !v)} className={cn("rounded-md border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted", preview ? "bg-indigo-50 text-indigo-700" : "text-slate-700")}>
             {preview ? "Edit" : "Preview"}
           </button>
@@ -150,6 +154,7 @@ export function ProposalPage() {
       </div>
 
       {sending && <SendDialog proposal={p} onClose={() => setSending(false)} onSent={refresh} pendingSections={dirty ? sections : null} />}
+      {saveTpl && <SaveTemplateDialog proposal={p} pendingSections={dirty ? sections : null} onSave={(body) => save.mutateAsync(body)} onClose={() => setSaveTpl(false)} />}
     </div>
   );
 }
@@ -261,6 +266,46 @@ function SendDialog({ proposal, pendingSections, onClose, onSent }: { proposal: 
           <button type="button" onClick={() => send.mutate()} disabled={!count || send.isPending} className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50">
             {send.isPending ? "Sending…" : `Send to ${count || "…"}`}
           </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+/** Row 159: the working sections become a proposal template. Unsaved edits are saved first. */
+function SaveTemplateDialog({ proposal, pendingSections, onSave, onClose }: { proposal: Proposal; pendingSections: ProposalSection[] | null; onSave: (b: { sections: ProposalSection[] }) => Promise<unknown>; onClose: () => void }) {
+  const qc = useQueryClient();
+  const [name, setName] = useState(proposal.title);
+  const [isDefault, setIsDefault] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const run = useMutation({
+    mutationFn: async () => {
+      if (pendingSections) await onSave({ sections: pendingSections });
+      return api.saveProposalAsTemplate(proposal.id, { name: name.trim(), isDefault });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["proposal-templates"] });
+      onClose();
+    },
+    onError: (e) => setError((e as Error).message.replace(/^API \d+: /, "")),
+  });
+  return (
+    <>
+      <div className="fixed inset-0 z-40 bg-black/20" onClick={onClose} />
+      <div className="fixed left-1/2 top-1/2 z-50 w-[420px] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-white p-5 shadow-xl">
+        <h2 className="text-base font-semibold text-slate-900">Save as template</h2>
+        <p className="mt-0.5 text-xs text-muted-foreground">The sections (with any merge fields) become a proposal template in Settings.</p>
+        <div className="mt-4 space-y-3">
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-slate-600">Template name</span>
+            <input autoFocus value={name} onChange={(e) => setName(e.target.value)} className="w-full rounded-md border border-border bg-white px-3 py-1.5 text-sm outline-none focus:border-indigo-500" />
+          </label>
+          <label className="flex items-center gap-2 text-xs text-slate-700"><input type="checkbox" checked={isDefault} onChange={(e) => setIsDefault(e.target.checked)} /> Make it the default proposal template</label>
+        </div>
+        {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
+        <div className="mt-5 flex justify-end gap-2">
+          <button type="button" onClick={onClose} className="rounded-md px-3 py-1.5 text-sm text-slate-600 hover:bg-muted">Cancel</button>
+          <button type="button" onClick={() => run.mutate()} disabled={!name.trim() || run.isPending} className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50">Save template</button>
         </div>
       </div>
     </>
