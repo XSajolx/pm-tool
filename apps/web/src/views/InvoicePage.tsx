@@ -56,6 +56,7 @@ export function InvoicePage() {
   const [voiding, setVoiding] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [recurring, setRecurring] = useState(false);
+  const [addingExpenses, setAddingExpenses] = useState(false);
 
   const { data: contacts = [] } = useQuery({ queryKey: ["contacts", "company", companyId], queryFn: () => api.getContacts({ companyId }), enabled: Boolean(companyId) });
 
@@ -152,6 +153,7 @@ export function InvoicePage() {
           <button onClick={() => pdf.mutate()} disabled={pdf.isPending} className={ghost}>PDF</button>
           {!inv.schedule && inv.status !== "void" && <button onClick={() => setRecurring(true)} className={ghost} title="Repeat this invoice on a schedule">↻ Make recurring</button>}
           {inv.token && inv.status !== "draft" && <button onClick={() => setShareOpen(true)} className={ghost}>Client link</button>}
+          {editable && admin && <button onClick={() => setAddingExpenses(true)} disabled={dirty} title={dirty ? "Save first" : "Add billable expenses as lines"} className={ghost}>+ Expenses</button>}
           {editable && (
             <button onClick={() => save.mutate()} disabled={!dirty || save.isPending} className={ghost}>
               {save.isPending ? "Saving…" : dirty ? "Save changes" : "Saved"}
@@ -315,6 +317,7 @@ export function InvoicePage() {
       {voiding && <VoidDialog onClose={() => setVoiding(false)} onConfirm={(r) => doVoid.mutate(r)} pending={doVoid.isPending} />}
       {shareOpen && inv.token && <ShareDialog inv={inv} onClose={() => setShareOpen(false)} />}
       {recurring && <NewScheduleDialog fromInvoiceId={inv.id} onClose={() => setRecurring(false)} />}
+      {addingExpenses && <AddExpensesDialog inv={inv} onClose={() => setAddingExpenses(false)} onDone={() => { setAddingExpenses(false); ok(); }} />}
     </div>
   );
 }
@@ -429,6 +432,46 @@ function ShareDialog({ inv, onClose }: { inv: Invoice; onClose: () => void }) {
         {inv.viewedAt && <p className="mt-3 text-xs text-indigo-700">Opened {inv.viewCount}× · last {fmtShortDate(inv.lastViewedAt ?? inv.viewedAt)}</p>}
         <div className="mt-5 flex justify-end">
           <button type="button" onClick={onClose} className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700">Done</button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+/** Row 160: pull unbilled billable expenses for this project/client onto the invoice as lines (optional markup). */
+function AddExpensesDialog({ inv, onClose, onDone }: { inv: Invoice; onClose: () => void; onDone: () => void }) {
+  useEscape(onClose);
+  const { data: candidates = [], isLoading } = useQuery({ queryKey: ["billable-expenses", inv.project?.id, inv.company?.id], queryFn: () => api.getBillableExpenses({ projectId: inv.project?.id, companyId: inv.company?.id }) });
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [markup, setMarkup] = useState("0");
+  const [error, setError] = useState<string | null>(null);
+  const add = useMutation({ mutationFn: () => api.addExpensesToInvoice(inv.id, [...picked], Number(markup) || 0), onSuccess: onDone, onError: (e) => setError((e as Error).message.replace(/^API \d+: /, "")) });
+  const toggle = (id: string) => setPicked((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const total = candidates.filter((e) => picked.has(e.id)).reduce((a, e) => a + e.amount, 0) * (1 + (Number(markup) || 0) / 100);
+  return (
+    <>
+      <div className="fixed inset-0 z-40 bg-black/20" onClick={onClose} />
+      <div className="fixed left-1/2 top-1/2 z-50 w-[560px] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-white p-5 shadow-xl">
+        <h2 className="text-base font-semibold text-slate-900">Add billable expenses</h2>
+        <p className="mt-0.5 text-xs text-muted-foreground">{inv.project ? `Unbilled expenses on ${inv.project.name}` : inv.company ? `Unbilled expenses for ${inv.company.name}` : "Set a project or company on the invoice to see matching expenses"}. Each becomes a line; the expense is marked as invoiced.</p>
+        <div className="mt-3 max-h-72 overflow-y-auto rounded-md border border-border">
+          {isLoading ? <p className="p-3 text-xs text-muted-foreground">Loading…</p> : candidates.length ? candidates.map((e) => (
+            <label key={e.id} className="flex cursor-pointer items-center gap-3 border-b border-border px-3 py-2 text-xs last:border-b-0 hover:bg-[#fbfbfa]">
+              <input type="checkbox" checked={picked.has(e.id)} onChange={() => toggle(e.id)} />
+              <span className="w-14 text-muted-foreground">{fmtShortDate(e.date)}</span>
+              <span className="min-w-0 flex-1 truncate"><b className="text-slate-800">{e.vendor}</b>{e.description ? <span className="text-muted-foreground"> · {e.description}</span> : null}</span>
+              <span className="tabular-nums text-slate-800">{fmtMoney(e.amount, e.currency)}</span>
+            </label>
+          )) : <p className="p-3 text-xs text-muted-foreground">Nothing billable and unbilled here. Mark expenses as billable on the Expenses page.</p>}
+        </div>
+        <div className="mt-3 flex items-center gap-3 text-xs">
+          <label className="flex items-center gap-2 text-slate-700">Markup <input type="number" min="0" max="100" value={markup} onChange={(e) => setMarkup(e.target.value)} className="w-16 rounded border border-border px-1.5 py-0.5" /> %</label>
+          <span className="ml-auto text-slate-700">{picked.size} selected · adds {fmtMoney(total, inv.currency)}</span>
+        </div>
+        {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
+        <div className="mt-4 flex justify-end gap-2">
+          <button type="button" onClick={onClose} className="rounded-md px-3 py-1.5 text-sm text-slate-600 hover:bg-muted">Cancel</button>
+          <button type="button" onClick={() => add.mutate()} disabled={!picked.size || add.isPending} className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50">Add to invoice</button>
         </div>
       </div>
     </>

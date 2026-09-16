@@ -41,6 +41,7 @@ import { InvoicePage } from "./views/InvoicePage.js";
 import { PublicInvoicePage } from "./views/PublicInvoicePage.js";
 import { SchedulesPage } from "./views/SchedulesPage.js";
 import { ContractsPage } from "./views/ContractsPage.js";
+import { ExpensesPage } from "./views/ExpensesPage.js";
 import { ContractPage } from "./views/ContractPage.js";
 import { PublicContractPage } from "./views/PublicContractPage.js";
 import { SchedulePage } from "./views/SchedulePage.js";
@@ -287,6 +288,7 @@ const invoicesRoute = createRoute({ getParentRoute: () => rootRoute, path: "/fin
 const invoiceRoute = createRoute({ getParentRoute: () => rootRoute, path: "/finance/invoices/$invoiceId", component: InvoicePage });
 const schedulesRoute = createRoute({ getParentRoute: () => rootRoute, path: "/finance/recurring", component: SchedulesPage });
 const scheduleRoute = createRoute({ getParentRoute: () => rootRoute, path: "/finance/recurring/$scheduleId", component: SchedulePage });
+const expensesRoute = createRoute({ getParentRoute: () => rootRoute, path: "/finance/expenses", component: ExpensesPage });
 const contractsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/crm/contracts", component: ContractsPage });
 const contractRoute = createRoute({ getParentRoute: () => rootRoute, path: "/crm/contracts/$contractId", component: ContractPage });
 const publicContractRoute = createRoute({ getParentRoute: () => rootRoute, path: "/c/$token", component: PublicContractPage });
@@ -324,6 +326,7 @@ const routeTree = rootRoute.addChildren([
   invoiceRoute,
   publicInvoiceRoute,
   contractsRoute,
+  expensesRoute,
   contractRoute,
   publicContractRoute,
   schedulesRoute,

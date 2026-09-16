@@ -1,0 +1,489 @@
+import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { and, asc, desc, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
+import { DRIZZLE } from "../../db/drizzle.module.js";
+import type { DB } from "../../db/index.js";
+import { companies, expenseImports, expenseRules, expenses, projects } from "../../db/schema.js";
+import { ActivityService } from "../activity/activity.service.js";
+import { parseStatement, type ParsedRow } from "./statement-csv.js";
+import { InvoicesService } from "./invoices.service.js";
+
+export const CATEGORIES = [
+  "Software & subscriptions",
+  "Contractors & freelancers",
+  "Advertising & marketing",
+  "Hosting & domains",
+  "Equipment",
+  "Office & supplies",
+  "Travel",
+  "Meals & entertainment",
+  "Professional services",
+  "Bank & payment fees",
+  "Insurance",
+  "Rent & utilities",
+  "Education & training",
+  "Taxes & licences",
+  "Salaries & benefits",
+  "Other",
+] as const;
+
+/** Vendor hints that categorise obvious things before any user rule exists. */
+const BUILTIN_HINTS: [RegExp, string][] = [
+  [/adobe|figma|notion|slack|zoom|google\s*(workspace|gsuite)|microsoft|github|atlassian|jira|canva|dropbox|1password|openai|anthropic|chatgpt|midjourney|loom|calendly|hubspot|mailchimp|zapier|clickup|asana|linear/i, "Software & subscriptions"],
+  [/aws|amazon web|digitalocean|vercel|netlify|cloudflare|godaddy|namecheap|hetzner|linode|heroku|supabase|render\.com|hostinger/i, "Hosting & domains"],
+  [/facebook|meta\s*ads|google\s*ads|linkedin|twitter|x corp|tiktok|ads?\b/i, "Advertising & marketing"],
+  [/upwork|fiverr|toptal|freelancer|contractor/i, "Contractors & freelancers"],
+  [/uber|lyft|airline|airways|delta|united|emirates|hotel|marriott|hilton|airbnb|booking\.com|train|rail|taxi|fuel|petrol|shell|bp\b/i, "Travel"],
+  [/starbucks|cafe|coffee|restaurant|pizza|burger|doordash|uber\s*eats|deliveroo|grubhub|mcdonald/i, "Meals & entertainment"],
+  [/apple\.com|apple store|best buy|dell|lenovo|logitech|b&h|newegg/i, "Equipment"],
+  [/staples|office depot|officeworks|ikea/i, "Office & supplies"],
+  [/stripe|paypal|wise|payoneer|bank fee|service fee|fx fee|interest/i, "Bank & payment fees"],
+  [/insurance|hiscox|next insurance/i, "Insurance"],
+  [/wework|regus|electric|power|water|internet|comcast|verizon|at&t|t-mobile/i, "Rent & utilities"],
+  [/udemy|coursera|course|training|conference|ticket/i, "Education & training"],
+  [/irs|hmrc|tax|licen[cs]e|registration/i, "Taxes & licences"],
+  [/gusto|adp|payroll|deel|remote\.com/i, "Salaries & benefits"],
+  [/lawyer|attorney|legal|accountant|cpa|bookkeep/i, "Professional services"],
+];
+
+export interface ExpenseDto {
+  date?: string;
+  vendor?: string;
+  description?: string | null;
+  amount?: number;
+  currency?: string;
+  kind?: "expense" | "refund";
+  category?: string | null;
+  projectId?: string | null;
+  companyId?: string | null;
+  billable?: boolean;
+  personal?: boolean;
+  receiptUrl?: string | null;
+  notes?: string | null;
+  account?: string | null;
+  reference?: string | null;
+}
+
+export interface RuleDto {
+  match: string;
+  category?: string | null;
+  projectId?: string | null;
+  billable?: boolean | null;
+  personal?: boolean | null;
+}
+
+export interface ImportRowInput {
+  date: string | null;
+  vendor: string;
+  description?: string | null;
+  amount: number;
+  kind?: "expense" | "refund";
+  currency?: string | null;
+  reference?: string | null;
+  category?: string | null;
+  projectId?: string | null;
+  billable?: boolean;
+  personal?: boolean;
+  skip?: boolean;
+}
+
+@Injectable()
+export class ExpensesService {
+  constructor(
+    @Inject(DRIZZLE) private readonly db: DB,
+    private readonly activity: ActivityService,
+    private readonly invoicesService: InvoicesService,
+  ) {}
+
+  categories() {
+    return CATEGORIES;
+  }
+
+  /* ---------------- read ---------------- */
+
+  async list(orgId: string, opts: { filter?: string; projectId?: string; companyId?: string; from?: string; to?: string; importId?: string; q?: string } = {}) {
+    const f = [eq(expenses.organizationId, orgId), isNull(expenses.archivedAt)];
+    if (opts.projectId) f.push(eq(expenses.projectId, opts.projectId));
+    if (opts.companyId) f.push(eq(expenses.companyId, opts.companyId));
+    if (opts.importId) f.push(eq(expenses.importId, opts.importId));
+    if (opts.from) f.push(gte(expenses.date, new Date(opts.from)));
+    if (opts.to) f.push(lte(expenses.date, new Date(opts.to)));
+    if (opts.q) f.push(sql`(${expenses.vendor} ilike ${"%" + opts.q + "%"} or ${expenses.description} ilike ${"%" + opts.q + "%"})`);
+    switch (opts.filter) {
+      case "uncategorised":
+        f.push(isNull(expenses.category), eq(expenses.personal, false));
+        break;
+      case "billable":
+        f.push(eq(expenses.billable, true), isNull(expenses.invoiceId), eq(expenses.personal, false));
+        break;
+      case "billed":
+        f.push(sql`${expenses.invoiceId} is not null`);
+        break;
+      case "personal":
+        f.push(eq(expenses.personal, true));
+        break;
+      case "refunds":
+        f.push(eq(expenses.kind, "refund"));
+        break;
+      case "imported":
+        f.push(eq(expenses.source, "import"));
+        break;
+    }
+    const rows = await this.db.query.expenses.findMany({
+      where: and(...f),
+      with: { project: { columns: { id: true, name: true } }, company: { columns: { id: true, name: true } }, invoice: { columns: { id: true, number: true } } },
+      orderBy: [desc(expenses.date), desc(expenses.createdAt)],
+      limit: 1000,
+    });
+    return rows.map(shape);
+  }
+
+  async summary(orgId: string) {
+    const now = new Date();
+    const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    const base = and(eq(expenses.organizationId, orgId), isNull(expenses.archivedAt), eq(expenses.personal, false));
+    const [month] = await this.db
+      .select({ n: sql<number>`coalesce(sum(case when ${expenses.kind} = 'expense' then ${expenses.amount} else -${expenses.amount} end), 0)::float` })
+      .from(expenses)
+      .where(and(base, gte(expenses.date, monthStart)));
+    const [uncat] = await this.db.select({ n: sql<number>`count(*)::int` }).from(expenses).where(and(base, isNull(expenses.category)));
+    const [bill] = await this.db
+      .select({ n: sql<number>`coalesce(sum(${expenses.amount}), 0)::float`, c: sql<number>`count(*)::int` })
+      .from(expenses)
+      .where(and(base, eq(expenses.billable, true), isNull(expenses.invoiceId), eq(expenses.kind, "expense")));
+    const [personal] = await this.db.select({ n: sql<number>`coalesce(sum(${expenses.amount}), 0)::float` }).from(expenses).where(and(eq(expenses.organizationId, orgId), isNull(expenses.archivedAt), eq(expenses.personal, true), gte(expenses.date, monthStart)));
+    return { thisMonth: round2(month?.n ?? 0), uncategorised: uncat?.n ?? 0, unbilledBillable: round2(bill?.n ?? 0), unbilledCount: bill?.c ?? 0, personalThisMonth: round2(personal?.n ?? 0) };
+  }
+
+  async get(orgId: string, id: string) {
+    const row = await this.db.query.expenses.findFirst({
+      where: and(eq(expenses.id, id), eq(expenses.organizationId, orgId)),
+      with: { project: { columns: { id: true, name: true } }, company: { columns: { id: true, name: true } }, invoice: { columns: { id: true, number: true } } },
+    });
+    if (!row) throw new NotFoundException("Expense not found");
+    return shape(row);
+  }
+
+  /* ---------------- write ---------------- */
+
+  async create(orgId: string, userId: string, dto: ExpenseDto) {
+    await this.assertLinks(orgId, dto);
+    if (!dto.vendor?.trim()) throw new BadRequestException("Vendor is required");
+    if (!(Number(dto.amount) > 0)) throw new BadRequestException("Amount must be greater than zero");
+    const guess = dto.category === undefined ? await this.suggest(orgId, dto.vendor, dto.description ?? "") : null;
+    const [row] = await this.db
+      .insert(expenses)
+      .values({
+        organizationId: orgId,
+        createdById: userId,
+        date: dto.date ? new Date(dto.date) : new Date(),
+        vendor: dto.vendor.trim().slice(0, 255),
+        description: dto.description?.trim() || null,
+        amount: round2(Number(dto.amount)),
+        currency: (dto.currency ?? "USD").toUpperCase(),
+        kind: dto.kind ?? "expense",
+        category: dto.category !== undefined ? dto.category : (guess?.category ?? null),
+        projectId: dto.projectId ?? guess?.projectId ?? null,
+        companyId: dto.companyId ?? null,
+        billable: dto.billable ?? guess?.billable ?? false,
+        personal: dto.personal ?? guess?.personal ?? false,
+        receiptUrl: dto.receiptUrl?.trim() || null,
+        notes: dto.notes?.trim() || null,
+        account: dto.account?.trim() || null,
+        reference: dto.reference?.trim() || null,
+        source: "manual",
+      })
+      .returning();
+    await this.activity.record({ orgId, actorId: userId, entityType: "expense", entityId: row!.id, action: "created", changes: [{ field: "amount", from: null, to: row!.amount }] });
+    return this.get(orgId, row!.id);
+  }
+
+  async update(orgId: string, userId: string, id: string, dto: ExpenseDto & { rememberVendor?: boolean; applyToSimilar?: boolean }) {
+    const before = await this.get(orgId, id);
+    if (before.invoiceId && (dto.amount !== undefined || dto.billable === false)) throw new BadRequestException("This expense is on an invoice — remove it from the invoice first");
+    await this.assertLinks(orgId, dto);
+    const patch: Record<string, unknown> = { updatedAt: new Date() };
+    if (dto.date !== undefined) patch.date = new Date(dto.date);
+    if (dto.vendor !== undefined) patch.vendor = dto.vendor.trim().slice(0, 255) || before.vendor;
+    if (dto.description !== undefined) patch.description = dto.description?.trim() || null;
+    if (dto.amount !== undefined) {
+      if (!(Number(dto.amount) > 0)) throw new BadRequestException("Amount must be greater than zero");
+      patch.amount = round2(Number(dto.amount));
+    }
+    if (dto.currency !== undefined) patch.currency = dto.currency.toUpperCase();
+    if (dto.kind !== undefined) patch.kind = dto.kind;
+    if (dto.category !== undefined) patch.category = dto.category || null;
+    for (const k of ["projectId", "companyId"] as const) if (dto[k] !== undefined) patch[k] = dto[k];
+    if (dto.billable !== undefined) patch.billable = dto.billable;
+    if (dto.personal !== undefined) patch.personal = dto.personal;
+    if (dto.receiptUrl !== undefined) patch.receiptUrl = dto.receiptUrl?.trim() || null;
+    if (dto.notes !== undefined) patch.notes = dto.notes?.trim() || null;
+    if (dto.account !== undefined) patch.account = dto.account?.trim() || null;
+    await this.db.update(expenses).set(patch).where(eq(expenses.id, id));
+
+    // "Remember this for <vendor>": upsert a rule and optionally re-file the vendor's other uncategorised rows.
+    if (dto.rememberVendor) {
+      const key = keyOf(before.vendor);
+      if (key) {
+        const existing = await this.db.query.expenseRules.findFirst({ where: and(eq(expenseRules.organizationId, orgId), sql`lower(${expenseRules.match}) = ${key.toLowerCase()}`) });
+        const values = {
+          category: dto.category !== undefined ? dto.category || null : before.category,
+          projectId: dto.projectId !== undefined ? dto.projectId : before.projectId,
+          billable: dto.billable !== undefined ? dto.billable : before.billable,
+          personal: dto.personal !== undefined ? dto.personal : before.personal,
+        };
+        if (existing) await this.db.update(expenseRules).set(values).where(eq(expenseRules.id, existing.id));
+        else await this.db.insert(expenseRules).values({ organizationId: orgId, createdById: userId, match: key, ...values });
+        if (dto.applyToSimilar) {
+          await this.db
+            .update(expenses)
+            .set({ category: values.category, projectId: values.projectId, billable: values.billable, personal: values.personal, updatedAt: new Date() })
+            .where(and(eq(expenses.organizationId, orgId), isNull(expenses.archivedAt), isNull(expenses.invoiceId), isNull(expenses.category), sql`lower(${expenses.vendor}) like ${"%" + key.toLowerCase() + "%"}`));
+        }
+      }
+    }
+    return this.get(orgId, id);
+  }
+
+  async remove(orgId: string, userId: string, id: string) {
+    const e = await this.get(orgId, id);
+    if (e.invoiceId) throw new BadRequestException("This expense is on an invoice — remove it from the invoice first");
+    await this.db.update(expenses).set({ archivedAt: new Date() }).where(eq(expenses.id, id));
+    await this.activity.record({ orgId, actorId: userId, entityType: "expense", entityId: id, action: "archived" });
+    return { id, archived: true };
+  }
+
+  /* ---------------- rules ---------------- */
+
+  async rules(orgId: string) {
+    const rows = await this.db.query.expenseRules.findMany({ where: eq(expenseRules.organizationId, orgId), with: { project: { columns: { id: true, name: true } } }, orderBy: [desc(expenseRules.hits), asc(expenseRules.match)] });
+    return rows.map((r) => ({ id: r.id, match: r.match, category: r.category, projectId: r.projectId, project: r.project ? { id: r.project.id, name: r.project.name } : null, billable: r.billable, personal: r.personal, hits: r.hits, createdAt: r.createdAt }));
+  }
+
+  async createRule(orgId: string, userId: string, dto: RuleDto) {
+    const match = dto.match.trim().slice(0, 255);
+    if (match.length < 2) throw new BadRequestException("Match text is too short");
+    if (dto.projectId) await this.assertLinks(orgId, { projectId: dto.projectId });
+    const [row] = await this.db.insert(expenseRules).values({ organizationId: orgId, createdById: userId, match, category: dto.category || null, projectId: dto.projectId ?? null, billable: dto.billable ?? null, personal: dto.personal ?? null }).returning();
+    return row!;
+  }
+
+  async removeRule(orgId: string, id: string) {
+    await this.db.delete(expenseRules).where(and(eq(expenseRules.id, id), eq(expenseRules.organizationId, orgId)));
+    return { id, removed: true };
+  }
+
+  /** Rules first (longest match wins), then built-in vendor hints. */
+  private async suggest(orgId: string, vendor: string, description: string, ruleCache?: Awaited<ReturnType<ExpensesService["rules"]>>) {
+    const rules = ruleCache ?? (await this.rules(orgId));
+    const hay = `${vendor} ${description}`.toLowerCase();
+    const hit = rules.filter((r) => hay.includes(r.match.toLowerCase())).sort((a, b) => b.match.length - a.match.length)[0];
+    if (hit) return { category: hit.category, projectId: hit.projectId, billable: hit.billable ?? undefined, personal: hit.personal ?? undefined, ruleId: hit.id, via: "rule" as const };
+    const builtin = BUILTIN_HINTS.find(([re]) => re.test(hay));
+    if (builtin) return { category: builtin[1], projectId: null, billable: undefined, personal: undefined, ruleId: null, via: "hint" as const };
+    return null;
+  }
+
+  /* ---------------- statement import ---------------- */
+
+  /** Parse and enrich without writing anything: the user reviews, edits, unticks, then commits. */
+  async preview(orgId: string, text: string) {
+    if (!text?.trim()) throw new BadRequestException("The file is empty");
+    if (text.length > 5_000_000) throw new BadRequestException("File is too large (5 MB max)");
+    const parsed = parseStatement(text);
+    if (!parsed.rows.length) throw new BadRequestException("No transactions found — is this a CSV export?");
+    const rules = await this.rules(orgId);
+    const existing = await this.db
+      .select({ date: expenses.date, amount: expenses.amount, vendor: expenses.vendor, reference: expenses.reference })
+      .from(expenses)
+      .where(and(eq(expenses.organizationId, orgId), isNull(expenses.archivedAt)));
+    const seen = new Set(existing.map((e) => dupKey(e.date.toISOString().slice(0, 10), e.amount, e.vendor)));
+    const refs = new Set(existing.map((e) => e.reference).filter(Boolean));
+    const inFile = new Set<string>();
+    const rows = [];
+    for (const r of parsed.rows) {
+      const s = await this.suggest(orgId, r.vendor, r.description, rules);
+      const key = r.date ? dupKey(r.date, r.amount, r.vendor) : null;
+      const duplicate = Boolean((key && seen.has(key)) || (r.reference && refs.has(r.reference)));
+      const duplicateInFile = Boolean(key && inFile.has(key));
+      if (key) inFile.add(key);
+      rows.push({
+        ...r,
+        category: s?.category ?? null,
+        projectId: s?.projectId ?? null,
+        billable: s?.billable ?? false,
+        personal: s?.personal ?? false,
+        suggestedBy: s?.via ?? null,
+        duplicate,
+        duplicateInFile,
+        skip: duplicate || duplicateInFile || r.problems.length > 0 || r.kind === "refund",
+      });
+    }
+    return { columns: parsed.columns, delimiter: parsed.delimiter, headerless: parsed.headerless, total: rows.length, duplicates: rows.filter((r) => r.duplicate || r.duplicateInFile).length, refunds: rows.filter((r) => r.kind === "refund").length, unreadable: rows.filter((r) => r.problems.length).length, rows };
+  }
+
+  async commit(orgId: string, userId: string, input: { filename: string; account?: string | null; rows: ImportRowInput[] }) {
+    const rows = input.rows.filter((r) => !r.skip);
+    if (!rows.length) throw new BadRequestException("Nothing selected to import");
+    const bad = rows.find((r) => !r.date || Number.isNaN(new Date(r.date).getTime()) || !(Math.abs(Number(r.amount)) > 0));
+    if (bad) throw new BadRequestException(`Row "${bad.vendor || "?"}" has no usable date or amount — untick it`);
+    if (rows.length > 5000) throw new BadRequestException("Too many rows in one import (5,000 max)");
+    const projectIds = new Set(rows.map((r) => r.projectId).filter((x): x is string => Boolean(x)));
+    for (const pid of projectIds) await this.assertLinks(orgId, { projectId: pid });
+    const rules = await this.rules(orgId);
+    const importId = await this.db.transaction(async (tx) => {
+      const [imp] = await tx.insert(expenseImports).values({ organizationId: orgId, createdById: userId, filename: input.filename.slice(0, 255), account: input.account?.trim().slice(0, 120) || null, rowCount: input.rows.length, importedCount: rows.length, skippedCount: input.rows.length - rows.length }).returning();
+      const hits = new Map<string, number>();
+      await tx.insert(expenses).values(
+        rows.map((r) => {
+          const hay = `${r.vendor} ${r.description ?? ""}`.toLowerCase();
+          const rule = rules.filter((x) => hay.includes(x.match.toLowerCase())).sort((a, b) => b.match.length - a.match.length)[0];
+          if (rule) hits.set(rule.id, (hits.get(rule.id) ?? 0) + 1);
+          return {
+            organizationId: orgId,
+            createdById: userId,
+            importId: imp!.id,
+            source: "import" as const,
+            account: input.account?.trim().slice(0, 120) || null,
+            date: new Date(r.date!),
+            vendor: (r.vendor || "Unknown").trim().slice(0, 255),
+            description: r.description?.trim() || null,
+            amount: round2(Math.abs(Number(r.amount))),
+            currency: (r.currency || "USD").toUpperCase().slice(0, 3),
+            kind: r.kind ?? "expense",
+            category: r.category || null,
+            projectId: r.projectId ?? null,
+            billable: Boolean(r.billable),
+            personal: Boolean(r.personal),
+            reference: r.reference?.trim().slice(0, 255) || null,
+          };
+        }),
+      );
+      for (const [ruleId, n] of hits) await tx.update(expenseRules).set({ hits: sql`${expenseRules.hits} + ${n}` }).where(eq(expenseRules.id, ruleId));
+      return imp!.id;
+    });
+    await this.activity.record({ orgId, actorId: userId, entityType: "expense", entityId: importId, action: "imported", changes: [{ field: "rows", from: null, to: String(rows.length) }] });
+    return this.imports(orgId).then((list) => list.find((i) => i.id === importId)!);
+  }
+
+  async imports(orgId: string) {
+    const rows = await this.db.query.expenseImports.findMany({ where: eq(expenseImports.organizationId, orgId), with: { createdBy: { columns: { id: true, name: true } } }, orderBy: [desc(expenseImports.createdAt)], limit: 50 });
+    return rows.map((r) => ({ id: r.id, filename: r.filename, account: r.account, rowCount: r.rowCount, importedCount: r.importedCount, skippedCount: r.skippedCount, createdAt: r.createdAt, createdBy: r.createdBy ? { id: r.createdBy.id, name: r.createdBy.name } : null }));
+  }
+
+  /** Undo a whole import (only rows not yet on an invoice go). */
+  async undoImport(orgId: string, userId: string, importId: string) {
+    const imp = await this.db.query.expenseImports.findFirst({ where: and(eq(expenseImports.id, importId), eq(expenseImports.organizationId, orgId)) });
+    if (!imp) throw new NotFoundException("Import not found");
+    const res = await this.db.update(expenses).set({ archivedAt: new Date() }).where(and(eq(expenses.importId, importId), isNull(expenses.archivedAt), isNull(expenses.invoiceId))).returning({ id: expenses.id });
+    await this.activity.record({ orgId, actorId: userId, entityType: "expense", entityId: importId, action: "import_undone", changes: [{ field: "rows", from: String(imp.importedCount), to: String(imp.importedCount - res.length) }] });
+    return { id: importId, removed: res.length };
+  }
+
+  /* ---------------- billing (row 160: "attach to an invoice as billable") ---------------- */
+
+  /** Unbilled billable expenses that fit an invoice's project/company. */
+  async billableFor(orgId: string, opts: { projectId?: string | null; companyId?: string | null }) {
+    const f = [eq(expenses.organizationId, orgId), isNull(expenses.archivedAt), eq(expenses.billable, true), isNull(expenses.invoiceId), eq(expenses.personal, false), eq(expenses.kind, "expense")];
+    if (opts.projectId) f.push(eq(expenses.projectId, opts.projectId));
+    else if (opts.companyId) f.push(eq(expenses.companyId, opts.companyId));
+    const rows = await this.db.query.expenses.findMany({ where: and(...f), with: { project: { columns: { id: true, name: true } }, company: { columns: { id: true, name: true } }, invoice: { columns: { id: true, number: true } } }, orderBy: [asc(expenses.date)], limit: 200 });
+    return rows.map(shape);
+  }
+
+  async addToInvoice(orgId: string, userId: string, invoiceId: string, expenseIds: string[], markup = 0) {
+    const inv = await this.invoicesService.get(orgId, invoiceId);
+    if (inv.status !== "draft") throw new BadRequestException("Expenses can only be added to a draft invoice");
+    if (!expenseIds.length) throw new BadRequestException("Pick at least one expense");
+    const rows = await this.db.query.expenses.findMany({ where: and(eq(expenses.organizationId, orgId), inArray(expenses.id, expenseIds), isNull(expenses.archivedAt)) });
+    if (rows.length !== expenseIds.length) throw new BadRequestException("Some expenses were not found");
+    const already = rows.filter((r) => r.invoiceId);
+    if (already.length) throw new BadRequestException(`${already.length} of these are already on an invoice`);
+    const pct = Math.min(100, Math.max(0, markup));
+    const items = [
+      ...inv.items.map((i) => ({ description: i.description, quantity: i.quantity, unitPrice: i.unitPrice })),
+      ...rows.map((r) => ({ description: `Expense — ${r.vendor}${r.description ? `: ${r.description}` : ""} (${r.date.toISOString().slice(0, 10)})`, quantity: 1, unitPrice: round2(r.amount * (1 + pct / 100)) })),
+    ];
+    await this.invoicesService.update(orgId, userId, invoiceId, { items });
+    await this.db.update(expenses).set({ invoiceId, billable: true, updatedAt: new Date() }).where(inArray(expenses.id, expenseIds));
+    await this.activity.record({ orgId, actorId: userId, entityType: "invoice", entityId: invoiceId, action: "expenses_added", changes: [{ field: "expenses", from: null, to: String(rows.length) }] });
+    return this.invoicesService.get(orgId, invoiceId);
+  }
+
+  /** Taking an expense off a draft invoice removes the matching line and frees the expense. */
+  async removeFromInvoice(orgId: string, userId: string, invoiceId: string, expenseId: string) {
+    const inv = await this.invoicesService.get(orgId, invoiceId);
+    if (inv.status !== "draft") throw new BadRequestException("Only a draft invoice can be changed");
+    const e = await this.get(orgId, expenseId);
+    if (e.invoiceId !== invoiceId) throw new BadRequestException("That expense is not on this invoice");
+    // Lines are matched by the description we wrote (vendor + date), so a markup doesn't hide them.
+    const marker = `Expense — ${e.vendor}`;
+    const day = `(${e.date.toISOString().slice(0, 10)})`;
+    let removed = false;
+    const items = inv.items
+      .filter((i) => {
+        const hit = !removed && i.description.startsWith(marker) && i.description.endsWith(day);
+        if (hit) removed = true;
+        return !hit;
+      })
+      .map((i) => ({ description: i.description, quantity: i.quantity, unitPrice: i.unitPrice }));
+    await this.invoicesService.update(orgId, userId, invoiceId, { items });
+    await this.db.update(expenses).set({ invoiceId: null, updatedAt: new Date() }).where(eq(expenses.id, expenseId));
+    return this.invoicesService.get(orgId, invoiceId);
+  }
+
+  /** Called when an invoice is voided/deleted so its expenses become billable again. */
+  async releaseInvoice(invoiceId: string) {
+    await this.db.update(expenses).set({ invoiceId: null, updatedAt: new Date() }).where(eq(expenses.invoiceId, invoiceId));
+  }
+
+  /* ---------------- helpers ---------------- */
+
+  private async assertLinks(orgId: string, dto: { projectId?: string | null; companyId?: string | null }) {
+    if (dto.projectId && !(await this.db.query.projects.findFirst({ where: and(eq(projects.id, dto.projectId), eq(projects.organizationId, orgId)) }))) throw new BadRequestException("Project not found in this organization");
+    if (dto.companyId && !(await this.db.query.companies.findFirst({ where: and(eq(companies.id, dto.companyId), eq(companies.organizationId, orgId)) }))) throw new BadRequestException("Company not found in this organization");
+  }
+}
+
+function dupKey(date: string, amount: number, vendor: string) {
+  return `${date}|${round2(amount).toFixed(2)}|${keyOf(vendor).toLowerCase()}`;
+}
+
+/** The stable part of a vendor string: letters/digits, first ~24 chars. */
+function keyOf(vendor: string) {
+  return vendor.replace(/[^A-Za-z0-9 &.-]/g, " ").replace(/\s+/g, " ").trim().slice(0, 24).trim();
+}
+
+function shape(r: typeof expenses.$inferSelect & { project: { id: string; name: string } | null; company: { id: string; name: string } | null; invoice: { id: string; number: string } | null }) {
+  return {
+    id: r.id,
+    date: r.date,
+    vendor: r.vendor,
+    description: r.description,
+    amount: r.amount,
+    currency: r.currency,
+    kind: r.kind,
+    category: r.category,
+    projectId: r.projectId,
+    companyId: r.companyId,
+    billable: r.billable,
+    invoiceId: r.invoiceId,
+    personal: r.personal,
+    receiptUrl: r.receiptUrl,
+    notes: r.notes,
+    source: r.source,
+    importId: r.importId,
+    account: r.account,
+    reference: r.reference,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt,
+    project: r.project ? { id: r.project.id, name: r.project.name } : null,
+    company: r.company ? { id: r.company.id, name: r.company.name } : null,
+    invoice: r.invoice ? { id: r.invoice.id, number: r.invoice.number } : null,
+  };
+}
+
+function round2(n: number) {
+  return Math.round(n * 100) / 100;
+}
+
+export type { ParsedRow };

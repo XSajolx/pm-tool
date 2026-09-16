@@ -3,7 +3,7 @@ import { and, asc, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
 import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
-import { companies, contacts, deals, estimateItems, estimates, invoiceItems, invoicePayments, invoices, organizations, projects, proposals } from "../../db/schema.js";
+import { companies, contacts, deals, estimateItems, estimates, expenses, invoiceItems, invoicePayments, invoices, organizations, projects, proposals } from "../../db/schema.js";
 import { ActivityService } from "../activity/activity.service.js";
 import { NotificationsService } from "../notifications/notifications.service.js";
 import { renderInvoicePdf } from "./invoice-pdf.js";
@@ -296,6 +296,8 @@ export class InvoicesService {
     if (inv.status === "void") return inv;
     if (inv.status === "paid" || inv.amountPaid > EPS) throw new BadRequestException("An invoice with payments can't be voided — remove the payments first");
     await this.db.update(invoices).set({ status: "void", voidedAt: new Date(), voidReason: reason?.trim() || null, updatedAt: new Date() }).where(eq(invoices.id, id));
+    // Row 160: expenses billed on a voided invoice become billable again.
+    await this.db.update(expenses).set({ invoiceId: null, updatedAt: new Date() }).where(eq(expenses.invoiceId, id));
     await this.activity.record({ orgId, actorId: userId, entityType: "invoice", entityId: id, action: "voided", changes: [{ field: "status", from: inv.status, to: "void" }] });
     return this.get(orgId, id);
   }
@@ -342,6 +344,7 @@ export class InvoicesService {
   async archive(orgId: string, userId: string, id: string) {
     await this.get(orgId, id);
     await this.db.update(invoices).set({ archivedAt: new Date() }).where(eq(invoices.id, id));
+    await this.db.update(expenses).set({ invoiceId: null, updatedAt: new Date() }).where(eq(expenses.invoiceId, id));
     await this.activity.record({ orgId, actorId: userId, entityType: "invoice", entityId: id, action: "archived" });
     return { id, archived: true };
   }

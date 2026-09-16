@@ -1716,6 +1716,109 @@ export interface PublicContract {
   from: { name: string; color: string; logoUrl: string | null; footer: string | null };
 }
 
+// ---- Finance: expenses (row 160) ----
+export type ExpenseKind = "expense" | "refund";
+export interface Expense {
+  id: string;
+  date: string;
+  vendor: string;
+  description: string | null;
+  amount: number;
+  currency: string;
+  kind: ExpenseKind;
+  category: string | null;
+  projectId: string | null;
+  companyId: string | null;
+  billable: boolean;
+  invoiceId: string | null;
+  personal: boolean;
+  receiptUrl: string | null;
+  notes: string | null;
+  source: "manual" | "import";
+  importId: string | null;
+  account: string | null;
+  reference: string | null;
+  createdAt: string;
+  updatedAt: string;
+  project: { id: string; name: string } | null;
+  company: { id: string; name: string } | null;
+  invoice: { id: string; number: string } | null;
+}
+export interface ExpenseInput {
+  date?: string;
+  vendor?: string;
+  description?: string | null;
+  amount?: number;
+  currency?: string;
+  kind?: ExpenseKind;
+  category?: string | null;
+  projectId?: string | null;
+  companyId?: string | null;
+  billable?: boolean;
+  personal?: boolean;
+  receiptUrl?: string | null;
+  notes?: string | null;
+  account?: string | null;
+  reference?: string | null;
+}
+export interface ExpenseTotals {
+  thisMonth: number;
+  uncategorised: number;
+  unbilledBillable: number;
+  unbilledCount: number;
+  personalThisMonth: number;
+}
+export interface ExpenseRule {
+  id: string;
+  match: string;
+  category: string | null;
+  projectId: string | null;
+  project: { id: string; name: string } | null;
+  billable: boolean | null;
+  personal: boolean | null;
+  hits: number;
+  createdAt: string;
+}
+export interface ExpenseImportRow {
+  line: number;
+  date: string | null;
+  vendor: string;
+  description: string;
+  amount: number;
+  kind: ExpenseKind;
+  currency: string | null;
+  reference: string | null;
+  problems: string[];
+  category: string | null;
+  projectId: string | null;
+  billable: boolean;
+  personal: boolean;
+  suggestedBy: "rule" | "hint" | null;
+  duplicate: boolean;
+  duplicateInFile: boolean;
+  skip: boolean;
+}
+export interface ExpenseImportPreview {
+  columns: Record<"date" | "description" | "vendor" | "amount" | "debit" | "credit" | "currency" | "reference", string | null>;
+  delimiter: string;
+  headerless: boolean;
+  total: number;
+  duplicates: number;
+  refunds: number;
+  unreadable: number;
+  rows: ExpenseImportRow[];
+}
+export interface ExpenseImport {
+  id: string;
+  filename: string;
+  account: string | null;
+  rowCount: number;
+  importedCount: number;
+  skippedCount: number;
+  createdAt: string;
+  createdBy: { id: string; name: string } | null;
+}
+
 export type EstimateStatus = "draft" | "sent" | "accepted" | "declined" | "expired";
 
 export interface EstimateItem {
@@ -2581,6 +2684,36 @@ export const api = {
   getPublicContract: (token: string) => publicRequest<PublicContract>(`/public/contracts/${token}`),
   signPublicContract: (token: string, body: SignaturePayload) => publicRequest<PublicContract>(`/public/contracts/${token}/sign`, { method: "POST", body: JSON.stringify(body) }),
   declinePublicContract: (token: string, reason?: string) => publicRequest<PublicContract>(`/public/contracts/${token}/decline`, { method: "POST", body: JSON.stringify({ reason }) }),
+
+  // ---- Finance: expenses (row 160) ----
+  getExpenses: (opts: { filter?: string; projectId?: string; companyId?: string; from?: string; to?: string; importId?: string; q?: string } = {}) => {
+    const q = new URLSearchParams();
+    for (const [k, v] of Object.entries(opts)) if (v) q.set(k, v);
+    const qs = q.toString();
+    return request<Expense[]>(`/finance/expenses${qs ? "?" + qs : ""}`);
+  },
+  getExpenseTotals: () => request<ExpenseTotals>(`/finance/expenses/summary`),
+  getExpenseCategories: () => request<string[]>(`/finance/expenses/categories`),
+  getExpense: (id: string) => request<Expense>(`/finance/expenses/${id}`),
+  createExpense: (body: ExpenseInput) => request<Expense>(`/finance/expenses`, { method: "POST", body: JSON.stringify(body) }),
+  updateExpense: (id: string, body: ExpenseInput & { rememberVendor?: boolean; applyToSimilar?: boolean }) => request<Expense>(`/finance/expenses/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  deleteExpense: (id: string) => request<{ id: string }>(`/finance/expenses/${id}`, { method: "DELETE" }),
+  getExpenseRules: () => request<ExpenseRule[]>(`/finance/expenses/rules`),
+  createExpenseRule: (body: { match: string; category?: string | null; projectId?: string | null; billable?: boolean | null; personal?: boolean | null }) => request<ExpenseRule>(`/finance/expenses/rules`, { method: "POST", body: JSON.stringify(body) }),
+  deleteExpenseRule: (id: string) => request<{ id: string }>(`/finance/expenses/rules/${id}`, { method: "DELETE" }),
+  getExpenseImports: () => request<ExpenseImport[]>(`/finance/expenses/imports`),
+  previewExpenseImport: (text: string) => request<ExpenseImportPreview>(`/finance/expenses/imports/preview`, { method: "POST", body: JSON.stringify({ text }) }),
+  commitExpenseImport: (body: { filename: string; account?: string | null; rows: (Partial<ExpenseImportRow> & { date: string; vendor: string; amount: number })[] }) => request<ExpenseImport>(`/finance/expenses/imports`, { method: "POST", body: JSON.stringify(body) }),
+  undoExpenseImport: (id: string) => request<{ id: string; removed: number }>(`/finance/expenses/imports/${id}`, { method: "DELETE" }),
+  getBillableExpenses: (opts: { projectId?: string | null; companyId?: string | null }) => {
+    const q = new URLSearchParams();
+    if (opts.projectId) q.set("projectId", opts.projectId);
+    else if (opts.companyId) q.set("companyId", opts.companyId);
+    const qs = q.toString();
+    return request<Expense[]>(`/finance/expenses/billable${qs ? "?" + qs : ""}`);
+  },
+  addExpensesToInvoice: (invoiceId: string, expenseIds: string[], markupPercent = 0) => request<Invoice>(`/finance/expenses/invoice/${invoiceId}`, { method: "POST", body: JSON.stringify({ expenseIds, markupPercent }) }),
+  removeExpenseFromInvoice: (invoiceId: string, expenseId: string) => request<Invoice>(`/finance/expenses/invoice/${invoiceId}/${expenseId}`, { method: "DELETE" }),
 
   // ---- CRM: estimates ----
   getEstimates: (opts: { companyId?: string; dealId?: string } = {}) => {

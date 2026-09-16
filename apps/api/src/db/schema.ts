@@ -2961,3 +2961,110 @@ export const contractEventsRelations = relations(contractEvents, ({ one }) => ({
   signer: one(contractSigners, { fields: [contractEvents.signerId], references: [contractSigners.id] }),
   actor: one(users, { fields: [contractEvents.actorUserId], references: [users.id] }),
 }));
+
+/* ------------------------------------------------------------------ *
+ * Row 160: expenses, statement imports and vendor rules
+ * ------------------------------------------------------------------ */
+export const expenseKind = pgEnum("expense_kind", ["expense", "refund"]);
+export const expenseSource = pgEnum("expense_source", ["manual", "import"]);
+
+/** A statement upload: one row per file so imports can be reviewed and undone. */
+export const expenseImports = pgTable(
+  "expense_imports",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    filename: varchar("filename", { length: 255 }).notNull(),
+    /** Free text: "Business Visa", "Chase checking". */
+    account: varchar("account", { length: 120 }),
+    rowCount: integer("row_count").notNull().default(0),
+    importedCount: integer("imported_count").notNull().default(0),
+    skippedCount: integer("skipped_count").notNull().default(0),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("expense_imports_org_idx").on(t.organizationId, t.createdAt)],
+);
+
+export const expenses = pgTable(
+  "expenses",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    date: timestamp("date", { withTimezone: true }).notNull(),
+    vendor: varchar("vendor", { length: 255 }).notNull(),
+    description: text("description"),
+    /** Always positive; `kind` says which way the money went. */
+    amount: doublePrecision("amount").notNull(),
+    currency: varchar("currency", { length: 8 }).notNull().default("USD"),
+    kind: expenseKind("kind").notNull().default("expense"),
+    /** Free text from the category list; null = uncategorised. */
+    category: varchar("category", { length: 64 }),
+    projectId: uuid("project_id").references(() => projects.id, { onDelete: "set null" }),
+    companyId: uuid("company_id").references(() => companies.id, { onDelete: "set null" }),
+    /** Re-bill to the client. */
+    billable: boolean("billable").notNull().default(false),
+    /** Set once the expense has been added to an invoice as a line. */
+    invoiceId: uuid("invoice_id").references(() => invoices.id, { onDelete: "set null" }),
+    /** Personal spend on a business card: kept for reconciliation, excluded from P&L. */
+    personal: boolean("personal").notNull().default(false),
+    receiptUrl: text("receipt_url"),
+    notes: text("notes"),
+    source: expenseSource("source").notNull().default("manual"),
+    importId: uuid("import_id").references(() => expenseImports.id, { onDelete: "set null" }),
+    account: varchar("account", { length: 120 }),
+    /** Statement reference / transaction id when the bank provides one. */
+    reference: varchar("reference", { length: 255 }),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    ...timestamps,
+  },
+  (t) => [
+    index("expenses_org_date_idx").on(t.organizationId, t.date),
+    index("expenses_project_idx").on(t.projectId),
+    index("expenses_invoice_idx").on(t.invoiceId),
+    index("expenses_import_idx").on(t.importId),
+    index("expenses_org_vendor_idx").on(t.organizationId, t.vendor),
+  ],
+);
+
+/** "Whenever the vendor contains X, file it as Y." Applied on import and offered when categorising. */
+export const expenseRules = pgTable(
+  "expense_rules",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    /** Case-insensitive substring matched against the vendor / description. */
+    match: varchar("match", { length: 255 }).notNull(),
+    category: varchar("category", { length: 64 }),
+    projectId: uuid("project_id").references(() => projects.id, { onDelete: "set null" }),
+    billable: boolean("billable"),
+    personal: boolean("personal"),
+    hits: integer("hits").notNull().default(0),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("expense_rules_org_idx").on(t.organizationId)],
+);
+
+export const expensesRelations = relations(expenses, ({ one }) => ({
+  project: one(projects, { fields: [expenses.projectId], references: [projects.id] }),
+  company: one(companies, { fields: [expenses.companyId], references: [companies.id] }),
+  invoice: one(invoices, { fields: [expenses.invoiceId], references: [invoices.id] }),
+  import: one(expenseImports, { fields: [expenses.importId], references: [expenseImports.id] }),
+  createdBy: one(users, { fields: [expenses.createdById], references: [users.id] }),
+}));
+
+export const expenseRulesRelations = relations(expenseRules, ({ one }) => ({
+  project: one(projects, { fields: [expenseRules.projectId], references: [projects.id] }),
+}));
+
+export const expenseImportsRelations = relations(expenseImports, ({ one, many }) => ({
+  createdBy: one(users, { fields: [expenseImports.createdById], references: [users.id] }),
+  expenses: many(expenses),
+}));
