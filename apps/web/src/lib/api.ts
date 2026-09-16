@@ -1889,6 +1889,28 @@ export interface TaxYear {
   nextDue: TaxQuarter | null;
 }
 
+// ---- Finance: billing overview + dashboard (row 164) ----
+export interface CompanyBilling {
+  company: { id: string; name: string };
+  totals: { outstanding: number; overdue: number; overdueCount: number; openCount: number; lifetime: number; thisYear: number; invoiced: number; draftCount: number; avgDaysToPay: number | null; lastPaymentAt: string | null };
+  invoices: InvoiceSummary[];
+  payments: { amount: number; paidAt: string; invoiceId: string; number: string }[];
+  schedules: { id: string; name: string; nextRunAt: string | null; every: number; unit: string }[];
+  contracts: { id: string; number: string; title: string; status: ContractStatus; signedAt: string | null }[];
+}
+export interface FinanceDashboardData {
+  currency: string;
+  month: { income: number; expenses: number; net: number; label: string };
+  ytd: { income: number; expenses: number; net: number; margin: number | null };
+  receivables: { outstanding: number; overdue: number; overdueCount: number; openCount: number; drafts: number };
+  expenses: { thisMonth: number; uncategorised: number; unbilledBillable: number };
+  profitFirst: { buckets: { key: string; label: string; balance: number }[]; untransferred: number } | null;
+  recurring: { active: number; nextRunAt: string | null };
+  contractsAwaiting: number;
+  nextTax: { label: string; dueDate: string; remaining: number; status: string; daysToDue: number } | null;
+  recentPayments: { amount: number; paidAt: string; invoiceId: string; number: string; company: string | null }[];
+}
+
 export type EstimateStatus = "draft" | "sent" | "accepted" | "declined" | "expired";
 
 export interface EstimateItem {
@@ -2824,6 +2846,10 @@ export const api = {
   updateTaxSettings: (body: Partial<Omit<TaxSettings, "jurisdictions">> & { jurisdictions?: { key?: string; label: string; ratePct: number }[] }) => request<TaxSettings>(`/finance/tax/settings`, { method: "PATCH", body: JSON.stringify(body) }),
   recordTaxPayment: (body: { year: number; quarter: number; jurisdiction?: string | null; amount: number; paidAt?: string | null; reference?: string | null; note?: string | null }) => request<TaxYear>(`/finance/tax/payments`, { method: "POST", body: JSON.stringify(body) }),
   deleteTaxPayment: (id: string) => request<TaxYear>(`/finance/tax/payments/${id}`, { method: "DELETE" }),
+
+  // ---- Finance: billing overview + dashboard (row 164) ----
+  getCompanyBilling: (companyId: string) => request<CompanyBilling>(`/finance/companies/${companyId}/billing`),
+  getFinanceDashboard: () => request<FinanceDashboardData>(`/finance/dashboard`),
 
   // ---- CRM: estimates ----
   getEstimates: (opts: { companyId?: string; dealId?: string } = {}) => {

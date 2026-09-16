@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
+import { FinanceDashboard } from "../components/FinanceDashboard.js";
 import { api } from "../lib/api.js";
 import { fmtDuration, fmtMoney, fmtShortDate } from "../lib/format.js";
 import { cn } from "../lib/utils.js";
@@ -55,6 +56,8 @@ export function DashboardsPage() {
           <Tile label="Logged this week" value={fmtDuration(weekSeconds)} hint={`${week.length} entries`} to="/time" />
           <Tile label="My open tasks" value={String(myTasks.length)} hint={overdue.length ? `${overdue.length} overdue` : "nothing overdue"} warn={overdue.length > 0} to="/inbox" />
         </div>
+
+        <FinanceDashboard />
 
         <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
           <Panel title="Pipeline by stage" to="/crm/deals">

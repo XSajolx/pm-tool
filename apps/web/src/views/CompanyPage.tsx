@@ -11,9 +11,10 @@ import { ContactDialog } from "../components/ContactDialog.js";
 import { DocsTab } from "../components/DocsTab.js";
 import { LinkedFiles } from "../components/LinkedFiles.js";
 import { NotFound } from "../components/NotFound.js";
+import { BillingTab } from "../components/BillingTab.js";
 import { cn } from "../lib/utils.js";
 
-type Tab = "contacts" | "projects" | "deals" | "tasks" | "docs" | "estimates" | "notes";
+type Tab = "contacts" | "projects" | "deals" | "tasks" | "docs" | "estimates" | "billing" | "notes";
 
 /** One company: details, its people, its pipeline, its paperwork, its notes. */
 export function CompanyPage() {
@@ -53,7 +54,7 @@ export function CompanyPage() {
         <CompanyDetails company={company} />
 
         <div className="mt-5 flex gap-1 border-b border-border">
-          {(["contacts", "projects", "deals", "tasks", "docs", "estimates", "notes"] as Tab[]).map((t) => (
+          {(["contacts", "projects", "deals", "tasks", "docs", "estimates", "billing", "notes"] as Tab[]).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -174,6 +175,7 @@ export function CompanyPage() {
             )
           )}
 
+          {tab === "billing" && <BillingTab companyId={companyId} />}
           {tab === "notes" && <NotesPanel entityType="company" entityId={companyId} />}
         </div>
       </div>
