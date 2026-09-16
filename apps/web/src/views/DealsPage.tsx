@@ -18,6 +18,7 @@ import { fmtMoney, fmtShortDate } from "../lib/format.js";
 import { NotesPanel } from "../components/NotesPanel.js";
 import { CrmTasks } from "../components/CrmTasks.js";
 import { NewProposalDialog, PROPOSAL_STATUS } from "./ProposalsPage.js";
+import { CONTRACT_STATUS, NewContractDialog } from "./ContractsPage.js";
 import { DocsTab } from "../components/DocsTab.js";
 import { useEscape } from "../lib/useEscape.js";
 import { CrmField, input } from "./CompaniesPage.js";
@@ -409,6 +410,8 @@ function DealDrawer({ dealId, onClose }: { dealId: string; onClose: () => void }
             <div className="border-t border-border px-5 py-4">
               <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Proposals</p>
               <DealProposals dealId={dealId} />
+              <p className="mb-2 mt-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Contracts</p>
+              <DealContracts dealId={dealId} companyId={deal.company?.id} />
             </div>
 
             <div className="border-t border-border px-5 py-4">
@@ -461,6 +464,27 @@ function DealProposals({ dealId }: { dealId: string }) {
         + New proposal from template
       </button>
       {creating && <NewProposalDialog dealId={dealId} onClose={() => setCreating(false)} />}
+    </div>
+  );
+}
+
+/** Row 158: contracts hanging off this deal, plus "new from template". */
+function DealContracts({ dealId, companyId }: { dealId: string; companyId?: string }) {
+  const [creating, setCreating] = useState(false);
+  const { data: contracts = [] } = useQuery({ queryKey: ["contracts", { dealId }], queryFn: () => api.getContracts({ dealId }) });
+  return (
+    <div className="space-y-1.5">
+      {contracts.map((c) => (
+        <Link key={c.id} to="/crm/contracts/$contractId" params={{ contractId: c.id }} className="flex items-center gap-2 rounded-md border border-border bg-white px-2.5 py-1.5 text-xs hover:border-indigo-300">
+          <span className="font-medium text-indigo-600">{c.number}</span>
+          <span className="min-w-0 flex-1 truncate text-slate-700">{c.title}</span>
+          <span className={cn("rounded-full px-1.5 py-0.5 text-[10px] font-medium", CONTRACT_STATUS[c.status].cls)}>{CONTRACT_STATUS[c.status].label}</span>
+        </Link>
+      ))}
+      <button type="button" onClick={() => setCreating(true)} className="rounded-md border border-dashed border-border px-2.5 py-1.5 text-xs text-slate-600 hover:bg-muted">
+        + New contract from template
+      </button>
+      {creating && <NewContractDialog dealId={dealId} companyId={companyId} onClose={() => setCreating(false)} />}
     </div>
   );
 }

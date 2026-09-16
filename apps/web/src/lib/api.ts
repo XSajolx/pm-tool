@@ -1583,6 +1583,139 @@ export interface ScheduleTotals {
   generated: number;
 }
 
+// ---- CRM: contracts with e-signature (rows 158-159) ----
+export type ContractKind = "service_agreement" | "nda" | "retainer" | "contractor" | "custom";
+export type ContractStatus = "draft" | "sent" | "viewed" | "signed" | "declined" | "expired";
+export type SignatureType = "typed" | "drawn";
+
+export interface ContractFields {
+  fee?: number | null;
+  currency?: string;
+  startDate?: string | null;
+  endDate?: string | null;
+  custom?: Record<string, string>;
+}
+
+export interface ContractTemplate {
+  id: string;
+  name: string;
+  kind: ContractKind;
+  description: string | null;
+  sections: ProposalSection[];
+  isDefault: boolean;
+}
+
+export interface ContractSigner {
+  id: string;
+  role: "client" | "company";
+  name: string;
+  email: string | null;
+  contactId: string | null;
+  userId: string | null;
+  token: string | null;
+  sentAt: string | null;
+  viewedAt: string | null;
+  lastViewedAt: string | null;
+  viewCount: number;
+  signedAt: string | null;
+  signatureType: SignatureType | null;
+  signatureName: string | null;
+  signatureTitle: string | null;
+  signatureImage: string | null;
+  signatureIp: string | null;
+  declinedAt: string | null;
+  declineReason: string | null;
+}
+
+export interface ContractSummary {
+  id: string;
+  number: string;
+  title: string;
+  kind: ContractKind;
+  kindLabel: string;
+  status: ContractStatus;
+  fields: ContractFields;
+  validUntil: string | null;
+  requireCountersign: boolean;
+  sentAt: string | null;
+  viewedAt: string | null;
+  signedAt: string | null;
+  declinedAt: string | null;
+  declineReason: string | null;
+  expiredAt: string | null;
+  pdfKey: string | null;
+  templateId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  company: { id: string; name: string } | null;
+  contact: { id: string; name: string; email: string | null } | null;
+  deal: { id: string; title: string } | null;
+  project: { id: string; name: string } | null;
+  signers: ContractSigner[];
+}
+
+export interface ContractEvent {
+  id: string;
+  kind: string;
+  detail: string | null;
+  at: string;
+  ip: string | null;
+  actor: { id: string; name: string } | null;
+  signer: { id: string; name: string; role: "client" | "company" } | null;
+}
+
+export interface Contract extends ContractSummary {
+  sections: ProposalSection[];
+  rendered: ProposalSection[] | null;
+  createdBy: { id: string; name: string } | null;
+  events: ContractEvent[];
+  pdfUrl: string | null;
+  placeholders: readonly (readonly [string, string])[];
+}
+
+export interface ContractInput {
+  title?: string;
+  kind?: ContractKind;
+  sections?: ProposalSection[];
+  fields?: ContractFields;
+  validUntil?: string | null;
+  companyId?: string | null;
+  contactId?: string | null;
+  dealId?: string | null;
+  projectId?: string | null;
+  requireCountersign?: boolean;
+  signers?: { id?: string; contactId?: string | null; name?: string; email?: string | null }[];
+}
+
+export interface SignaturePayload {
+  signatureType: SignatureType;
+  name: string;
+  title?: string;
+  image?: string | null;
+  agreed: boolean;
+}
+
+export interface PublicContract {
+  token: string;
+  signer: { id: string; name: string; email: string | null; signedAt: string | null; signatureType: SignatureType | null; signatureName: string | null; signatureTitle: string | null; signatureImage: string | null; declinedAt: string | null };
+  contract: {
+    number: string;
+    title: string;
+    kind: ContractKind;
+    kindLabel: string;
+    status: ContractStatus;
+    sentAt: string | null;
+    signedAt: string | null;
+    validUntil: string | null;
+    expired: boolean;
+    company: string | null;
+    sections: ProposalSection[];
+    parties: { role: "client" | "company"; name: string; title: string | null; signedAt: string | null; signatureType: SignatureType | null; signatureImage: string | null; me: boolean }[];
+    pdfUrl: string;
+  };
+  from: { name: string; color: string; logoUrl: string | null; footer: string | null };
+}
+
 export type EstimateStatus = "draft" | "sent" | "accepted" | "declined" | "expired";
 
 export interface EstimateItem {
@@ -2409,6 +2542,43 @@ export const api = {
   endSchedule: (id: string) => request<InvoiceScheduleDetail>(`/finance/schedules/${id}/end`, { method: "POST" }),
   runSchedule: (id: string) => request<InvoiceScheduleDetail>(`/finance/schedules/${id}/run`, { method: "POST" }),
   archiveSchedule: (id: string) => request<{ id: string }>(`/finance/schedules/${id}`, { method: "DELETE" }),
+
+  // ---- CRM: contracts (rows 158-159) ----
+  getContractTemplates: () => request<ContractTemplate[]>(`/crm/contract-templates`),
+  createContractTemplate: (body: { name: string; kind?: ContractKind; description?: string | null; sections?: ProposalSection[]; isDefault?: boolean }) =>
+    request<ContractTemplate>(`/crm/contract-templates`, { method: "POST", body: JSON.stringify(body) }),
+  updateContractTemplate: (id: string, body: Partial<{ name: string; kind: ContractKind; description: string | null; sections: ProposalSection[]; isDefault: boolean }>) =>
+    request<ContractTemplate>(`/crm/contract-templates/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  deleteContractTemplate: (id: string) => request<{ id: string }>(`/crm/contract-templates/${id}`, { method: "DELETE" }),
+  getContracts: (opts: { companyId?: string; dealId?: string; projectId?: string; status?: string } = {}) => {
+    const q = new URLSearchParams();
+    for (const [k, v] of Object.entries(opts)) if (v) q.set(k, v);
+    const qs = q.toString();
+    return request<ContractSummary[]>(`/crm/contracts${qs ? "?" + qs : ""}`);
+  },
+  getContract: (id: string) => request<Contract>(`/crm/contracts/${id}`),
+  createContract: (body: ContractInput & { templateId?: string | null }) => request<Contract>(`/crm/contracts`, { method: "POST", body: JSON.stringify(body) }),
+  updateContract: (id: string, body: ContractInput) => request<Contract>(`/crm/contracts/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  setContractCompanySigner: (id: string, userId: string) => request<Contract>(`/crm/contracts/${id}/company-signer`, { method: "PATCH", body: JSON.stringify({ userId }) }),
+  sendContract: (id: string) => request<Contract>(`/crm/contracts/${id}/send`, { method: "POST" }),
+  reopenContract: (id: string) => request<Contract>(`/crm/contracts/${id}/reopen`, { method: "POST" }),
+  countersignContract: (id: string, body: SignaturePayload) => request<Contract>(`/crm/contracts/${id}/countersign`, { method: "POST", body: JSON.stringify(body) }),
+  saveContractAsTemplate: (id: string, body: { name: string; kind?: ContractKind; isDefault?: boolean }) =>
+    request<ContractTemplate>(`/crm/contracts/${id}/save-template`, { method: "POST", body: JSON.stringify(body) }),
+  archiveContract: (id: string) => request<{ id: string }>(`/crm/contracts/${id}`, { method: "DELETE" }),
+  openContractPdf: async (id: string) => {
+    const token = await accessToken();
+    const res = await fetch(`${API_URL}/api/crm/contracts/${id}/pdf`, {
+      headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), ...(activeOrgId ? { "x-org-id": activeOrgId } : {}) },
+    });
+    if (!res.ok) throw new ApiError(res.status, `API ${res.status}: ${await res.text()}`);
+    const url = URL.createObjectURL(await res.blob());
+    window.open(url, "_blank", "noopener");
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  },
+  getPublicContract: (token: string) => publicRequest<PublicContract>(`/public/contracts/${token}`),
+  signPublicContract: (token: string, body: SignaturePayload) => publicRequest<PublicContract>(`/public/contracts/${token}/sign`, { method: "POST", body: JSON.stringify(body) }),
+  declinePublicContract: (token: string, reason?: string) => publicRequest<PublicContract>(`/public/contracts/${token}/decline`, { method: "POST", body: JSON.stringify({ reason }) }),
 
   // ---- CRM: estimates ----
   getEstimates: (opts: { companyId?: string; dealId?: string } = {}) => {

@@ -40,6 +40,9 @@ import { InvoicesPage } from "./views/InvoicesPage.js";
 import { InvoicePage } from "./views/InvoicePage.js";
 import { PublicInvoicePage } from "./views/PublicInvoicePage.js";
 import { SchedulesPage } from "./views/SchedulesPage.js";
+import { ContractsPage } from "./views/ContractsPage.js";
+import { ContractPage } from "./views/ContractPage.js";
+import { PublicContractPage } from "./views/PublicContractPage.js";
 import { SchedulePage } from "./views/SchedulePage.js";
 import { SettingsPage } from "./views/SettingsPage.js";
 import { MyWorkPage } from "./views/MyWorkPage.js";
@@ -73,7 +76,7 @@ function Protected() {
 
   // Client-facing pages (proposal links, rows 58-59) live outside the login gate.
   // Rows 65/55/79/120: public pages - share links, proposals, password reset, the client portal (but not the team's preview).
-  if (pathname.startsWith("/p/") || pathname.startsWith("/d/") || pathname.startsWith("/i/") || pathname === "/reset-password" || (pathname.startsWith("/portal/") && !pathname.startsWith("/portal/preview/"))) return <Outlet />;
+  if (pathname.startsWith("/p/") || pathname.startsWith("/d/") || pathname.startsWith("/i/") || pathname.startsWith("/c/") || pathname === "/reset-password" || (pathname.startsWith("/portal/") && !pathname.startsWith("/portal/preview/"))) return <Outlet />;
 
   if (loading) return <Splash />;
   if (!session) return <AuthPage />;
@@ -284,6 +287,9 @@ const invoicesRoute = createRoute({ getParentRoute: () => rootRoute, path: "/fin
 const invoiceRoute = createRoute({ getParentRoute: () => rootRoute, path: "/finance/invoices/$invoiceId", component: InvoicePage });
 const schedulesRoute = createRoute({ getParentRoute: () => rootRoute, path: "/finance/recurring", component: SchedulesPage });
 const scheduleRoute = createRoute({ getParentRoute: () => rootRoute, path: "/finance/recurring/$scheduleId", component: SchedulePage });
+const contractsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/crm/contracts", component: ContractsPage });
+const contractRoute = createRoute({ getParentRoute: () => rootRoute, path: "/crm/contracts/$contractId", component: ContractPage });
+const publicContractRoute = createRoute({ getParentRoute: () => rootRoute, path: "/c/$token", component: PublicContractPage });
 const publicInvoiceRoute = createRoute({ getParentRoute: () => rootRoute, path: "/i/$token", component: PublicInvoicePage });
 const publicDocRoute = createRoute({ getParentRoute: () => rootRoute, path: "/d/$token", component: PublicDocPage });
 const resetPasswordRoute = createRoute({ getParentRoute: () => rootRoute, path: "/reset-password", component: ResetPasswordPage });
@@ -317,6 +323,9 @@ const routeTree = rootRoute.addChildren([
   invoicesRoute,
   invoiceRoute,
   publicInvoiceRoute,
+  contractsRoute,
+  contractRoute,
+  publicContractRoute,
   schedulesRoute,
   scheduleRoute,
   resetPasswordRoute,

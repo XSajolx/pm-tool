@@ -14,6 +14,9 @@ import { MeetingsService } from "./meetings.service.js";
 import { ProposalsController } from "./proposals.controller.js";
 import { PublicProposalsController } from "./public-proposals.controller.js";
 import { ProposalsService } from "./proposals.service.js";
+import { ContractsController } from "./contracts.controller.js";
+import { PublicContractsController } from "./public-contracts.controller.js";
+import { ContractsService } from "./contracts.service.js";
 import { ProjectsModule } from "../projects/projects.module.js";
 import { NotificationsModule } from "../notifications/notifications.module.js";
 import { FilesModule } from "../files/files.module.js";
@@ -35,6 +38,8 @@ import { FilesModule } from "../files/files.module.js";
     MeetingsController,
     ProposalsController,
     PublicProposalsController,
+    ContractsController,
+    PublicContractsController,
   ],
   providers: [
     CompaniesService,
@@ -44,6 +49,7 @@ import { FilesModule } from "../files/files.module.js";
     NotesService,
     MeetingsService,
     ProposalsService,
+    ContractsService,
   ],
 })
 export class CrmModule {}

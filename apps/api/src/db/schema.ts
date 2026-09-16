@@ -2797,3 +2797,167 @@ export const invoiceSchedulesRelations = relations(invoiceSchedules, ({ one, man
   createdBy: one(users, { fields: [invoiceSchedules.createdById], references: [users.id] }),
   invoices: many(invoices),
 }));
+
+/* ------------------------------------------------------------------ *
+ * Row 158: contracts with e-signature (+ row 159 template library)
+ * ------------------------------------------------------------------ */
+export const contractKind = pgEnum("contract_kind", ["service_agreement", "nda", "retainer", "contractor", "custom"]);
+export const contractStatus = pgEnum("contract_status", ["draft", "sent", "viewed", "signed", "declined", "expired"]);
+export const contractSignerRole = pgEnum("contract_signer_role", ["client", "company"]);
+export const contractSignatureType = pgEnum("contract_signature_type", ["typed", "drawn"]);
+
+/** Merge values substituted into {{placeholders}} when a contract is sent. */
+export interface ContractFields {
+  fee?: number | null;
+  currency?: string;
+  startDate?: string | null;
+  endDate?: string | null;
+  custom?: Record<string, string>;
+}
+
+export const contractTemplates = pgTable(
+  "contract_templates",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 160 }).notNull(),
+    kind: contractKind("kind").notNull().default("custom"),
+    description: varchar("description", { length: 255 }),
+    sections: jsonb("sections").$type<ProposalSection[]>().notNull().default([]),
+    /** One default per kind: what "new contract" starts from. */
+    isDefault: boolean("is_default").notNull().default(false),
+    ...timestamps,
+  },
+  (t) => [index("contract_templates_org_idx").on(t.organizationId, t.kind)],
+);
+
+export const contracts = pgTable(
+  "contracts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    /** Human key like CON-0007, sequential per org. */
+    number: varchar("number", { length: 32 }).notNull(),
+    title: varchar("title", { length: 255 }).notNull(),
+    kind: contractKind("kind").notNull().default("service_agreement"),
+    templateId: uuid("template_id").references(() => contractTemplates.id, { onDelete: "set null" }),
+    companyId: uuid("company_id").references(() => companies.id, { onDelete: "set null" }),
+    contactId: uuid("contact_id").references(() => contacts.id, { onDelete: "set null" }),
+    dealId: uuid("deal_id").references(() => deals.id, { onDelete: "set null" }),
+    projectId: uuid("project_id").references(() => projects.id, { onDelete: "set null" }),
+    status: contractStatus("status").notNull().default("draft"),
+    /** Working copy with {{placeholders}}. */
+    sections: jsonb("sections").$type<ProposalSection[]>().notNull().default([]),
+    /** What was actually sent: placeholders resolved, frozen. Null until sent. */
+    rendered: jsonb("rendered").$type<ProposalSection[]>(),
+    fields: jsonb("fields").$type<ContractFields>().notNull().default({}),
+    validUntil: timestamp("valid_until", { withTimezone: true }),
+    /** Whether someone on our side must also sign before it counts as executed. */
+    requireCountersign: boolean("require_countersign").notNull().default(true),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    viewedAt: timestamp("viewed_at", { withTimezone: true }),
+    /** All required signatures collected. */
+    signedAt: timestamp("signed_at", { withTimezone: true }),
+    declinedAt: timestamp("declined_at", { withTimezone: true }),
+    declineReason: text("decline_reason"),
+    expiredAt: timestamp("expired_at", { withTimezone: true }),
+    /** The executed PDF, stored once fully signed. */
+    pdfKey: text("pdf_key"),
+    createdById: uuid("created_by_id").references(() => users.id),
+    ...timestamps,
+  },
+  (t) => [
+    uniqueIndex("contracts_org_number_uq").on(t.organizationId, t.number),
+    index("contracts_org_status_idx").on(t.organizationId, t.status),
+    index("contracts_company_idx").on(t.companyId),
+    index("contracts_deal_idx").on(t.dealId),
+    index("contracts_project_idx").on(t.projectId),
+  ],
+);
+
+/** Each party that must sign. Client signers get a token link; company signers sign in-app. */
+export const contractSigners = pgTable(
+  "contract_signers",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    contractId: uuid("contract_id")
+      .notNull()
+      .references(() => contracts.id, { onDelete: "cascade" }),
+    role: contractSignerRole("role").notNull().default("client"),
+    name: varchar("name", { length: 255 }).notNull(),
+    email: varchar("email", { length: 320 }),
+    contactId: uuid("contact_id").references(() => contacts.id, { onDelete: "set null" }),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    token: varchar("token", { length: 64 }),
+    position: integer("position").notNull().default(1),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    viewedAt: timestamp("viewed_at", { withTimezone: true }),
+    lastViewedAt: timestamp("last_viewed_at", { withTimezone: true }),
+    viewCount: integer("view_count").notNull().default(0),
+    signedAt: timestamp("signed_at", { withTimezone: true }),
+    signatureType: contractSignatureType("signature_type"),
+    signatureName: varchar("signature_name", { length: 255 }),
+    signatureTitle: varchar("signature_title", { length: 255 }),
+    /** PNG data URL for drawn signatures. */
+    signatureImage: text("signature_image"),
+    signatureIp: varchar("signature_ip", { length: 64 }),
+    signatureUserAgent: varchar("signature_user_agent", { length: 500 }),
+    declinedAt: timestamp("declined_at", { withTimezone: true }),
+    declineReason: text("decline_reason"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("contract_signers_contract_idx").on(t.contractId), uniqueIndex("contract_signers_token_uq").on(t.token)],
+);
+
+/** The audit trail shown on the contract and appended to the PDF. */
+export const contractEvents = pgTable(
+  "contract_events",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    contractId: uuid("contract_id")
+      .notNull()
+      .references(() => contracts.id, { onDelete: "cascade" }),
+    signerId: uuid("signer_id").references(() => contractSigners.id, { onDelete: "set null" }),
+    actorUserId: uuid("actor_user_id").references(() => users.id, { onDelete: "set null" }),
+    /** created | sent | viewed | signed | countersigned | completed | declined | expired | reopened */
+    kind: varchar("kind", { length: 24 }).notNull(),
+    detail: text("detail"),
+    ip: varchar("ip", { length: 64 }),
+    userAgent: varchar("user_agent", { length: 500 }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("contract_events_contract_idx").on(t.contractId, t.createdAt)],
+);
+
+export const contractsRelations = relations(contracts, ({ one, many }) => ({
+  company: one(companies, { fields: [contracts.companyId], references: [companies.id] }),
+  contact: one(contacts, { fields: [contracts.contactId], references: [contacts.id] }),
+  deal: one(deals, { fields: [contracts.dealId], references: [deals.id] }),
+  project: one(projects, { fields: [contracts.projectId], references: [projects.id] }),
+  template: one(contractTemplates, { fields: [contracts.templateId], references: [contractTemplates.id] }),
+  createdBy: one(users, { fields: [contracts.createdById], references: [users.id] }),
+  signers: many(contractSigners),
+  events: many(contractEvents),
+}));
+
+export const contractSignersRelations = relations(contractSigners, ({ one }) => ({
+  contract: one(contracts, { fields: [contractSigners.contractId], references: [contracts.id] }),
+  contact: one(contacts, { fields: [contractSigners.contactId], references: [contacts.id] }),
+  user: one(users, { fields: [contractSigners.userId], references: [users.id] }),
+}));
+
+export const contractEventsRelations = relations(contractEvents, ({ one }) => ({
+  contract: one(contracts, { fields: [contractEvents.contractId], references: [contracts.id] }),
+  signer: one(contractSigners, { fields: [contractEvents.signerId], references: [contractSigners.id] }),
+  actor: one(users, { fields: [contractEvents.actorUserId], references: [users.id] }),
+}));

@@ -203,6 +203,7 @@ export function Sidebar() {
         <NavLink to="/crm/contacts" label="Contacts" icon={contactIcon} />
         <NavLink to="/crm/deals" label="Deals" icon={dealIcon} />
         <NavLink to="/crm/proposals" label="Proposals" icon={estimateIcon} />
+        <NavLink to="/crm/contracts" label="Contracts" icon={contractIcon} />
         <NavLink to="/crm/estimates" label="Estimates" icon={estimateIcon} />
         <NavLink to="/crm/meetings" label="Meetings" icon={meetingIcon} />
       </nav>
@@ -431,6 +432,9 @@ const invoiceIcon = (
 );
 const repeatIcon = (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M17 2l4 4-4 4" /><path d="M3 11V9a4 4 0 0 1 4-4h14" /><path d="M7 22l-4-4 4-4" /><path d="M21 13v2a4 4 0 0 1-4 4H3" /></svg>
+);
+const contractIcon = (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" /><path d="M14 3v6h6" /><path d="M8 17c1-2 2-2 3 0s2 2 3 0" /></svg>
 );
 const estimateIcon = (
   <path d="M7 3h7l5 5v13H7zM14 3v5h5M9 13h6M9 17h6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />

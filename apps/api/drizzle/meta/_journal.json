@@ -505,6 +505,13 @@
       "when": 1789518579354,
       "tag": "0071_loud_karen_page",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1789519482240,
+      "tag": "0072_confused_mesmero",
+      "breakpoints": true
     }
   ]
 }
