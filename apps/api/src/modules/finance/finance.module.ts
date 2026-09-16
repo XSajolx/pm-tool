@@ -11,6 +11,8 @@ import { ReportsController } from "./reports.controller.js";
 import { ReportsService } from "./reports.service.js";
 import { ProfitFirstController } from "./profit-first.controller.js";
 import { ProfitFirstService } from "./profit-first.service.js";
+import { TaxController } from "./tax.controller.js";
+import { TaxService } from "./tax.service.js";
 
 /**
  * Money: invoices now (row 156); recurring billing, expenses, P&L, Profit
@@ -18,8 +20,8 @@ import { ProfitFirstService } from "./profit-first.service.js";
  */
 @Module({
   imports: [NotificationsModule],
-  controllers: [InvoicesController, PublicInvoicesController, SchedulesController, ExpensesController, ReportsController, ProfitFirstController],
-  providers: [InvoicesService, SchedulesService, ExpensesService, ReportsService, ProfitFirstService],
+  controllers: [InvoicesController, PublicInvoicesController, SchedulesController, ExpensesController, ReportsController, ProfitFirstController, TaxController],
+  providers: [InvoicesService, SchedulesService, ExpensesService, ReportsService, ProfitFirstService, TaxService],
   exports: [InvoicesService, SchedulesService, ExpensesService, ProfitFirstService],
 })
 export class FinanceModule {}

@@ -110,6 +110,8 @@ export const organizations = pgTable(
     priorityLabels: jsonb("priority_labels").$type<Partial<Record<"urgent" | "high" | "normal" | "low", { label: string; color: string }>>>(),
     /** Row 162: Profit First percentages and whether it is on. */
     profitFirst: jsonb("profit_first").$type<ProfitFirstConfig>(),
+    /** Row 163: tax rates, basis, filing dates, reminder lead time. */
+    taxSettings: jsonb("tax_settings").$type<TaxSettings>(),
     ...timestamps,
   },
   (t) => [uniqueIndex("organizations_slug_uq").on(t.slug)],
@@ -3125,4 +3127,46 @@ export const profitMovementsRelations = relations(profitMovements, ({ one }) => 
   invoice: one(invoices, { fields: [profitMovements.invoiceId], references: [invoices.id] }),
   createdBy: one(users, { fields: [profitMovements.createdById], references: [users.id] }),
   transferredBy: one(users, { fields: [profitMovements.transferredById], references: [users.id] }),
+}));
+
+/* ------------------------------------------------------------------ *
+ * Row 163: quarterly tax estimates
+ * ------------------------------------------------------------------ */
+export interface TaxSettings {
+  /** Rates applied to the quarter's taxable base, e.g. Federal 22, State 5, Self-employment 15.3. */
+  jurisdictions: { key: string; label: string; ratePct: number }[];
+  /** What the rates apply to: net profit (income - expenses) or gross income. */
+  basis: "net" | "income";
+  /** Fraction of net profit that is deductible before tax (e.g. 20 for QBI); 0 = none. */
+  deductionPct: number;
+  /** Filing deadline per calendar quarter: {month 1-12, day}; Q4 usually lands in the next year. */
+  dueDates: { q: 1 | 2 | 3 | 4; month: number; day: number }[];
+  reminderDaysBefore: number;
+  enabled: boolean;
+}
+
+/** A quarterly payment actually made (per jurisdiction or lump sum). */
+export const taxPayments = pgTable(
+  "tax_payments",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    year: integer("year").notNull(),
+    quarter: integer("quarter").notNull(),
+    /** Jurisdiction key or null for a combined payment. */
+    jurisdiction: varchar("jurisdiction", { length: 40 }),
+    amount: doublePrecision("amount").notNull(),
+    paidAt: timestamp("paid_at", { withTimezone: true }).notNull(),
+    reference: varchar("reference", { length: 255 }),
+    note: text("note"),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("tax_payments_org_period_idx").on(t.organizationId, t.year, t.quarter)],
+);
+
+export const taxPaymentsRelations = relations(taxPayments, ({ one }) => ({
+  createdBy: one(users, { fields: [taxPayments.createdById], references: [users.id] }),
 }));

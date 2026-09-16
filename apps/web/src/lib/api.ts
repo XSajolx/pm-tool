@@ -1852,6 +1852,43 @@ export interface ProfitFirstOverview {
   unallocated: { count: number; amount: number };
 }
 
+// ---- Finance: quarterly tax (row 163) ----
+export interface TaxSettings {
+  jurisdictions: { key: string; label: string; ratePct: number }[];
+  basis: "net" | "income";
+  deductionPct: number;
+  dueDates: { q: 1 | 2 | 3 | 4; month: number; day: number }[];
+  reminderDaysBefore: number;
+  enabled: boolean;
+}
+export interface TaxQuarter {
+  q: 1 | 2 | 3 | 4;
+  label: string;
+  from: string;
+  to: string;
+  dueDate: string;
+  daysToDue: number;
+  income: number;
+  expenses: number;
+  net: number;
+  taxable: number;
+  byJurisdiction: { key: string; label: string; ratePct: number; amount: number }[];
+  estimate: number;
+  paid: number;
+  remaining: number;
+  status: "future" | "in_progress" | "upcoming" | "due_soon" | "overdue" | "paid" | "none";
+  payments: { id: string; jurisdiction: string | null; amount: number; paidAt: string; reference: string | null; note: string | null }[];
+}
+export interface TaxYear {
+  year: number;
+  settings: TaxSettings;
+  quarters: TaxQuarter[];
+  ytd: { income: number; expenses: number; net: number; estimate: number; paid: number; remaining: number; effectiveRatePct: number };
+  projection: { net: number; estimate: number } | null;
+  taxBucketBalance: number | null;
+  nextDue: TaxQuarter | null;
+}
+
 export type EstimateStatus = "draft" | "sent" | "accepted" | "declined" | "expired";
 
 export interface EstimateItem {
@@ -2781,6 +2818,12 @@ export const api = {
   setProfitAllocationTransferred: (groupId: string, transferred: boolean) => request<ProfitFirstOverview>(`/finance/profit-first/allocations/${groupId}/transferred`, { method: "PATCH", body: JSON.stringify({ transferred }) }),
   deleteProfitAllocation: (groupId: string) => request<ProfitFirstOverview>(`/finance/profit-first/allocations/${groupId}`, { method: "DELETE" }),
   transferAllProfitAllocations: () => request<ProfitFirstOverview>(`/finance/profit-first/allocations/transfer-all`, { method: "POST" }),
+
+  // ---- Finance: quarterly tax (row 163) ----
+  getTaxYear: (year?: number) => request<TaxYear>(`/finance/tax${year ? `?year=${year}` : ""}`),
+  updateTaxSettings: (body: Partial<Omit<TaxSettings, "jurisdictions">> & { jurisdictions?: { key?: string; label: string; ratePct: number }[] }) => request<TaxSettings>(`/finance/tax/settings`, { method: "PATCH", body: JSON.stringify(body) }),
+  recordTaxPayment: (body: { year: number; quarter: number; jurisdiction?: string | null; amount: number; paidAt?: string | null; reference?: string | null; note?: string | null }) => request<TaxYear>(`/finance/tax/payments`, { method: "POST", body: JSON.stringify(body) }),
+  deleteTaxPayment: (id: string) => request<TaxYear>(`/finance/tax/payments/${id}`, { method: "DELETE" }),
 
   // ---- CRM: estimates ----
   getEstimates: (opts: { companyId?: string; dealId?: string } = {}) => {
