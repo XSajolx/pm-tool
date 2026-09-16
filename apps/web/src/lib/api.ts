@@ -1446,6 +1446,8 @@ export interface InvoiceSummary {
   company: { id: string; name: string } | null;
   contact: { id: string; name: string; email: string | null } | null;
   project: { id: string; name: string } | null;
+  /** Row 157: the billing schedule that generated this invoice, if any. */
+  schedule: { id: string; name: string; nextRunAt: string | null; status: ScheduleStatus } | null;
 }
 
 export interface Invoice extends InvoiceSummary {
@@ -1505,6 +1507,80 @@ export interface PublicInvoice {
     payments: { amount: number; method: PaymentMethod; paidAt: string }[];
   };
   from: { name: string; color: string; logoUrl: string | null; footer: string | null };
+}
+
+// ---- Finance: recurring & subscription invoices (row 157) ----
+export type ScheduleKind = "recurring" | "subscription";
+export type ScheduleUnit = "week" | "month" | "year";
+export type ScheduleStatus = "active" | "paused" | "ended";
+export type ScheduleFrequency = "weekly" | "monthly" | "quarterly" | "yearly" | "custom";
+
+export interface InvoiceSchedule {
+  id: string;
+  name: string;
+  kind: ScheduleKind;
+  status: ScheduleStatus;
+  title: string;
+  currency: string;
+  items: InvoiceItem[];
+  taxRate: number;
+  discountPercent: number;
+  notes: string | null;
+  dueDays: number;
+  autoSend: boolean;
+  every: number;
+  unit: ScheduleUnit;
+  frequency: ScheduleFrequency;
+  anchorDay: number | null;
+  startsAt: string;
+  nextRunAt: string | null;
+  endsAt: string | null;
+  maxOccurrences: number | null;
+  occurrences: number;
+  lastRunAt: string | null;
+  lastInvoiceId: string | null;
+  lastError: string | null;
+  pausedAt: string | null;
+  endedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  /** Total of one generated invoice, from the template lines. */
+  amount: number;
+  company: { id: string; name: string } | null;
+  contact: { id: string; name: string } | null;
+  project: { id: string; name: string } | null;
+}
+
+export interface InvoiceScheduleDetail extends InvoiceSchedule {
+  createdBy: { id: string; name: string } | null;
+  invoices: InvoiceSummary[];
+}
+
+export interface InvoiceScheduleInput {
+  name?: string;
+  kind?: ScheduleKind;
+  title?: string;
+  companyId?: string | null;
+  contactId?: string | null;
+  projectId?: string | null;
+  currency?: string;
+  items?: InvoiceItem[];
+  taxRate?: number;
+  discountPercent?: number;
+  notes?: string | null;
+  dueDays?: number;
+  autoSend?: boolean;
+  every?: number;
+  unit?: ScheduleUnit;
+  startsAt?: string;
+  endsAt?: string | null;
+  maxOccurrences?: number | null;
+}
+
+export interface ScheduleTotals {
+  active: number;
+  nextRunAt: string | null;
+  generated: number;
 }
 
 export type EstimateStatus = "draft" | "sent" | "accepted" | "declined" | "expired";
@@ -2314,6 +2390,25 @@ export const api = {
   },
   getPublicInvoice: (token: string) => publicRequest<PublicInvoice>(`/public/invoices/${token}`),
   publicInvoicePdfUrl: (token: string) => `${API_URL}/api/public/invoices/${token}/pdf`,
+
+  // ---- Finance: recurring & subscription invoices (row 157) ----
+  getSchedules: (opts: { companyId?: string; status?: string } = {}) => {
+    const q = new URLSearchParams();
+    if (opts.companyId) q.set("companyId", opts.companyId);
+    if (opts.status) q.set("status", opts.status);
+    const qs = q.toString();
+    return request<InvoiceSchedule[]>(`/finance/schedules${qs ? "?" + qs : ""}`);
+  },
+  getScheduleTotals: () => request<ScheduleTotals>(`/finance/schedules/summary`),
+  getSchedule: (id: string) => request<InvoiceScheduleDetail>(`/finance/schedules/${id}`),
+  createSchedule: (body: InvoiceScheduleInput & { fromInvoiceId?: string | null }) =>
+    request<InvoiceScheduleDetail>(`/finance/schedules`, { method: "POST", body: JSON.stringify(body) }),
+  updateSchedule: (id: string, body: InvoiceScheduleInput) => request<InvoiceScheduleDetail>(`/finance/schedules/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  pauseSchedule: (id: string) => request<InvoiceScheduleDetail>(`/finance/schedules/${id}/pause`, { method: "POST" }),
+  resumeSchedule: (id: string) => request<InvoiceScheduleDetail>(`/finance/schedules/${id}/resume`, { method: "POST" }),
+  endSchedule: (id: string) => request<InvoiceScheduleDetail>(`/finance/schedules/${id}/end`, { method: "POST" }),
+  runSchedule: (id: string) => request<InvoiceScheduleDetail>(`/finance/schedules/${id}/run`, { method: "POST" }),
+  archiveSchedule: (id: string) => request<{ id: string }>(`/finance/schedules/${id}`, { method: "DELETE" }),
 
   // ---- CRM: estimates ----
   getEstimates: (opts: { companyId?: string; dealId?: string } = {}) => {

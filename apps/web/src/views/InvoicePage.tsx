@@ -8,6 +8,7 @@ import { useEscape } from "../lib/useEscape.js";
 import { NotFound } from "../components/NotFound.js";
 import { CrmField, input } from "./CompaniesPage.js";
 import { InvoiceChip } from "./InvoicesPage.js";
+import { NewScheduleDialog } from "./SchedulesPage.js";
 import { cn } from "../lib/utils.js";
 
 /** The client-facing link for an issued invoice (row 156). */
@@ -54,6 +55,7 @@ export function InvoicePage() {
   const [paying, setPaying] = useState(false);
   const [voiding, setVoiding] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [recurring, setRecurring] = useState(false);
 
   const { data: contacts = [] } = useQuery({ queryKey: ["contacts", "company", companyId], queryFn: () => api.getContacts({ companyId }), enabled: Boolean(companyId) });
 
@@ -140,9 +142,15 @@ export function InvoicePage() {
         {inv.viewedAt && <span className="text-xs text-indigo-700">viewed {fmtShortDate(inv.viewedAt)} ({inv.viewCount}×)</span>}
         {inv.paidAt && <span className="text-xs text-emerald-700">paid {fmtShortDate(inv.paidAt)}</span>}
         {inv.voidedAt && <span className="text-xs text-slate-500">void {fmtShortDate(inv.voidedAt)}{inv.voidReason ? ` · ${inv.voidReason}` : ""}</span>}
+        {inv.schedule && (
+          <Link to="/finance/recurring/$scheduleId" params={{ scheduleId: inv.schedule.id }} className="rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700 hover:bg-indigo-100">
+            ↻ {inv.schedule.name}{inv.schedule.status === "active" && inv.schedule.nextRunAt ? ` · next ${fmtShortDate(inv.schedule.nextRunAt)}` : ` · ${inv.schedule.status}`}
+          </Link>
+        )}
 
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <button onClick={() => pdf.mutate()} disabled={pdf.isPending} className={ghost}>PDF</button>
+          {!inv.schedule && inv.status !== "void" && <button onClick={() => setRecurring(true)} className={ghost} title="Repeat this invoice on a schedule">↻ Make recurring</button>}
           {inv.token && inv.status !== "draft" && <button onClick={() => setShareOpen(true)} className={ghost}>Client link</button>}
           {editable && (
             <button onClick={() => save.mutate()} disabled={!dirty || save.isPending} className={ghost}>
@@ -306,6 +314,7 @@ export function InvoicePage() {
       {paying && <PaymentDialog inv={inv} onClose={() => setPaying(false)} onDone={() => { setPaying(false); ok(); }} />}
       {voiding && <VoidDialog onClose={() => setVoiding(false)} onConfirm={(r) => doVoid.mutate(r)} pending={doVoid.isPending} />}
       {shareOpen && inv.token && <ShareDialog inv={inv} onClose={() => setShareOpen(false)} />}
+      {recurring && <NewScheduleDialog fromInvoiceId={inv.id} onClose={() => setRecurring(false)} />}
     </div>
   );
 }

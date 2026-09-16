@@ -213,6 +213,7 @@ export function Sidebar() {
       </p>
       <nav className="px-2">
         <NavLink to="/finance/invoices" label="Invoices" icon={invoiceIcon} />
+        <NavLink to="/finance/recurring" label="Recurring" icon={repeatIcon} />
       </nav>
 
       {/* Productivity */}
@@ -427,6 +428,9 @@ const dealIcon = (
 );
 const invoiceIcon = (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z" /><path d="M9 8h6M9 12h6M9 16h3" /></svg>
+);
+const repeatIcon = (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M17 2l4 4-4 4" /><path d="M3 11V9a4 4 0 0 1 4-4h14" /><path d="M7 22l-4-4 4-4" /><path d="M21 13v2a4 4 0 0 1-4 4H3" /></svg>
 );
 const estimateIcon = (
   <path d="M7 3h7l5 5v13H7zM14 3v5h5M9 13h6M9 17h6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />

@@ -33,6 +33,8 @@ export interface InvoiceDto {
 }
 
 export interface CreateInvoiceDto extends InvoiceDto {
+  /** Internal: set by the schedule sweep (row 157). Never accepted from the API. */
+  scheduleId?: string | null;
   /** Copy the lines of an estimate (any status) — the usual "accepted quote → invoice" path. */
   fromEstimateId?: string | null;
   /** One line for the proposal total. */
@@ -61,16 +63,17 @@ export class InvoicesService {
 
   /* ---------------- read ---------------- */
 
-  async list(orgId: string, opts: { status?: string; companyId?: string; projectId?: string } = {}) {
+  async list(orgId: string, opts: { status?: string; companyId?: string; projectId?: string; scheduleId?: string } = {}) {
     const filters = [eq(invoices.organizationId, orgId), isNull(invoices.archivedAt)];
     if (opts.companyId) filters.push(eq(invoices.companyId, opts.companyId));
+    if (opts.scheduleId) filters.push(eq(invoices.scheduleId, opts.scheduleId));
     if (opts.projectId) filters.push(eq(invoices.projectId, opts.projectId));
     if (opts.status === "outstanding") filters.push(inArray(invoices.status, OPEN));
     else if (opts.status === "overdue") filters.push(inArray(invoices.status, OPEN), lt(invoices.dueDate, new Date()));
     else if (opts.status && opts.status !== "all") filters.push(eq(invoices.status, opts.status as InvoiceStatus));
     const rows = await this.db.query.invoices.findMany({
       where: and(...filters),
-      with: { company: { columns: { id: true, name: true } }, contact: { columns: { id: true, firstName: true, lastName: true, email: true } }, project: { columns: { id: true, name: true } } },
+      with: { company: { columns: { id: true, name: true } }, contact: { columns: { id: true, firstName: true, lastName: true, email: true } }, project: { columns: { id: true, name: true } }, schedule: { columns: { id: true, name: true, nextRunAt: true, status: true } } },
       orderBy: [desc(invoices.issueDate), desc(invoices.createdAt)],
     });
     return rows.map((r) => shape(r));
@@ -113,6 +116,7 @@ export class InvoicesService {
         company: { columns: { id: true, name: true } },
         contact: { columns: { id: true, firstName: true, lastName: true, email: true } },
         project: { columns: { id: true, name: true } },
+        schedule: { columns: { id: true, name: true, nextRunAt: true, status: true } },
         deal: { columns: { id: true, title: true } },
         createdBy: { columns: { id: true, name: true } },
         items: { orderBy: asc(invoiceItems.position) },
@@ -198,7 +202,7 @@ export class InvoicesService {
             .insert(invoices)
             .values({
               organizationId: orgId,
-              createdById: userId,
+              createdById: userId || null,
               number,
               title,
               companyId: dto.companyId !== undefined ? dto.companyId : (seed.companyId ?? null),
@@ -207,6 +211,7 @@ export class InvoicesService {
               dealId: dto.dealId !== undefined ? dto.dealId : (seed.dealId ?? null),
               estimateId: seed.estimateId ?? null,
               proposalId: seed.proposalId ?? null,
+              scheduleId: dto.scheduleId ?? null,
               currency: (dto.currency ?? seed.currency ?? "USD").toUpperCase(),
               issueDate,
               dueDate,
@@ -262,7 +267,7 @@ export class InvoicesService {
    * Sending mints the client link and locks the lines. Nothing is emailed (no
    * mail provider wired for invoices yet); the link is shown to copy by hand.
    */
-  async send(orgId: string, userId: string, id: string) {
+  async send(orgId: string, userId: string, id: string, opts: { system?: boolean } = {}) {
     const inv = await this.get(orgId, id);
     if (inv.status !== "draft") throw new BadRequestException("Only a draft can be sent");
     if (!inv.items.length) throw new BadRequestException("Add at least one line item before sending");
@@ -272,7 +277,7 @@ export class InvoicesService {
       .update(invoices)
       .set({ status: "sent", sentAt: now, token: inv.token ?? randomBytes(24).toString("hex"), updatedAt: now })
       .where(eq(invoices.id, id));
-    await this.activity.record({ orgId, actorId: userId, entityType: "invoice", entityId: id, action: "sent", changes: [{ field: "status", from: "draft", to: "sent" }] });
+    await this.activity.record({ orgId, actorId: userId || null, entityType: "invoice", entityId: id, action: opts.system ? "auto_sent" : "sent", changes: [{ field: "status", from: "draft", to: "sent" }] });
     return this.get(orgId, id);
   }
 
@@ -490,6 +495,7 @@ function shape(
     company: { id: string; name: string } | null;
     contact: { id: string; firstName: string | null; lastName: string | null; email: string | null } | null;
     project: { id: string; name: string } | null;
+    schedule?: { id: string; name: string; nextRunAt: Date | null; status: string } | null;
   },
 ) {
   const balanceDue = round2(Math.max(0, r.total - r.amountPaid));
@@ -528,6 +534,7 @@ function shape(
     company: r.company ? { id: r.company.id, name: r.company.name } : null,
     contact: r.contact ? { id: r.contact.id, name: [r.contact.firstName, r.contact.lastName].filter(Boolean).join(" "), email: r.contact.email } : null,
     project: r.project ? { id: r.project.id, name: r.project.name } : null,
+    schedule: r.schedule ? { id: r.schedule.id, name: r.schedule.name, nextRunAt: r.schedule.nextRunAt, status: r.schedule.status } : null,
   };
 }
 

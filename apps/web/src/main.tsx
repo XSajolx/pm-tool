@@ -39,6 +39,8 @@ import { PublicDocPage } from "./views/PublicDocPage.js";
 import { InvoicesPage } from "./views/InvoicesPage.js";
 import { InvoicePage } from "./views/InvoicePage.js";
 import { PublicInvoicePage } from "./views/PublicInvoicePage.js";
+import { SchedulesPage } from "./views/SchedulesPage.js";
+import { SchedulePage } from "./views/SchedulePage.js";
 import { SettingsPage } from "./views/SettingsPage.js";
 import { MyWorkPage } from "./views/MyWorkPage.js";
 import { DocsPage, DocPage } from "./views/DocsPage.js";
@@ -280,6 +282,8 @@ const proposalRoute = createRoute({ getParentRoute: () => rootRoute, path: "/crm
 const publicProposalRoute = createRoute({ getParentRoute: () => rootRoute, path: "/p/$token", component: PublicProposalPage });
 const invoicesRoute = createRoute({ getParentRoute: () => rootRoute, path: "/finance/invoices", component: InvoicesPage });
 const invoiceRoute = createRoute({ getParentRoute: () => rootRoute, path: "/finance/invoices/$invoiceId", component: InvoicePage });
+const schedulesRoute = createRoute({ getParentRoute: () => rootRoute, path: "/finance/recurring", component: SchedulesPage });
+const scheduleRoute = createRoute({ getParentRoute: () => rootRoute, path: "/finance/recurring/$scheduleId", component: SchedulePage });
 const publicInvoiceRoute = createRoute({ getParentRoute: () => rootRoute, path: "/i/$token", component: PublicInvoicePage });
 const publicDocRoute = createRoute({ getParentRoute: () => rootRoute, path: "/d/$token", component: PublicDocPage });
 const resetPasswordRoute = createRoute({ getParentRoute: () => rootRoute, path: "/reset-password", component: ResetPasswordPage });
@@ -313,6 +317,8 @@ const routeTree = rootRoute.addChildren([
   invoicesRoute,
   invoiceRoute,
   publicInvoiceRoute,
+  schedulesRoute,
+  scheduleRoute,
   resetPasswordRoute,
   taskOpenRoute,
   docsRoute,
