@@ -1,6 +1,7 @@
+import { useEffect, useState } from "react";
 import { useParams } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
-import { api } from "../lib/api.js";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { api, errorMessage } from "../lib/api.js";
 
 function money(n: number, c: string) {
   try {
@@ -14,10 +15,31 @@ const day = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString(unde
 /**
  * Row 156: what the client sees from their link — a read-only invoice with the
  * balance, the lines and a PDF. No login, no client account.
+ * Row 129: "Pay now" hands off to Stripe Checkout; coming back with
+ * ?session_id= confirms the payment with Stripe and refreshes the balance.
  */
 export function PublicInvoicePage() {
   const { token } = useParams({ from: "/i/$token" });
+  const qc = useQueryClient();
   const { data, isError, isLoading } = useQuery({ queryKey: ["public-invoice", token], queryFn: () => api.getPublicInvoice(token), retry: false });
+  const [banner, setBanner] = useState<{ kind: "ok" | "wait" | "err"; text: string } | null>(null);
+
+  // Stripe sends the client back to /i/<token>?session_id=cs_… — confirm server-side, never trust the URL.
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const sessionId = url.searchParams.get("session_id");
+    if (!sessionId) return;
+    url.searchParams.delete("session_id");
+    window.history.replaceState(null, "", url.pathname + (url.search || ""));
+    setBanner({ kind: "wait", text: "Confirming your payment…" });
+    api
+      .confirmInvoiceCheckout(token, sessionId)
+      .then((r) => {
+        setBanner(r.paid ? { kind: "ok", text: "Payment received — thank you." } : { kind: "wait", text: "Your payment is still processing. This page will update once it clears." });
+        void qc.invalidateQueries({ queryKey: ["public-invoice", token] });
+      })
+      .catch((e: unknown) => setBanner({ kind: "err", text: errorMessage(e, "Could not confirm the payment. If you were charged, it will be recorded shortly.") }));
+  }, [token, qc]);
 
   if (isLoading) return <Shell><p className="text-sm text-slate-500">Loading…</p></Shell>;
   if (isError || !data)
@@ -102,13 +124,51 @@ export function PublicInvoicePage() {
         </div>
       )}
 
+      {banner && (
+        <div className={`mt-6 rounded-md border px-4 py-3 text-sm ${banner.kind === "ok" ? "border-emerald-200 bg-emerald-50 text-emerald-800" : banner.kind === "err" ? "border-red-200 bg-red-50 text-red-700" : "border-sky-200 bg-sky-50 text-sky-800"}`} data-testid="pay-banner">
+          {banner.text}
+        </div>
+      )}
+
       <div className="mt-8 flex flex-wrap items-center gap-3 border-t border-slate-200 pt-5">
-        <a href={api.publicInvoicePdfUrl(token)} target="_blank" rel="noreferrer" className="rounded-md px-4 py-2 text-sm font-medium text-white" style={{ background: from.color }}>
+        {inv.payOnline && <PayNow token={token} balance={inv.balanceDue} currency={inv.currency} color={from.color} onError={(text) => setBanner({ kind: "err", text })} />}
+        <a href={api.publicInvoicePdfUrl(token)} target="_blank" rel="noreferrer" className={`rounded-md px-4 py-2 text-sm font-medium ${inv.payOnline ? "border border-slate-300 bg-white text-slate-800" : "text-white"}`} style={inv.payOnline ? undefined : { background: from.color }}>
           Download PDF
         </a>
-        <p className="text-xs text-slate-500">Questions about this invoice? Reply to the person who sent it.</p>
+        <p className="text-xs text-slate-500">{inv.payOnline ? "Card payments are processed securely by Stripe." : "Questions about this invoice? Reply to the person who sent it."}</p>
       </div>
     </Shell>
+  );
+}
+
+/** Row 129: pay the balance, or a smaller amount when the client asks to split it. */
+function PayNow({ token, balance, currency, color, onError }: { token: string; balance: number; currency: string; color: string; onError: (text: string) => void }) {
+  const [partial, setPartial] = useState(false);
+  const [amount, setAmount] = useState(balance.toFixed(2));
+  const start = useMutation({
+    mutationFn: () => api.startInvoiceCheckout(token, partial ? Number(amount) : null),
+    onSuccess: (r) => {
+      window.location.assign(r.url);
+    },
+    onError: (e: unknown) => onError(errorMessage(e, "Could not start the payment")),
+  });
+  const n = Number(amount);
+  const valid = !partial || (Number.isFinite(n) && n > 0 && n <= balance + 0.005);
+  return (
+    <div className="flex flex-wrap items-center gap-2" data-testid="pay-now">
+      {partial && (
+        <label className="flex items-center gap-1 text-sm text-slate-700">
+          <span className="text-slate-500">{currency}</span>
+          <input type="number" min={0.01} max={balance} step={0.01} value={amount} onChange={(e) => setAmount(e.target.value)} className="w-28 rounded-md border border-slate-300 px-2 py-1.5 text-sm tabular-nums" aria-label="Amount to pay" />
+        </label>
+      )}
+      <button type="button" disabled={!valid || start.isPending} onClick={() => start.mutate()} className="rounded-md px-4 py-2 text-sm font-semibold text-white shadow-sm disabled:opacity-60" style={{ background: color }}>
+        {start.isPending ? "Opening secure checkout…" : partial ? "Pay this amount" : `Pay ${money(balance, currency)} now`}
+      </button>
+      <button type="button" onClick={() => setPartial((v) => !v)} className="text-xs text-slate-500 underline-offset-2 hover:underline">
+        {partial ? "Pay the full balance" : "Pay a different amount"}
+      </button>
+    </div>
   );
 }
 

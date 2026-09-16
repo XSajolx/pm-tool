@@ -1,7 +1,8 @@
 import { Module } from "@nestjs/common";
 import { NotificationsModule } from "../notifications/notifications.module.js";
 import { InvoicesController } from "./invoices.controller.js";
-import { PublicInvoicesController } from "./public-invoices.controller.js";
+import { PublicInvoicesController, StripeWebhookController } from "./public-invoices.controller.js";
+import { StripeService } from "./stripe.service.js";
 import { InvoicesService } from "./invoices.service.js";
 import { SchedulesController } from "./schedules.controller.js";
 import { SchedulesService } from "./schedules.service.js";
@@ -22,8 +23,8 @@ import { FinanceOverviewService } from "./finance-overview.service.js";
  */
 @Module({
   imports: [NotificationsModule],
-  controllers: [InvoicesController, PublicInvoicesController, SchedulesController, ExpensesController, ReportsController, ProfitFirstController, TaxController, FinanceOverviewController],
-  providers: [InvoicesService, SchedulesService, ExpensesService, ReportsService, ProfitFirstService, TaxService, FinanceOverviewService],
-  exports: [InvoicesService, SchedulesService, ExpensesService, ProfitFirstService],
+  controllers: [InvoicesController, PublicInvoicesController, StripeWebhookController, SchedulesController, ExpensesController, ReportsController, ProfitFirstController, TaxController, FinanceOverviewController],
+  providers: [InvoicesService, StripeService, SchedulesService, ExpensesService, ReportsService, ProfitFirstService, TaxService, FinanceOverviewService],
+  exports: [InvoicesService, StripeService, SchedulesService, ExpensesService, ProfitFirstService],
 })
 export class FinanceModule {}

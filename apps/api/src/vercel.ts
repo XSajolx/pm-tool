@@ -20,6 +20,7 @@ async function create() {
   const server = express();
   const app = await NestFactory.create(AppModule, new ExpressAdapter(server), {
     logger: ["error", "warn", "log"],
+    rawBody: true,
   });
   configureApp(app);
   await app.init();

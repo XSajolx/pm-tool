@@ -2651,6 +2651,8 @@ export const invoices = pgTable(
     paidAt: timestamp("paid_at", { withTimezone: true }),
     voidedAt: timestamp("voided_at", { withTimezone: true }),
     voidReason: text("void_reason"),
+    /** Row 129: show a "Pay now" (Stripe Checkout) button on the client link. */
+    onlinePayments: boolean("online_payments").notNull().default(true),
     createdById: uuid("created_by_id").references(() => users.id),
     ...timestamps,
   },
@@ -2701,10 +2703,17 @@ export const invoicePayments = pgTable(
     paidAt: timestamp("paid_at", { withTimezone: true }).defaultNow().notNull(),
     reference: varchar("reference", { length: 255 }),
     note: text("note"),
+    /** Row 129: "stripe" when the client paid through the link; providerRef = the PaymentIntent id, unique so a replayed webhook can't double-record. */
+    provider: varchar("provider", { length: 24 }),
+    providerRef: varchar("provider_ref", { length: 255 }),
     recordedById: uuid("recorded_by_id").references(() => users.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
-  (t) => [index("invoice_payments_invoice_idx").on(t.invoiceId), index("invoice_payments_org_paid_idx").on(t.organizationId, t.paidAt)],
+  (t) => [
+    index("invoice_payments_invoice_idx").on(t.invoiceId),
+    index("invoice_payments_org_paid_idx").on(t.organizationId, t.paidAt),
+    uniqueIndex("invoice_payments_provider_ref_uq").on(t.providerRef),
+  ],
 );
 
 export const invoicesRelations = relations(invoices, ({ one, many }) => ({

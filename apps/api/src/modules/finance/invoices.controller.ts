@@ -41,6 +41,7 @@ const paymentSchema = z.object({
 });
 
 const voidSchema = z.object({ reason: z.string().max(500).nullable().optional() });
+const onlineSchema = z.object({ enabled: z.boolean() });
 
 /** Row 156. Members can draft; issuing, money and voiding are owner/admin work. */
 @Controller("finance/invoices")
@@ -108,6 +109,14 @@ export class InvoicesController {
   @UsePipes(new ZodValidationPipe(paymentSchema))
   pay(@Auth() auth: AuthContext, @Param("id") id: string, @Body() dto: z.infer<typeof paymentSchema>) {
     return this.invoices.recordPayment(auth.orgId, auth.userId, id, dto);
+  }
+
+  /** Row 129 */
+  @Patch(":id/online-payments")
+  @Roles("owner", "admin")
+  @UsePipes(new ZodValidationPipe(onlineSchema))
+  onlinePayments(@Auth() auth: AuthContext, @Param("id") id: string, @Body() dto: z.infer<typeof onlineSchema>) {
+    return this.invoices.setOnlinePayments(auth.orgId, auth.userId, id, dto.enabled);
   }
 
   @Delete(":id/payments/:paymentId")

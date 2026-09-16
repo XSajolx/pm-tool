@@ -29,13 +29,33 @@ export function getActiveOrg() {
 }
 
 export class ApiError extends Error {
+  /** The server's human message when the body was Nest's `{ message }` JSON, else the raw text. */
+  readonly detail: string;
   constructor(
     readonly status: number,
     message: string,
   ) {
     super(message);
     this.name = "ApiError";
+    this.detail = ApiError.extract(message);
   }
+  private static extract(message: string) {
+    const raw = message.replace(/^API \d+: /, "");
+    try {
+      const j = JSON.parse(raw) as { message?: string | string[] };
+      if (Array.isArray(j.message)) return j.message.join(", ");
+      if (typeof j.message === "string") return j.message;
+    } catch {
+      /* not JSON */
+    }
+    return raw;
+  }
+}
+/** Message to show a person for any thrown value. */
+export function errorMessage(e: unknown, fallback = "Something went wrong") {
+  if (e instanceof ApiError) return e.detail || fallback;
+  if (e instanceof Error) return e.message || fallback;
+  return fallback;
 }
 
 async function accessToken(forceRefresh = false) {
@@ -495,6 +515,8 @@ export interface PortalProject {
   tasks: { id: string; reference: string | null; title: string; status: string | null; statusCategory: string | null; statusColor: string | null; dueDate: string | null; completedAt: string | null }[];
   docs: { id: string; title: string; icon: string | null; updatedAt: string; reviewStatus: string; shareToken: string | null; clientApprovedAt?: string | null; clientApprovedBy?: string | null; clientDecision?: "approved" | "changes_requested" | null }[];
   generatedAt: string;
+  invoices?: PortalInvoice[];
+  balances?: PortalBalance[];
 }
 /** Row 126 */
 export interface ClickUpPreview {
@@ -633,6 +655,8 @@ export interface PortalHome {
   guest: { name: string | null; email: string; expiresAt: string | null };
   organization: { name: string; brandColor: string; brandLogoUrl: string | null; brandFooter: string | null } | null;
   projects: { id: string; name: string; color: string; status: string }[];
+  invoices?: PortalInvoice[];
+  balances?: PortalBalance[];
 }
 export interface PortalDoc {
   id: string;
@@ -1121,7 +1145,7 @@ export interface IntegrationStatus {
 
 /** Row 116 */
 export interface ServiceHealth {
-  id: "email" | "calendar" | "esign";
+  id: "email" | "payments" | "calendar" | "esign";
   label: string;
   status: "connected" | "failing" | "not_set_up";
   detail: string;
@@ -1408,6 +1432,8 @@ export interface InvoicePayment {
   paidAt: string;
   reference: string | null;
   note: string | null;
+  /** Row 129: "stripe" when the client paid through the link. */
+  provider: "stripe" | null;
   recordedBy: { id: string; name: string } | null;
 }
 
@@ -1451,6 +1477,8 @@ export interface InvoiceSummary {
 }
 
 export interface Invoice extends InvoiceSummary {
+  /** Row 129: show "Pay now" on the client link. */
+  onlinePayments: boolean;
   deal: { id: string; title: string } | null;
   createdBy: { id: string; name: string } | null;
   items: Required<InvoiceItem>[];
@@ -1504,9 +1532,34 @@ export interface PublicInvoice {
     paidAt: string | null;
     billTo: { company: string | null; contact: string | null; email: string | null; address: string | null };
     project: string | null;
-    payments: { amount: number; method: PaymentMethod; paidAt: string }[];
+    payments: { amount: number; method: PaymentMethod; paidAt: string; provider: "stripe" | null }[];
+    /** Row 129: Stripe keys present, invoice allows it, balance outstanding. */
+    payOnline: boolean;
   };
   from: { name: string; color: string; logoUrl: string | null; footer: string | null };
+}
+
+/** Row 129: what the client portal shows about money. */
+export interface PortalInvoice {
+  id: string;
+  number: string;
+  title: string;
+  status: InvoiceStatus;
+  currency: string;
+  issueDate: string;
+  dueDate: string | null;
+  paidAt: string | null;
+  total: number;
+  amountPaid: number;
+  balanceDue: number;
+  overdue: boolean;
+  token: string | null;
+  projectId: string | null;
+}
+export interface PortalBalance {
+  currency: string;
+  outstanding: number;
+  overdue: number;
 }
 
 // ---- Finance: recurring & subscription invoices (row 157) ----
@@ -2720,6 +2773,12 @@ export const api = {
   },
   getPublicInvoice: (token: string) => publicRequest<PublicInvoice>(`/public/invoices/${token}`),
   publicInvoicePdfUrl: (token: string) => `${API_URL}/api/public/invoices/${token}/pdf`,
+  /** Row 129 */
+  startInvoiceCheckout: (token: string, amount?: number | null) =>
+    publicRequest<{ url: string; sessionId: string; amount: number; currency: string }>(`/public/invoices/${token}/checkout`, { method: "POST", body: JSON.stringify({ amount: amount ?? null }) }),
+  confirmInvoiceCheckout: (token: string, sessionId: string) =>
+    publicRequest<{ paid: boolean; amount?: number; status?: string }>(`/public/invoices/${token}/checkout/confirm`, { method: "POST", body: JSON.stringify({ sessionId }) }),
+  setInvoiceOnlinePayments: (id: string, enabled: boolean) => request<Invoice>(`/finance/invoices/${id}/online-payments`, { method: "PATCH", body: JSON.stringify({ enabled }) }),
 
   // ---- Finance: recurring & subscription invoices (row 157) ----
   getSchedules: (opts: { companyId?: string; status?: string } = {}) => {

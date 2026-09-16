@@ -282,12 +282,13 @@ export function InvoicePage() {
                       <div className="flex items-center gap-2">
                         <span className="font-semibold tabular-nums text-slate-900">{fmtMoney(p.amount, inv.currency)}</span>
                         <span className="text-muted-foreground">{METHODS.find((m) => m.key === p.method)?.label ?? p.method}</span>
+                        {p.provider === "stripe" && <span className="rounded bg-violet-50 px-1.5 py-0.5 text-[10px] font-medium text-violet-700" title="Paid online through the client link">Stripe</span>}
                         <span className="ml-auto text-muted-foreground">{fmtShortDate(p.paidAt)}</span>
                       </div>
                       {(p.reference || p.note) && <p className="mt-0.5 text-muted-foreground">{[p.reference, p.note].filter(Boolean).join(" · ")}</p>}
                       <div className="mt-1 flex items-center gap-2 text-[10px] text-muted-foreground">
-                        {p.recordedBy && <span>by {p.recordedBy.name}</span>}
-                        {admin && inv.status !== "void" && <button onClick={() => unpay.mutate(p.id)} className="ml-auto hover:text-red-700">Remove</button>}
+                        {p.recordedBy ? <span>by {p.recordedBy.name}</span> : p.provider ? <span>paid by the client</span> : null}
+                        {admin && inv.status !== "void" && !p.provider && <button onClick={() => unpay.mutate(p.id)} className="ml-auto hover:text-red-700">Remove</button>}
                       </div>
                     </li>
                   ))}
@@ -430,11 +431,39 @@ function ShareDialog({ inv, onClose }: { inv: Invoice; onClose: () => void }) {
           <a href={link} target="_blank" rel="noreferrer" className="rounded border border-border px-2 py-1.5 text-xs text-slate-700 hover:bg-muted">Open</a>
         </div>
         {inv.viewedAt && <p className="mt-3 text-xs text-indigo-700">Opened {inv.viewCount}× · last {fmtShortDate(inv.lastViewedAt ?? inv.viewedAt)}</p>}
+        <OnlinePaymentsToggle inv={inv} />
         <div className="mt-5 flex justify-end">
           <button type="button" onClick={onClose} className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700">Done</button>
         </div>
       </div>
     </>
+  );
+}
+
+/** Row 129: per-invoice switch for the Stripe "Pay now" button on the client link. */
+function OnlinePaymentsToggle({ inv }: { inv: Invoice }) {
+  const qc = useQueryClient();
+  const { data: health } = useQuery({ queryKey: ["integrations-health"], queryFn: () => api.getIntegrationHealth(), staleTime: 60_000 });
+  const stripe = health?.services.find((s) => s.id === "payments");
+  const toggle = useMutation({
+    mutationFn: (enabled: boolean) => api.setInvoiceOnlinePayments(inv.id, enabled),
+    onSuccess: (data) => qc.setQueryData(["invoice", inv.id], data),
+  });
+  return (
+    <div className="mt-4 rounded-md border border-border bg-[#fbfbfa] px-3 py-2.5" data-testid="online-payments">
+      <label className="flex items-center gap-2 text-xs text-slate-800">
+        <input type="checkbox" checked={inv.onlinePayments} disabled={toggle.isPending} onChange={(e) => toggle.mutate(e.target.checked)} />
+        <span className="font-medium">Accept card payment on this link</span>
+        <span className="ml-auto text-[10px] text-muted-foreground">Stripe</span>
+      </label>
+      <p className="mt-1 text-[11px] text-muted-foreground">
+        {stripe?.status === "connected"
+          ? inv.onlinePayments
+            ? "The client sees a Pay now button; a card payment is recorded here automatically."
+            : "The link shows the invoice and PDF only."
+          : "Stripe is not set up yet — add STRIPE_SECRET_KEY to the API .env (Settings › Connections). The button appears on the link once it is."}
+      </p>
+    </div>
   );
 }
 

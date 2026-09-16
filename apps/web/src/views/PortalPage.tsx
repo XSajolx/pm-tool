@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useParams } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api.js";
+import { PortalInvoices } from "../components/PortalInvoices.js";
 import { PortalProjectView } from "../components/PortalProjectView.js";
 
 /**
@@ -50,6 +51,11 @@ export function PortalPage() {
             ))}
             {home.data.projects.length === 0 && <li className="text-sm text-slate-500">Nothing has been shared with you yet.</li>}
           </ul>
+          {home.data.invoices?.length ? (
+            <div className="mt-6">
+              <PortalInvoices invoices={home.data.invoices} balances={home.data.balances ?? []} accent={b?.brandColor ?? "#6366f1"} />
+            </div>
+          ) : null}
         </main>
       </div>
     );

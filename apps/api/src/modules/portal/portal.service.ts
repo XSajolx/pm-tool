@@ -1,9 +1,9 @@
 import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, notInArray, or, sql } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
 import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
-import { contacts, documents, lists, milestones, organizations, portalAccess, portalEvents, projectStages, projects, statuses, tasks, users } from "../../db/schema.js";
+import { contacts, documents, invoices, lists, milestones, organizations, portalAccess, portalEvents, projectStages, projects, statuses, tasks, users } from "../../db/schema.js";
 import { DocumentsService } from "../documents/documents.service.js";
 import { textOf } from "../documents/doc-content.js";
 import { MailerService } from "../notifications/mailer.service.js";
@@ -145,14 +145,65 @@ Keep the link private; it is your access.`,
     const org = await this.db.query.organizations.findFirst({ where: eq(organizations.id, a.organizationId), columns: { name: true, brandColor: true, brandLogoUrl: true, brandFooter: true } });
     const rows = a.projectIds.length ? await this.db.select({ id: projects.id, name: projects.name, color: projects.color, status: projects.status }).from(projects).where(and(inArray(projects.id, a.projectIds), isNull(projects.archivedAt))) : [];
     await this.logEvent(a, rows.length === 1 ? rows[0]!.id : null, "opened");
-    return { guest: { name: a.name, email: a.email, expiresAt: a.expiresAt?.toISOString() ?? null }, organization: org, projects: rows };
+    const billing = await this.invoicesFor(a);
+    return { guest: { name: a.name, email: a.email, expiresAt: a.expiresAt?.toISOString() ?? null }, organization: org, projects: rows, ...billing };
+  }
+
+  /**
+   * Row 129: the client's invoices and balance, next to the work. An invoice
+   * belongs on this guest's portal when it is on one of their projects or
+   * billed to the company their contact record belongs to. Drafts never show;
+   * paid ones stay for the record.
+   */
+  private async invoicesFor(a: typeof portalAccess.$inferSelect, projectId?: string) {
+    const contact = a.contactId ? await this.db.query.contacts.findFirst({ where: eq(contacts.id, a.contactId), columns: { companyId: true } }) : null;
+    const scope = projectId
+      ? eq(invoices.projectId, projectId)
+      : or(a.projectIds.length ? inArray(invoices.projectId, a.projectIds) : sql`false`, contact?.companyId ? eq(invoices.companyId, contact.companyId) : sql`false`);
+    const rows = await this.db.query.invoices.findMany({
+      where: and(eq(invoices.organizationId, a.organizationId), isNull(invoices.archivedAt), notInArray(invoices.status, ["draft", "void"]), scope),
+      orderBy: [desc(invoices.issueDate)],
+      columns: { id: true, number: true, title: true, status: true, currency: true, issueDate: true, dueDate: true, total: true, amountPaid: true, token: true, paidAt: true, projectId: true },
+      limit: 100,
+    });
+    const now = Date.now();
+    const list = rows.map((r) => {
+      const balanceDue = Math.round(Math.max(0, r.total - r.amountPaid) * 100) / 100;
+      return {
+        id: r.id,
+        number: r.number,
+        title: r.title,
+        status: r.status,
+        currency: r.currency,
+        issueDate: r.issueDate.toISOString(),
+        dueDate: r.dueDate?.toISOString() ?? null,
+        paidAt: r.paidAt?.toISOString() ?? null,
+        total: r.total,
+        amountPaid: r.amountPaid,
+        balanceDue,
+        overdue: balanceDue > 0 && Boolean(r.dueDate && r.dueDate.getTime() < now),
+        token: r.token,
+        projectId: r.projectId,
+      };
+    });
+    const byCurrency = new Map<string, { outstanding: number; overdue: number }>();
+    for (const i of list) {
+      const c = byCurrency.get(i.currency) ?? { outstanding: 0, overdue: 0 };
+      c.outstanding += i.balanceDue;
+      if (i.overdue) c.overdue += i.balanceDue;
+      byCurrency.set(i.currency, c);
+    }
+    return {
+      invoices: list,
+      balances: [...byCurrency.entries()].map(([currency, c]) => ({ currency, outstanding: Math.round(c.outstanding * 100) / 100, overdue: Math.round(c.overdue * 100) / 100 })),
+    };
   }
 
   async guestProject(token: string, projectId: string) {
     const a = await this.resolveToken(token, projectId);
     const view = await this.projectView(a.organizationId, projectId);
     await this.logEvent(a, projectId, "opened", { label: view.project.name });
-    return view;
+    return { ...view, ...(await this.invoicesFor(a, projectId)) };
   }
 
   async guestDoc(token: string, projectId: string, docId: string) {

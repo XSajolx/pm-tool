@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { PortalDoc, PortalProject } from "../lib/api.js";
 import { DocReadOnly } from "./doc/DocReadOnly.js";
 import { cn } from "../lib/utils.js";
+import { PortalInvoices } from "./PortalInvoices.js";
 
 /**
  * Row 118: the client portal page for one project. Pure presentation - the
@@ -162,6 +163,7 @@ export function PortalProjectView({
             <p className="text-sm text-slate-500">No documents have been shared yet.</p>
           )}
         </section>
+        {data.invoices?.length ? <PortalInvoices invoices={data.invoices} balances={data.balances ?? []} accent={accent} compact /> : null}
         <p className="pb-6 text-center text-[11px] text-slate-400">{data.organization.brandFooter ?? data.organization.name} · Updated {new Date(data.generatedAt).toLocaleString()}</p>
       </main>
     </div>

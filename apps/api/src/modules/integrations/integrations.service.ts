@@ -7,6 +7,7 @@ import { integrations, memberships } from "../../db/schema.js";
 import { MailerService } from "../notifications/mailer.service.js";
 import { NotificationsService } from "../notifications/notifications.service.js";
 import { ActivityService } from "../activity/activity.service.js";
+import { stripeHealth } from "../finance/stripe.config.js";
 
 export type Provider = "google_drive" | "dropbox";
 export const PROVIDERS: Provider[] = ["google_drive", "dropbox"];
@@ -123,7 +124,7 @@ export class IntegrationsService implements OnModuleInit, OnModuleDestroy {
       lastError: null,
       canCheck: false,
     };
-    return { providers, services: [email, calendar, esign] };
+    return { providers, services: [email, stripeHealth(), calendar, esign] };
   }
 
   async checkEmail(orgId: string) {

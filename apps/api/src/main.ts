@@ -4,7 +4,8 @@ import { AppModule } from "./app.module.js";
 import { configureApp } from "./app.setup.js";
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  // rawBody: Stripe webhook signatures (row 129) are computed over the exact bytes.
+  const app = await NestFactory.create(AppModule, { rawBody: true });
   configureApp(app);
 
   const port = Number(process.env.API_PORT ?? 3333);

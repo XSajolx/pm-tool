@@ -8,6 +8,7 @@ import { ActivityService } from "../activity/activity.service.js";
 import { NotificationsService } from "../notifications/notifications.service.js";
 import { renderInvoicePdf } from "./invoice-pdf.js";
 import { ProfitFirstService } from "./profit-first.service.js";
+import { stripeConfigured } from "./stripe.config.js";
 
 export type InvoiceStatus = "draft" | "sent" | "viewed" | "partially_paid" | "paid" | "void";
 export type PaymentMethod = "bank_transfer" | "card" | "cash" | "cheque" | "other";
@@ -48,6 +49,9 @@ export interface PaymentDto {
   paidAt?: string | null;
   reference?: string | null;
   note?: string | null;
+  /** Row 129: set by the Stripe settle path only. */
+  provider?: "stripe" | null;
+  providerRef?: string | null;
 }
 
 /** Statuses that still expect money. */
@@ -138,9 +142,20 @@ export class InvoicesService {
         paidAt: p.paidAt,
         reference: p.reference,
         note: p.note,
+        provider: p.provider,
+        providerRef: p.providerRef,
         recordedBy: p.recordedBy ? { id: p.recordedBy.id, name: p.recordedBy.name } : null,
       })),
     };
+  }
+
+  /** Row 129: the "Pay now" button can be turned off per invoice at any stage (e.g. a retainer settled by standing order). */
+  async setOnlinePayments(orgId: string, userId: string, id: string, enabled: boolean) {
+    const inv = await this.get(orgId, id);
+    if (inv.onlinePayments === enabled) return inv;
+    await this.db.update(invoices).set({ onlinePayments: enabled, updatedAt: new Date() }).where(eq(invoices.id, id));
+    await this.activity.record({ orgId, actorId: userId, entityType: "invoice", entityId: id, action: "updated", changes: [{ field: "onlinePayments", from: String(inv.onlinePayments), to: String(enabled) }] });
+    return this.get(orgId, id);
   }
 
   /* ---------------- write ---------------- */
@@ -304,9 +319,18 @@ export class InvoicesService {
     return this.get(orgId, id);
   }
 
-  /** Partial payments add up; paying past the balance is refused rather than silently absorbed. */
-  async recordPayment(orgId: string, userId: string, id: string, dto: PaymentDto) {
+  /**
+   * Partial payments add up; paying past the balance is refused rather than
+   * silently absorbed. `userId` is null when Stripe settles the invoice
+   * (row 129); a providerRef that was already recorded is a no-op so a
+   * replayed webhook and the return-page confirm cannot both count.
+   */
+  async recordPayment(orgId: string, userId: string | null, id: string, dto: PaymentDto) {
     const inv = await this.get(orgId, id);
+    if (dto.providerRef) {
+      const dup = await this.db.query.invoicePayments.findFirst({ where: eq(invoicePayments.providerRef, dto.providerRef), columns: { id: true } });
+      if (dup) return inv;
+    }
     if (inv.status === "draft") throw new BadRequestException("Send the invoice before recording a payment");
     if (inv.status === "void") throw new BadRequestException("This invoice is void");
     const amount = round2(dto.amount);
@@ -326,6 +350,8 @@ export class InvoicesService {
           paidAt,
           reference: dto.reference?.trim() || null,
           note: dto.note?.trim() || null,
+          provider: dto.provider ?? null,
+          providerRef: dto.providerRef ?? null,
           recordedById: userId,
         })
         .returning({ id: invoicePayments.id });
@@ -334,7 +360,7 @@ export class InvoicesService {
     });
     // Row 162: income is split into the Profit First buckets the moment it lands.
     await this.profitFirst.allocatePayment(orgId, userId, { id: paymentId, invoiceId: id, amount, paidAt });
-    await this.activity.record({ orgId, actorId: userId, entityType: "invoice", entityId: id, action: "payment_recorded", changes: [{ field: "amountPaid", from: inv.amountPaid, to: round2(inv.amountPaid + amount) }] });
+    await this.activity.record({ orgId, actorId: userId, entityType: "invoice", entityId: id, action: dto.provider ? "paid_online" : "payment_recorded", changes: [{ field: "amountPaid", from: inv.amountPaid, to: round2(inv.amountPaid + amount) }] });
     return this.get(orgId, id);
   }
 
@@ -395,9 +421,27 @@ export class InvoicesService {
 
   private async byToken(token: string) {
     if (!token || token.length < 16) throw new NotFoundException("This link is not valid");
-    const row = await this.db.query.invoices.findFirst({ where: and(eq(invoices.token, token), isNull(invoices.archivedAt)), columns: { id: true, organizationId: true, status: true, viewedAt: true, viewCount: true, createdById: true, number: true, title: true } });
+    const row = await this.db.query.invoices.findFirst({ where: and(eq(invoices.token, token), isNull(invoices.archivedAt)), columns: { id: true, organizationId: true, status: true, viewedAt: true, viewCount: true, createdById: true, number: true, title: true, onlinePayments: true } });
     if (!row || row.status === "draft") throw new NotFoundException("This link is not valid");
     return row;
+  }
+
+  /** Row 129: the Stripe service resolves the client link the same way the public page does. */
+  async resolveToken(token: string) {
+    const row = await this.byToken(token);
+    return { ...(await this.get(row.organizationId, row.id)), organizationId: row.organizationId };
+  }
+
+  /** Row 129: a webhook carries no org context, only the invoice id from the session metadata. */
+  async findAnyOrg(id: string) {
+    const row = await this.db.query.invoices.findFirst({ where: and(eq(invoices.id, id), isNull(invoices.archivedAt)), columns: { organizationId: true, createdById: true } });
+    if (!row) return null;
+    return { ...(await this.get(row.organizationId, id)), organizationId: row.organizationId, createdById: row.createdById };
+  }
+
+  /** Whether the client link should offer "Pay now": keys present, the invoice allows it, and there is a balance. */
+  payOnline(inv: { status: string; onlinePayments: boolean; balanceDue: number }) {
+    return stripeConfigured() && inv.onlinePayments && OPEN.includes(inv.status as InvoiceStatus) && inv.balanceDue > EPS;
   }
 
   /** Opening the link counts as a view; the first one is announced to whoever issued it. */
@@ -447,7 +491,8 @@ export class InvoicesService {
         paidAt: inv.paidAt,
         billTo: { company: company?.name ?? inv.company?.name ?? null, contact: inv.contact?.name ?? null, email: inv.contact?.email ?? company?.email ?? null, address: company?.address ?? null },
         project: inv.project?.name ?? null,
-        payments: inv.payments.map((p) => ({ amount: p.amount, method: p.method, paidAt: p.paidAt })),
+        payments: inv.payments.map((p) => ({ amount: p.amount, method: p.method, paidAt: p.paidAt, provider: p.provider })),
+        payOnline: this.payOnline(inv),
       },
       from: { name: org?.name ?? "", color: org?.brandColor ?? "#6366f1", logoUrl: org?.brandLogoUrl ?? null, footer: org?.brandFooter ?? null },
     };
@@ -539,6 +584,7 @@ function shape(
     paidAt: r.paidAt,
     voidedAt: r.voidedAt,
     voidReason: r.voidReason,
+    onlinePayments: r.onlinePayments,
     estimateId: r.estimateId,
     proposalId: r.proposalId,
     dealId: r.dealId,
