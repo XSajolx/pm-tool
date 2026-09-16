@@ -1389,6 +1389,124 @@ export interface PublicProposal {
   };
 }
 
+// ---- Finance: invoices (row 156) ----
+export type InvoiceStatus = "draft" | "sent" | "viewed" | "partially_paid" | "paid" | "void";
+export type PaymentMethod = "bank_transfer" | "card" | "cash" | "cheque" | "other";
+
+export interface InvoiceItem {
+  id?: string;
+  description: string;
+  quantity: number;
+  unitPrice: number;
+  amount?: number;
+}
+
+export interface InvoicePayment {
+  id: string;
+  amount: number;
+  method: PaymentMethod;
+  paidAt: string;
+  reference: string | null;
+  note: string | null;
+  recordedBy: { id: string; name: string } | null;
+}
+
+export interface InvoiceSummary {
+  id: string;
+  number: string;
+  title: string;
+  status: InvoiceStatus;
+  /** Open and past its due date — derived, not a stored status. */
+  overdue: boolean;
+  currency: string;
+  issueDate: string;
+  dueDate: string | null;
+  notes: string | null;
+  subtotal: number;
+  discountPercent: number;
+  discountAmount: number;
+  taxRate: number;
+  taxAmount: number;
+  total: number;
+  amountPaid: number;
+  balanceDue: number;
+  token: string | null;
+  sentAt: string | null;
+  viewedAt: string | null;
+  lastViewedAt: string | null;
+  viewCount: number;
+  paidAt: string | null;
+  voidedAt: string | null;
+  voidReason: string | null;
+  estimateId: string | null;
+  proposalId: string | null;
+  dealId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  company: { id: string; name: string } | null;
+  contact: { id: string; name: string; email: string | null } | null;
+  project: { id: string; name: string } | null;
+}
+
+export interface Invoice extends InvoiceSummary {
+  deal: { id: string; title: string } | null;
+  createdBy: { id: string; name: string } | null;
+  items: Required<InvoiceItem>[];
+  payments: InvoicePayment[];
+}
+
+export interface InvoiceInput {
+  title?: string;
+  companyId?: string | null;
+  contactId?: string | null;
+  projectId?: string | null;
+  dealId?: string | null;
+  currency?: string;
+  issueDate?: string | null;
+  dueDate?: string | null;
+  notes?: string | null;
+  taxRate?: number;
+  discountPercent?: number;
+  items?: InvoiceItem[];
+}
+
+export interface InvoiceTotals {
+  outstanding: number;
+  overdue: number;
+  overdueCount: number;
+  paidLast30: number;
+  drafts: number;
+  openCount: number;
+}
+
+export interface PublicInvoice {
+  token: string;
+  invoice: {
+    number: string;
+    title: string;
+    status: InvoiceStatus;
+    overdue: boolean;
+    currency: string;
+    issueDate: string;
+    dueDate: string | null;
+    notes: string | null;
+    items: Required<InvoiceItem>[];
+    subtotal: number;
+    discountPercent: number;
+    discountAmount: number;
+    taxRate: number;
+    taxAmount: number;
+    total: number;
+    amountPaid: number;
+    balanceDue: number;
+    paidAt: string | null;
+    billTo: { company: string | null; contact: string | null; email: string | null; address: string | null };
+    project: string | null;
+    payments: { amount: number; method: PaymentMethod; paidAt: string }[];
+  };
+  from: { name: string; color: string; logoUrl: string | null; footer: string | null };
+}
+
 export type EstimateStatus = "draft" | "sent" | "accepted" | "declined" | "expired";
 
 export interface EstimateItem {
@@ -2161,6 +2279,41 @@ export const api = {
     publicRequest<PublicProposal>(`/public/proposals/${token}/accept`, { method: "POST", body: JSON.stringify(body) }),
   declinePublicProposal: (token: string, reason?: string) =>
     publicRequest<PublicProposal>(`/public/proposals/${token}/decline`, { method: "POST", body: JSON.stringify({ reason }) }),
+
+    // ---- Finance: invoices (row 156) ----
+  getInvoices: (opts: { status?: string; companyId?: string; projectId?: string } = {}) => {
+    const q = new URLSearchParams();
+    if (opts.status) q.set("status", opts.status);
+    if (opts.companyId) q.set("companyId", opts.companyId);
+    if (opts.projectId) q.set("projectId", opts.projectId);
+    const qs = q.toString();
+    return request<InvoiceSummary[]>(`/finance/invoices${qs ? "?" + qs : ""}`);
+  },
+  getInvoiceTotals: () => request<InvoiceTotals>(`/finance/invoices/summary`),
+  getInvoice: (id: string) => request<Invoice>(`/finance/invoices/${id}`),
+  createInvoice: (body: InvoiceInput & { fromEstimateId?: string | null; fromProposalId?: string | null }) =>
+    request<Invoice>(`/finance/invoices`, { method: "POST", body: JSON.stringify(body) }),
+  updateInvoice: (id: string, body: InvoiceInput) => request<Invoice>(`/finance/invoices/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  sendInvoice: (id: string) => request<Invoice>(`/finance/invoices/${id}/send`, { method: "POST" }),
+  reopenInvoice: (id: string) => request<Invoice>(`/finance/invoices/${id}/reopen`, { method: "POST" }),
+  voidInvoice: (id: string, reason?: string) => request<Invoice>(`/finance/invoices/${id}/void`, { method: "POST", body: JSON.stringify({ reason: reason ?? null }) }),
+  recordInvoicePayment: (id: string, body: { amount: number; method?: PaymentMethod; paidAt?: string | null; reference?: string | null; note?: string | null }) =>
+    request<Invoice>(`/finance/invoices/${id}/payments`, { method: "POST", body: JSON.stringify(body) }),
+  removeInvoicePayment: (id: string, paymentId: string) => request<Invoice>(`/finance/invoices/${id}/payments/${paymentId}`, { method: "DELETE" }),
+  archiveInvoice: (id: string) => request<{ id: string }>(`/finance/invoices/${id}`, { method: "DELETE" }),
+  /** Authenticated PDF: fetched with the bearer token and opened from a blob URL (a plain link can't carry the header). */
+  openInvoicePdf: async (id: string) => {
+    const token = await accessToken();
+    const res = await fetch(`${API_URL}/api/finance/invoices/${id}/pdf`, {
+      headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), ...(activeOrgId ? { "x-org-id": activeOrgId } : {}) },
+    });
+    if (!res.ok) throw new ApiError(res.status, `API ${res.status}: ${await res.text()}`);
+    const url = URL.createObjectURL(await res.blob());
+    window.open(url, "_blank", "noopener");
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  },
+  getPublicInvoice: (token: string) => publicRequest<PublicInvoice>(`/public/invoices/${token}`),
+  publicInvoicePdfUrl: (token: string) => `${API_URL}/api/public/invoices/${token}/pdf`,
 
   // ---- CRM: estimates ----
   getEstimates: (opts: { companyId?: string; dealId?: string } = {}) => {

@@ -27,6 +27,7 @@ export interface RecordActivity {
     | "contact"
     | "deal"
     | "estimate"
+    | "invoice"
     | "meeting"
     | "document"
     | "project"

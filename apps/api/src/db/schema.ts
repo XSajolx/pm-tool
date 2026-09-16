@@ -2599,3 +2599,122 @@ export const leaveRequestsRelations = relations(leaveRequests, ({ one }) => ({
   user: one(users, { fields: [leaveRequests.userId], references: [users.id], relationName: "leave_user" }),
   decidedBy: one(users, { fields: [leaveRequests.decidedById], references: [users.id], relationName: "leave_decider" }),
 }));
+
+/* ------------------------------------------------------------------ *
+ * Finance — row 156: invoices (create, send, track, get paid)
+ * ------------------------------------------------------------------ */
+export const invoiceStatus = pgEnum("invoice_status", ["draft", "sent", "viewed", "partially_paid", "paid", "void"]);
+
+export const invoices = pgTable(
+  "invoices",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    /** Human key like INV-0007, sequential per org. */
+    number: varchar("number", { length: 32 }).notNull(),
+    title: varchar("title", { length: 255 }).notNull(),
+    companyId: uuid("company_id").references(() => companies.id, { onDelete: "set null" }),
+    contactId: uuid("contact_id").references(() => contacts.id, { onDelete: "set null" }),
+    projectId: uuid("project_id").references(() => projects.id, { onDelete: "set null" }),
+    dealId: uuid("deal_id").references(() => deals.id, { onDelete: "set null" }),
+    /** Where the lines came from, when built from an accepted estimate / proposal. */
+    estimateId: uuid("estimate_id").references(() => estimates.id, { onDelete: "set null" }),
+    proposalId: uuid("proposal_id").references(() => proposals.id, { onDelete: "set null" }),
+    status: invoiceStatus("status").notNull().default("draft"),
+    currency: varchar("currency", { length: 8 }).notNull().default("USD"),
+    issueDate: timestamp("issue_date", { withTimezone: true }).defaultNow().notNull(),
+    dueDate: timestamp("due_date", { withTimezone: true }),
+    /** Message / payment instructions shown to the client. */
+    notes: text("notes"),
+    subtotal: doublePrecision("subtotal").notNull().default(0),
+    discountPercent: doublePrecision("discount_percent").notNull().default(0),
+    discountAmount: doublePrecision("discount_amount").notNull().default(0),
+    taxRate: doublePrecision("tax_rate").notNull().default(0),
+    taxAmount: doublePrecision("tax_amount").notNull().default(0),
+    total: doublePrecision("total").notNull().default(0),
+    /** Sum of recorded payments; balance due = total - amountPaid. */
+    amountPaid: doublePrecision("amount_paid").notNull().default(0),
+    /** Unguessable client link; minted on first send. */
+    token: varchar("token", { length: 64 }),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    viewedAt: timestamp("viewed_at", { withTimezone: true }),
+    lastViewedAt: timestamp("last_viewed_at", { withTimezone: true }),
+    viewCount: integer("view_count").notNull().default(0),
+    paidAt: timestamp("paid_at", { withTimezone: true }),
+    voidedAt: timestamp("voided_at", { withTimezone: true }),
+    voidReason: text("void_reason"),
+    createdById: uuid("created_by_id").references(() => users.id),
+    ...timestamps,
+  },
+  (t) => [
+    uniqueIndex("invoices_org_number_uq").on(t.organizationId, t.number),
+    uniqueIndex("invoices_token_uq").on(t.token),
+    index("invoices_org_status_idx").on(t.organizationId, t.status),
+    index("invoices_company_idx").on(t.companyId),
+    index("invoices_project_idx").on(t.projectId),
+    index("invoices_due_idx").on(t.dueDate),
+  ],
+);
+
+export const invoiceItems = pgTable(
+  "invoice_items",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    invoiceId: uuid("invoice_id")
+      .notNull()
+      .references(() => invoices.id, { onDelete: "cascade" }),
+    description: text("description").notNull(),
+    quantity: doublePrecision("quantity").notNull().default(1),
+    unitPrice: doublePrecision("unit_price").notNull().default(0),
+    amount: doublePrecision("amount").notNull().default(0),
+    position: doublePrecision("position").notNull().default(0),
+  },
+  (t) => [index("invoice_items_invoice_idx").on(t.invoiceId)],
+);
+
+/** Money received against an invoice. Several partial payments add up; overpayment is refused. */
+export const invoicePayments = pgTable(
+  "invoice_payments",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    invoiceId: uuid("invoice_id")
+      .notNull()
+      .references(() => invoices.id, { onDelete: "cascade" }),
+    amount: doublePrecision("amount").notNull(),
+    /** bank_transfer | card | cash | cheque | other */
+    method: varchar("method", { length: 24 }).notNull().default("bank_transfer"),
+    paidAt: timestamp("paid_at", { withTimezone: true }).defaultNow().notNull(),
+    reference: varchar("reference", { length: 255 }),
+    note: text("note"),
+    recordedById: uuid("recorded_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("invoice_payments_invoice_idx").on(t.invoiceId), index("invoice_payments_org_paid_idx").on(t.organizationId, t.paidAt)],
+);
+
+export const invoicesRelations = relations(invoices, ({ one, many }) => ({
+  company: one(companies, { fields: [invoices.companyId], references: [companies.id] }),
+  contact: one(contacts, { fields: [invoices.contactId], references: [contacts.id] }),
+  project: one(projects, { fields: [invoices.projectId], references: [projects.id] }),
+  deal: one(deals, { fields: [invoices.dealId], references: [deals.id] }),
+  createdBy: one(users, { fields: [invoices.createdById], references: [users.id] }),
+  items: many(invoiceItems),
+  payments: many(invoicePayments),
+}));
+
+export const invoiceItemsRelations = relations(invoiceItems, ({ one }) => ({
+  invoice: one(invoices, { fields: [invoiceItems.invoiceId], references: [invoices.id] }),
+}));
+
+export const invoicePaymentsRelations = relations(invoicePayments, ({ one }) => ({
+  invoice: one(invoices, { fields: [invoicePayments.invoiceId], references: [invoices.id] }),
+  recordedBy: one(users, { fields: [invoicePayments.recordedById], references: [users.id] }),
+}));

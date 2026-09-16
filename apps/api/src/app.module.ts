@@ -29,6 +29,7 @@ import { SearchModule } from "./modules/search/search.module.js";
 import { LinkedFilesModule } from "./modules/linked-files/linked-files.module.js";
 import { TrashModule } from "./modules/trash/trash.module.js";
 import { ImportModule } from "./modules/import/import.module.js";
+import { FinanceModule } from "./modules/finance/finance.module.js";
 
 @Module({
   imports: [
@@ -61,6 +62,7 @@ import { ImportModule } from "./modules/import/import.module.js";
     LinkedFilesModule,
     TrashModule,
     ImportModule,
+    FinanceModule,
   ],
   controllers: [HealthController],
 })

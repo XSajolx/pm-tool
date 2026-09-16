@@ -36,6 +36,9 @@ import { ProposalsPage } from "./views/ProposalsPage.js";
 import { ProposalPage } from "./views/ProposalPage.js";
 import { PublicProposalPage } from "./views/PublicProposalPage.js";
 import { PublicDocPage } from "./views/PublicDocPage.js";
+import { InvoicesPage } from "./views/InvoicesPage.js";
+import { InvoicePage } from "./views/InvoicePage.js";
+import { PublicInvoicePage } from "./views/PublicInvoicePage.js";
 import { SettingsPage } from "./views/SettingsPage.js";
 import { MyWorkPage } from "./views/MyWorkPage.js";
 import { DocsPage, DocPage } from "./views/DocsPage.js";
@@ -68,7 +71,7 @@ function Protected() {
 
   // Client-facing pages (proposal links, rows 58-59) live outside the login gate.
   // Rows 65/55/79/120: public pages - share links, proposals, password reset, the client portal (but not the team's preview).
-  if (pathname.startsWith("/p/") || pathname.startsWith("/d/") || pathname === "/reset-password" || (pathname.startsWith("/portal/") && !pathname.startsWith("/portal/preview/"))) return <Outlet />;
+  if (pathname.startsWith("/p/") || pathname.startsWith("/d/") || pathname.startsWith("/i/") || pathname === "/reset-password" || (pathname.startsWith("/portal/") && !pathname.startsWith("/portal/preview/"))) return <Outlet />;
 
   if (loading) return <Splash />;
   if (!session) return <AuthPage />;
@@ -275,6 +278,9 @@ const meetingsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/crm
 const proposalsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/crm/proposals", component: ProposalsPage });
 const proposalRoute = createRoute({ getParentRoute: () => rootRoute, path: "/crm/proposals/$proposalId", component: ProposalPage });
 const publicProposalRoute = createRoute({ getParentRoute: () => rootRoute, path: "/p/$token", component: PublicProposalPage });
+const invoicesRoute = createRoute({ getParentRoute: () => rootRoute, path: "/finance/invoices", component: InvoicesPage });
+const invoiceRoute = createRoute({ getParentRoute: () => rootRoute, path: "/finance/invoices/$invoiceId", component: InvoicePage });
+const publicInvoiceRoute = createRoute({ getParentRoute: () => rootRoute, path: "/i/$token", component: PublicInvoicePage });
 const publicDocRoute = createRoute({ getParentRoute: () => rootRoute, path: "/d/$token", component: PublicDocPage });
 const resetPasswordRoute = createRoute({ getParentRoute: () => rootRoute, path: "/reset-password", component: ResetPasswordPage });
 const settingsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/settings", component: SettingsPage });
@@ -304,6 +310,9 @@ const routeTree = rootRoute.addChildren([
   proposalRoute,
   publicProposalRoute,
   publicDocRoute,
+  invoicesRoute,
+  invoiceRoute,
+  publicInvoiceRoute,
   resetPasswordRoute,
   taskOpenRoute,
   docsRoute,

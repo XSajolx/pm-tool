@@ -207,6 +207,14 @@ export function Sidebar() {
         <NavLink to="/crm/meetings" label="Meetings" icon={meetingIcon} />
       </nav>
 
+      {/* Finance (row 156+) */}
+      <p className="px-3 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+        Finance
+      </p>
+      <nav className="px-2">
+        <NavLink to="/finance/invoices" label="Invoices" icon={invoiceIcon} />
+      </nav>
+
       {/* Productivity */}
       <p className="px-3 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
         Productivity
@@ -416,6 +424,9 @@ const contactIcon = (
 );
 const dealIcon = (
   <path d="M3 17l6-6 4 4 8-8M14 7h7v7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+);
+const invoiceIcon = (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z" /><path d="M9 8h6M9 12h6M9 16h3" /></svg>
 );
 const estimateIcon = (
   <path d="M7 3h7l5 5v13H7zM14 3v5h5M9 13h6M9 17h6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />

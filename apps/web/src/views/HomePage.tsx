@@ -353,6 +353,8 @@ function NotificationList({
                         navigate({ to: "/t/$taskId", params: { taskId: n.entityId } });
                       } else if (n.entityType === "document") {
                         navigate({ to: "/docs/$docId", params: { docId: n.entityId } });
+                      } else if (n.entityType === "invoice") {
+                        navigate({ to: "/finance/invoices/$invoiceId", params: { invoiceId: n.entityId } });
                       } else if (n.entityType === "proposal") {
                         navigate({ to: "/crm/proposals/$proposalId", params: { proposalId: n.entityId } });
                       } else if (n.entityType === "deal") {
