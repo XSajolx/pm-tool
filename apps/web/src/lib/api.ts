@@ -1819,6 +1819,23 @@ export interface ExpenseImport {
   createdBy: { id: string; name: string } | null;
 }
 
+// ---- Finance: P&L (row 161) ----
+export type PnlBasis = "cash" | "accrual";
+export type PnlGranularity = "month" | "quarter" | "year";
+export interface PnlReport {
+  basis: PnlBasis;
+  granularity: PnlGranularity;
+  from: string;
+  to: string;
+  currency: string;
+  totals: { income: number; expenses: number; net: number; margin: number | null; invoices: number; expenseCount: number };
+  buckets: { key: string; label: string; income: number; expenses: number; net: number; byCategory: Record<string, number> }[];
+  categories: { category: string; amount: number; share: number }[];
+  vendors: { vendor: string; amount: number }[];
+  clients: { id: string | null; name: string; amount: number; share: number }[];
+  projects: { id: string | null; name: string; income: number; expenses: number; margin: number; marginPct: number | null }[];
+}
+
 export type EstimateStatus = "draft" | "sent" | "accepted" | "declined" | "expired";
 
 export interface EstimateItem {
@@ -2714,6 +2731,29 @@ export const api = {
   },
   addExpensesToInvoice: (invoiceId: string, expenseIds: string[], markupPercent = 0) => request<Invoice>(`/finance/expenses/invoice/${invoiceId}`, { method: "POST", body: JSON.stringify({ expenseIds, markupPercent }) }),
   removeExpenseFromInvoice: (invoiceId: string, expenseId: string) => request<Invoice>(`/finance/expenses/invoice/${invoiceId}/${expenseId}`, { method: "DELETE" }),
+
+  // ---- Finance: P&L (row 161) ----
+  getPnl: (opts: { from?: string; to?: string; granularity?: PnlGranularity; basis?: PnlBasis } = {}) => {
+    const q = new URLSearchParams();
+    for (const [k, v] of Object.entries(opts)) if (v) q.set(k, v);
+    const qs = q.toString();
+    return request<PnlReport>(`/finance/reports/pnl${qs ? "?" + qs : ""}`);
+  },
+  downloadPnlCsv: async (opts: { from?: string; to?: string; granularity?: PnlGranularity; basis?: PnlBasis } = {}) => {
+    const q = new URLSearchParams();
+    for (const [k, v] of Object.entries(opts)) if (v) q.set(k, v);
+    const token = await accessToken();
+    const res = await fetch(`${API_URL}/api/finance/reports/pnl.csv?${q.toString()}`, { headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), ...(activeOrgId ? { "x-org-id": activeOrgId } : {}) } });
+    if (!res.ok) throw new ApiError(res.status, `API ${res.status}: ${await res.text()}`);
+    const name = /filename="([^"]+)"/.exec(res.headers.get("content-disposition") ?? "")?.[1] ?? "pnl.csv";
+    const url = URL.createObjectURL(await res.blob());
+    const a = Object.assign(document.createElement("a"), { href: url, download: name });
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    return name;
+  },
 
   // ---- CRM: estimates ----
   getEstimates: (opts: { companyId?: string; dealId?: string } = {}) => {

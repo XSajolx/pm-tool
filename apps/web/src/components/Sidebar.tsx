@@ -216,6 +216,7 @@ export function Sidebar() {
         <NavLink to="/finance/invoices" label="Invoices" icon={invoiceIcon} />
         <NavLink to="/finance/recurring" label="Recurring" icon={repeatIcon} />
         <NavLink to="/finance/expenses" label="Expenses" icon={expenseIcon} />
+        <NavLink to="/finance/pnl" label="Profit & Loss" icon={chartIcon} />
       </nav>
 
       {/* Productivity */}
