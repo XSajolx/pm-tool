@@ -7,6 +7,7 @@ import { companies, contacts, deals, estimateItems, estimates, expenses, invoice
 import { ActivityService } from "../activity/activity.service.js";
 import { NotificationsService } from "../notifications/notifications.service.js";
 import { renderInvoicePdf } from "./invoice-pdf.js";
+import { ProfitFirstService } from "./profit-first.service.js";
 
 export type InvoiceStatus = "draft" | "sent" | "viewed" | "partially_paid" | "paid" | "void";
 export type PaymentMethod = "bank_transfer" | "card" | "cash" | "cheque" | "other";
@@ -59,6 +60,7 @@ export class InvoicesService {
     @Inject(DRIZZLE) private readonly db: DB,
     private readonly activity: ActivityService,
     private readonly notifications: NotificationsService,
+    private readonly profitFirst: ProfitFirstService,
   ) {}
 
   /* ---------------- read ---------------- */
@@ -312,19 +314,26 @@ export class InvoicesService {
     const balance = round2(inv.total - inv.amountPaid);
     if (amount > balance + EPS) throw new BadRequestException(`That is more than the balance due (${inv.currency} ${balance.toFixed(2)})`);
 
-    await this.db.transaction(async (tx) => {
-      await tx.insert(invoicePayments).values({
-        organizationId: orgId,
-        invoiceId: id,
-        amount,
-        method: dto.method ?? "bank_transfer",
-        paidAt: dto.paidAt ? new Date(dto.paidAt) : new Date(),
-        reference: dto.reference?.trim() || null,
-        note: dto.note?.trim() || null,
-        recordedById: userId,
-      });
+    const paidAt = dto.paidAt ? new Date(dto.paidAt) : new Date();
+    const paymentId = await this.db.transaction(async (tx) => {
+      const [p] = await tx
+        .insert(invoicePayments)
+        .values({
+          organizationId: orgId,
+          invoiceId: id,
+          amount,
+          method: dto.method ?? "bank_transfer",
+          paidAt,
+          reference: dto.reference?.trim() || null,
+          note: dto.note?.trim() || null,
+          recordedById: userId,
+        })
+        .returning({ id: invoicePayments.id });
       await this.syncPaid(tx, id);
+      return p!.id;
     });
+    // Row 162: income is split into the Profit First buckets the moment it lands.
+    await this.profitFirst.allocatePayment(orgId, userId, { id: paymentId, invoiceId: id, amount, paidAt });
     await this.activity.record({ orgId, actorId: userId, entityType: "invoice", entityId: id, action: "payment_recorded", changes: [{ field: "amountPaid", from: inv.amountPaid, to: round2(inv.amountPaid + amount) }] });
     return this.get(orgId, id);
   }
@@ -333,6 +342,7 @@ export class InvoicesService {
     const inv = await this.get(orgId, id);
     const p = inv.payments.find((x) => x.id === paymentId);
     if (!p) throw new NotFoundException("Payment not found");
+    await this.profitFirst.unallocatePayment(orgId, paymentId);
     await this.db.transaction(async (tx) => {
       await tx.delete(invoicePayments).where(and(eq(invoicePayments.id, paymentId), eq(invoicePayments.organizationId, orgId)));
       await this.syncPaid(tx, id);

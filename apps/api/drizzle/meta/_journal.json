@@ -519,6 +519,20 @@
       "when": 1789520681844,
       "tag": "0073_thin_butterfly",
       "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1789521791114,
+      "tag": "0074_nice_loki",
+      "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1789521938304,
+      "tag": "0075_white_sersi",
+      "breakpoints": true
     }
   ]
 }

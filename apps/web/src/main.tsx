@@ -43,6 +43,7 @@ import { SchedulesPage } from "./views/SchedulesPage.js";
 import { ContractsPage } from "./views/ContractsPage.js";
 import { ExpensesPage } from "./views/ExpensesPage.js";
 import { PnlPage } from "./views/PnlPage.js";
+import { ProfitFirstPage } from "./views/ProfitFirstPage.js";
 import { ContractPage } from "./views/ContractPage.js";
 import { PublicContractPage } from "./views/PublicContractPage.js";
 import { SchedulePage } from "./views/SchedulePage.js";
@@ -289,6 +290,7 @@ const invoicesRoute = createRoute({ getParentRoute: () => rootRoute, path: "/fin
 const invoiceRoute = createRoute({ getParentRoute: () => rootRoute, path: "/finance/invoices/$invoiceId", component: InvoicePage });
 const schedulesRoute = createRoute({ getParentRoute: () => rootRoute, path: "/finance/recurring", component: SchedulesPage });
 const scheduleRoute = createRoute({ getParentRoute: () => rootRoute, path: "/finance/recurring/$scheduleId", component: SchedulePage });
+const profitFirstRoute = createRoute({ getParentRoute: () => rootRoute, path: "/finance/profit-first", component: ProfitFirstPage });
 const pnlRoute = createRoute({ getParentRoute: () => rootRoute, path: "/finance/pnl", component: PnlPage });
 const expensesRoute = createRoute({ getParentRoute: () => rootRoute, path: "/finance/expenses", component: ExpensesPage });
 const contractsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/crm/contracts", component: ContractsPage });
@@ -330,6 +332,7 @@ const routeTree = rootRoute.addChildren([
   contractsRoute,
   expensesRoute,
   pnlRoute,
+  profitFirstRoute,
   contractRoute,
   publicContractRoute,
   schedulesRoute,

@@ -1,0 +1,1 @@
+ALTER TABLE "profit_movements" ADD COLUMN "group_id" uuid;

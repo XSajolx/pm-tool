@@ -1836,6 +1836,22 @@ export interface PnlReport {
   projects: { id: string | null; name: string; income: number; expenses: number; margin: number; marginPct: number | null }[];
 }
 
+// ---- Finance: Profit First (row 162) ----
+export type ProfitBucket = "profit" | "owner_pay" | "tax" | "opex";
+export interface ProfitFirstConfig {
+  enabled: boolean;
+  buckets: { key: ProfitBucket; label: string; currentPct: number; targetPct: number }[];
+  startedAt?: string | null;
+}
+export interface ProfitFirstOverview {
+  config: ProfitFirstConfig;
+  buckets: { key: ProfitBucket; label: string; currentPct: number; targetPct: number; balance: number; allocated: number; distributed: number; untransferred: number }[];
+  totals: { allocated: number; balance: number; untransferred: number };
+  allocations: { id: string; date: string; income: number; source: { invoiceId: string | null; number: string | null; title: string | null; note: string | null }; lines: { id: string; bucket: ProfitBucket; pct: number | null; amount: number; transferredAt: string | null }[]; transferred: boolean }[];
+  movements: { id: string; bucket: ProfitBucket; kind: "distribution" | "adjustment"; amount: number; date: string; note: string | null; createdBy: { id: string; name: string } | null }[];
+  unallocated: { count: number; amount: number };
+}
+
 export type EstimateStatus = "draft" | "sent" | "accepted" | "declined" | "expired";
 
 export interface EstimateItem {
@@ -2754,6 +2770,17 @@ export const api = {
     setTimeout(() => URL.revokeObjectURL(url), 60_000);
     return name;
   },
+
+  // ---- Finance: Profit First (row 162) ----
+  getProfitFirst: () => request<ProfitFirstOverview>(`/finance/profit-first`),
+  updateProfitFirst: (body: { enabled?: boolean; startedAt?: string | null; buckets?: { key: ProfitBucket; label?: string; currentPct?: number; targetPct?: number }[] }) => request<ProfitFirstConfig>(`/finance/profit-first/config`, { method: "PATCH", body: JSON.stringify(body) }),
+  allocateProfitFirst: (body: { amount: number; date?: string | null; note?: string | null }) => request<ProfitFirstOverview>(`/finance/profit-first/allocate`, { method: "POST", body: JSON.stringify(body) }),
+  backfillProfitFirst: () => request<ProfitFirstOverview & { allocated: number }>(`/finance/profit-first/backfill`, { method: "POST" }),
+  addProfitMovement: (body: { bucket: ProfitBucket; amount: number; date?: string | null; note?: string | null; kind?: "distribution" | "adjustment"; direction?: "in" | "out" }) => request<ProfitFirstOverview>(`/finance/profit-first/movements`, { method: "POST", body: JSON.stringify(body) }),
+  deleteProfitMovement: (id: string) => request<ProfitFirstOverview>(`/finance/profit-first/movements/${id}`, { method: "DELETE" }),
+  setProfitAllocationTransferred: (groupId: string, transferred: boolean) => request<ProfitFirstOverview>(`/finance/profit-first/allocations/${groupId}/transferred`, { method: "PATCH", body: JSON.stringify({ transferred }) }),
+  deleteProfitAllocation: (groupId: string) => request<ProfitFirstOverview>(`/finance/profit-first/allocations/${groupId}`, { method: "DELETE" }),
+  transferAllProfitAllocations: () => request<ProfitFirstOverview>(`/finance/profit-first/allocations/transfer-all`, { method: "POST" }),
 
   // ---- CRM: estimates ----
   getEstimates: (opts: { companyId?: string; dealId?: string } = {}) => {

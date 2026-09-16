@@ -108,6 +108,8 @@ export const organizations = pgTable(
     quietHours: jsonb("quiet_hours").$type<{ enabled: boolean; start: string; end: string; weekends: boolean; timezone: string }>(),
     /** Row 107: how the four priority levels are named and coloured in this workspace. */
     priorityLabels: jsonb("priority_labels").$type<Partial<Record<"urgent" | "high" | "normal" | "low", { label: string; color: string }>>>(),
+    /** Row 162: Profit First percentages and whether it is on. */
+    profitFirst: jsonb("profit_first").$type<ProfitFirstConfig>(),
     ...timestamps,
   },
   (t) => [uniqueIndex("organizations_slug_uq").on(t.slug)],
@@ -3067,4 +3069,60 @@ export const expenseRulesRelations = relations(expenseRules, ({ one }) => ({
 export const expenseImportsRelations = relations(expenseImports, ({ one, many }) => ({
   createdBy: one(users, { fields: [expenseImports.createdById], references: [users.id] }),
   expenses: many(expenses),
+}));
+
+/* ------------------------------------------------------------------ *
+ * Row 162: Profit First buckets
+ * ------------------------------------------------------------------ */
+export const profitBucket = pgEnum("profit_bucket", ["profit", "owner_pay", "tax", "opex"]);
+export const profitMovementKind = pgEnum("profit_movement_kind", ["allocation", "distribution", "adjustment"]);
+
+export interface ProfitFirstConfig {
+  enabled: boolean;
+  /** Current allocation percentages (must sum to 100) and the targets you are working towards. */
+  buckets: { key: "profit" | "owner_pay" | "tax" | "opex"; label: string; currentPct: number; targetPct: number }[];
+  startedAt?: string | null;
+}
+
+/**
+ * One ledger for all four buckets. Allocations are positive and come from
+ * recorded income (one line per bucket per payment); distributions are
+ * negative (money taken out: profit distribution, tax paid, owner draw);
+ * adjustments are hand corrections either way. Balance = sum per bucket.
+ */
+export const profitMovements = pgTable(
+  "profit_movements",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    bucket: profitBucket("bucket").notNull(),
+    kind: profitMovementKind("kind").notNull().default("allocation"),
+    /** Signed: allocations +, distributions -. */
+    amount: doublePrecision("amount").notNull(),
+    /** The four lines of one income event share this (the payment id, or a fresh uuid for other income). */
+    groupId: uuid("group_id"),
+    /** The income this allocation came from. */
+    paymentId: uuid("payment_id").references(() => invoicePayments.id, { onDelete: "cascade" }),
+    invoiceId: uuid("invoice_id").references(() => invoices.id, { onDelete: "set null" }),
+    /** Total income that was split, and the percentage this line took. */
+    incomeAmount: doublePrecision("income_amount"),
+    pct: doublePrecision("pct"),
+    date: timestamp("date", { withTimezone: true }).notNull(),
+    note: text("note"),
+    /** For allocations: when the money was actually moved to the bucket's bank account. */
+    transferredAt: timestamp("transferred_at", { withTimezone: true }),
+    transferredById: uuid("transferred_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("profit_movements_org_bucket_idx").on(t.organizationId, t.bucket), index("profit_movements_payment_idx").on(t.paymentId), index("profit_movements_org_date_idx").on(t.organizationId, t.date)],
+);
+
+export const profitMovementsRelations = relations(profitMovements, ({ one }) => ({
+  payment: one(invoicePayments, { fields: [profitMovements.paymentId], references: [invoicePayments.id] }),
+  invoice: one(invoices, { fields: [profitMovements.invoiceId], references: [invoices.id] }),
+  createdBy: one(users, { fields: [profitMovements.createdById], references: [users.id] }),
+  transferredBy: one(users, { fields: [profitMovements.transferredById], references: [users.id] }),
 }));

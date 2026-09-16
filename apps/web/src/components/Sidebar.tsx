@@ -217,6 +217,7 @@ export function Sidebar() {
         <NavLink to="/finance/recurring" label="Recurring" icon={repeatIcon} />
         <NavLink to="/finance/expenses" label="Expenses" icon={expenseIcon} />
         <NavLink to="/finance/pnl" label="Profit & Loss" icon={chartIcon} />
+        <NavLink to="/finance/profit-first" label="Profit First" icon={bucketIcon} />
       </nav>
 
       {/* Productivity */}
@@ -434,6 +435,9 @@ const invoiceIcon = (
 );
 const expenseIcon = (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="6" width="18" height="13" rx="2" /><path d="M3 10h18" /><path d="M7 15h3" /></svg>
+);
+const bucketIcon = (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4 7h16l-1.5 12a2 2 0 0 1-2 1.8h-9a2 2 0 0 1-2-1.8z" /><path d="M8 7V5a4 4 0 0 1 8 0v2" /></svg>
 );
 const repeatIcon = (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M17 2l4 4-4 4" /><path d="M3 11V9a4 4 0 0 1 4-4h14" /><path d="M7 22l-4-4 4-4" /><path d="M21 13v2a4 4 0 0 1-4 4H3" /></svg>
