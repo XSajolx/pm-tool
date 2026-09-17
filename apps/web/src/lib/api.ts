@@ -1875,6 +1875,9 @@ export interface Expense {
   decidedBy: { id: string; name: string } | null;
   decisionNote: string | null;
   adjustsExpenseId: string | null;
+  /** Row 134: per-expense override (null = category default). */
+  markupPct: number | null;
+  markupNote: string | null;
   adjustments?: { id: string; amount: number; kind: "expense" | "refund"; description: string | null; createdAt: string }[];
   notes: string | null;
   source: "manual" | "import";
@@ -1912,6 +1915,17 @@ export interface ExpenseTotals {
   personalThisMonth: number;
   pendingCount: number;
   pendingAmount: number;
+}
+/** Row 134 */
+export interface ExpenseCategory {
+  name: string;
+  markupPct: number;
+  active: boolean;
+}
+export interface BillableExpense extends Expense {
+  effectiveMarkupPct: number;
+  markupSource: "override" | "category" | "none";
+  billAmount: number;
 }
 export interface ExpenseRule {
   id: string;
@@ -2968,9 +2982,14 @@ export const api = {
     if (opts.projectId) q.set("projectId", opts.projectId);
     else if (opts.companyId) q.set("companyId", opts.companyId);
     const qs = q.toString();
-    return request<Expense[]>(`/finance/expenses/billable${qs ? "?" + qs : ""}`);
+    return request<BillableExpense[]>(`/finance/expenses/billable${qs ? "?" + qs : ""}`);
   },
-  addExpensesToInvoice: (invoiceId: string, expenseIds: string[], markupPercent = 0) => request<Invoice>(`/finance/expenses/invoice/${invoiceId}`, { method: "POST", body: JSON.stringify({ expenseIds, markupPercent }) }),
+  /** markupPercent null = each expense keeps its own (override or category default). */
+  addExpensesToInvoice: (invoiceId: string, expenseIds: string[], markupPercent: number | null = null) => request<Invoice>(`/finance/expenses/invoice/${invoiceId}`, { method: "POST", body: JSON.stringify({ expenseIds, markupPercent }) }),
+  /** Row 134 */
+  getExpenseCategorySettings: () => request<ExpenseCategory[]>(`/finance/expenses/category-settings`),
+  saveExpenseCategorySettings: (categories: ExpenseCategory[]) => request<ExpenseCategory[]>(`/finance/expenses/category-settings`, { method: "PUT", body: JSON.stringify({ categories }) }),
+  setExpenseMarkup: (id: string, body: { markupPct: number | null; note?: string | null }) => request<Expense>(`/finance/expenses/${id}/markup`, { method: "PATCH", body: JSON.stringify(body) }),
   removeExpenseFromInvoice: (invoiceId: string, expenseId: string) => request<Invoice>(`/finance/expenses/invoice/${invoiceId}/${expenseId}`, { method: "DELETE" }),
 
   // ---- Finance: P&L (row 161) ----

@@ -2,7 +2,7 @@ import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundEx
 import { and, asc, desc, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
 import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
-import { companies, expenseImports, expenseRules, expenses, memberships, projects, users } from "../../db/schema.js";
+import { companies, expenseImports, expenseRules, expenses, memberships, organizations, projects, users, type ExpenseCategory } from "../../db/schema.js";
 import { ActivityService } from "../activity/activity.service.js";
 import { NotificationsService, pendingApproval } from "../notifications/notifications.service.js";
 import { parseStatement, type ParsedRow } from "./statement-csv.js";
@@ -24,8 +24,14 @@ export const CATEGORIES = [
   "Education & training",
   "Taxes & licences",
   "Salaries & benefits",
+  "Print & production",
+  "Stock assets",
   "Other",
 ] as const;
+
+/** Row 134: the built-in list with a sensible default markup each (0 unless it is something you resell). */
+const DEFAULT_MARKUP: Record<string, number> = { "Print & production": 10, "Stock assets": 15, "Contractors & freelancers": 10 };
+export const defaultCategories = (): ExpenseCategory[] => CATEGORIES.map((name) => ({ name, markupPct: DEFAULT_MARKUP[name] ?? 0, active: true }));
 
 /** Vendor hints that categorise obvious things before any user rule exists. */
 const BUILTIN_HINTS: [RegExp, string][] = [
@@ -104,8 +110,52 @@ export class ExpensesService implements OnModuleInit {
     this.notifications.registerApproval("expense", (d) => this.decide(d.orgId, { userId: d.userId, role: d.role }, d.entityId, d.approve, d.note));
   }
 
-  categories() {
-    return CATEGORIES;
+  /** Active category names — the list every dropdown uses. */
+  async categories(orgId: string) {
+    return (await this.categorySettings(orgId)).filter((c) => c.active).map((c) => c.name);
+  }
+
+  /* ---------------- row 134: categories with default markup ---------------- */
+
+  async categorySettings(orgId: string): Promise<ExpenseCategory[]> {
+    const org = await this.db.query.organizations.findFirst({ where: eq(organizations.id, orgId), columns: { expenseCategories: true } });
+    if (org?.expenseCategories?.length) return org.expenseCategories;
+    return defaultCategories();
+  }
+
+  async saveCategorySettings(orgId: string, userId: string, list: ExpenseCategory[]) {
+    const seen = new Set<string>();
+    const clean = list
+      .map((c) => ({ name: c.name.trim().slice(0, 64), markupPct: Math.min(500, Math.max(0, Number(c.markupPct) || 0)), active: c.active !== false }))
+      .filter((c) => c.name && !seen.has(c.name.toLowerCase()) && seen.add(c.name.toLowerCase()));
+    if (!clean.length) throw new BadRequestException("Keep at least one category");
+    const before = await this.categorySettings(orgId);
+    await this.db.update(organizations).set({ expenseCategories: clean, updatedAt: new Date() }).where(eq(organizations.id, orgId));
+    const changed = clean.filter((c) => {
+      const b = before.find((x) => x.name === c.name);
+      return !b || b.markupPct !== c.markupPct || b.active !== c.active;
+    });
+    await this.activity.record({ orgId, actorId: userId, entityType: "workspace", entityId: orgId, action: "expense_categories_updated", changes: changed.slice(0, 20).map((c) => ({ field: c.name, from: before.find((x) => x.name === c.name)?.markupPct ?? null, to: c.markupPct })) });
+    return clean;
+  }
+
+  /** Effective markup for an expense: its own override, else its category default, else 0. */
+  private markupFor(e: { category: string | null; markupPct: number | null }, cats: ExpenseCategory[]) {
+    if (e.markupPct != null) return { pct: e.markupPct, source: "override" as const };
+    const c = e.category ? cats.find((x) => x.name === e.category) : undefined;
+    return { pct: c?.markupPct ?? 0, source: c ? ("category" as const) : ("none" as const) };
+  }
+
+  /** A manager overrides the default markup on one expense, saying why; null goes back to the default. */
+  async setMarkup(orgId: string, actor: { userId: string; role: string }, id: string, dto: { markupPct: number | null; note?: string | null }) {
+    const e = await this.get(orgId, id);
+    if (!(await this.approverIds(orgId, e.projectId)).has(actor.userId)) throw new ForbiddenException("Only a project manager can change the markup");
+    if (e.invoiceId) throw new BadRequestException("This expense is already on an invoice");
+    if (dto.markupPct != null && !dto.note?.trim()) throw new BadRequestException("Say why this expense gets a different markup");
+    const pct = dto.markupPct == null ? null : Math.min(500, Math.max(0, dto.markupPct));
+    await this.db.update(expenses).set({ markupPct: pct, markupNote: pct == null ? null : dto.note!.trim(), updatedAt: new Date() }).where(eq(expenses.id, id));
+    await this.activity.record({ orgId, actorId: actor.userId, entityType: "expense", entityId: id, action: "markup_overridden", changes: [{ field: "markupPct", from: e.markupPct, to: pct }, ...(pct != null ? [{ field: "note", from: null, to: dto.note!.trim() }] : [])] });
+    return this.get(orgId, id);
   }
 
   /* ---------------- read ---------------- */
@@ -560,10 +610,14 @@ export class ExpensesService implements OnModuleInit {
     if (opts.projectId) f.push(eq(expenses.projectId, opts.projectId));
     else if (opts.companyId) f.push(eq(expenses.companyId, opts.companyId));
     const rows = await this.db.query.expenses.findMany({ where: and(...f), with: { project: { columns: { id: true, name: true } }, company: { columns: { id: true, name: true } }, invoice: { columns: { id: true, number: true } } }, orderBy: [asc(expenses.date)], limit: 200 });
-    return rows.map(shape);
+    const cats = await this.categorySettings(orgId);
+    return rows.map((r) => {
+      const m = this.markupFor(r, cats);
+      return { ...shape(r), effectiveMarkupPct: m.pct, markupSource: m.source, billAmount: round2(r.amount * (1 + m.pct / 100)) };
+    });
   }
 
-  async addToInvoice(orgId: string, userId: string, invoiceId: string, expenseIds: string[], markup = 0) {
+  async addToInvoice(orgId: string, userId: string, invoiceId: string, expenseIds: string[], markup: number | null = null) {
     const inv = await this.invoicesService.get(orgId, invoiceId);
     if (inv.status !== "draft") throw new BadRequestException("Expenses can only be added to a draft invoice");
     if (!expenseIds.length) throw new BadRequestException("Pick at least one expense");
@@ -573,10 +627,12 @@ export class ExpensesService implements OnModuleInit {
     if (unapproved.length) throw new BadRequestException(`${unapproved.length} of those expense${unapproved.length === 1 ? " is" : "s are"} not approved yet`);
     const already = rows.filter((r) => r.invoiceId);
     if (already.length) throw new BadRequestException(`${already.length} of these are already on an invoice`);
-    const pct = Math.min(100, Math.max(0, markup));
+    // Row 134: each expense carries its own markup (override, else category default) unless the caller forces one for all.
+    const cats = await this.categorySettings(orgId);
+    const pctOf = (r: (typeof rows)[number]) => (markup != null ? Math.min(500, Math.max(0, markup)) : this.markupFor(r, cats).pct);
     const items = [
       ...inv.items.map((i) => ({ description: i.description, quantity: i.quantity, unitPrice: i.unitPrice })),
-      ...rows.map((r) => ({ description: `Expense — ${r.vendor}${r.description ? `: ${r.description}` : ""} (${r.date.toISOString().slice(0, 10)})`, quantity: 1, unitPrice: round2(r.amount * (1 + pct / 100)) })),
+      ...rows.map((r) => ({ description: `Expense — ${r.vendor}${r.description ? `: ${r.description}` : ""} (${r.date.toISOString().slice(0, 10)})`, quantity: 1, unitPrice: round2(r.amount * (1 + pctOf(r) / 100)) })),
     ];
     await this.invoicesService.update(orgId, userId, invoiceId, { items });
     await this.db.update(expenses).set({ invoiceId, billable: true, updatedAt: new Date() }).where(inArray(expenses.id, expenseIds));
@@ -638,6 +694,8 @@ function shape(r: typeof expenses.$inferSelect & { project: { id: string; name: 
     decidedBy: r.decidedBy ? { id: r.decidedBy.id, name: r.decidedBy.name } : null,
     decisionNote: r.decisionNote,
     adjustsExpenseId: r.adjustsExpenseId,
+    markupPct: r.markupPct,
+    markupNote: r.markupNote,
     date: r.date,
     vendor: r.vendor,
     description: r.description,

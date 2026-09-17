@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UsePipes } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, UsePipes } from "@nestjs/common";
 import { z } from "zod";
 import { ZodValidationPipe } from "../../common/zod-validation.pipe.js";
 import { Auth, Roles } from "../auth/auth.decorators.js";
@@ -25,6 +25,8 @@ const expenseSchema = z.object({
 });
 const updateSchema = expenseSchema.extend({ rememberVendor: z.boolean().optional(), applyToSimilar: z.boolean().optional() });
 const decisionSchema = z.object({ note: z.string().max(2000).nullable().optional() });
+const categoriesSchema = z.object({ categories: z.array(z.object({ name: z.string().min(1).max(64), markupPct: z.number().min(0).max(500), active: z.boolean() })).max(100) });
+const markupSchema = z.object({ markupPct: z.number().min(0).max(500).nullable(), note: z.string().max(500).nullable().optional() });
 const adjustSchema = z.object({ amount: z.number().min(0), note: z.string().min(1).max(2000) });
 const ruleSchema = z.object({
   match: z.string().min(2).max(255),
@@ -56,7 +58,7 @@ const commitSchema = z.object({
     )
     .max(5000),
 });
-const addSchema = z.object({ expenseIds: z.array(z.string().uuid()).min(1).max(200), markupPercent: z.number().min(0).max(100).optional() });
+const addSchema = z.object({ expenseIds: z.array(z.string().uuid()).min(1).max(200), markupPercent: z.number().min(0).max(500).nullable().optional() });
 
 /** Row 160. Everyone logs; import, rules and billing are owner/admin. */
 @Controller("finance/expenses")
@@ -85,9 +87,22 @@ export class ExpensesController {
     return this.expenses.summary(auth.orgId);
   }
 
+  /* ---- row 134 ---- */
+  @Get("category-settings")
+  categorySettings(@Auth() auth: AuthContext) {
+    return this.expenses.categorySettings(auth.orgId);
+  }
+
+  @Put("category-settings")
+  @Roles("owner", "admin")
+  @UsePipes(new ZodValidationPipe(categoriesSchema))
+  saveCategorySettings(@Auth() auth: AuthContext, @Body() dto: z.infer<typeof categoriesSchema>) {
+    return this.expenses.saveCategorySettings(auth.orgId, auth.userId, dto.categories);
+  }
+
   @Get("categories")
-  categories() {
-    return this.expenses.categories();
+  categories(@Auth() auth: AuthContext) {
+    return this.expenses.categories(auth.orgId);
   }
 
   @Get("rules")
@@ -142,7 +157,7 @@ export class ExpensesController {
   @Roles("owner", "admin")
   @UsePipes(new ZodValidationPipe(addSchema))
   addToInvoice(@Auth() auth: AuthContext, @Param("invoiceId") invoiceId: string, @Body() dto: z.infer<typeof addSchema>) {
-    return this.expenses.addToInvoice(auth.orgId, auth.userId, invoiceId, dto.expenseIds, dto.markupPercent ?? 0);
+    return this.expenses.addToInvoice(auth.orgId, auth.userId, invoiceId, dto.expenseIds, dto.markupPercent ?? null);
   }
 
   @Delete("invoice/:invoiceId/:expenseId")
@@ -186,6 +201,12 @@ export class ExpensesController {
   @Roles("owner", "admin", "member")
   resubmit(@Auth() auth: AuthContext, @Param("id") id: string) {
     return this.expenses.resubmit(auth.orgId, auth.userId, id, auth.role === "member" ? auth.userId : undefined);
+  }
+
+  @Patch(":id/markup")
+  @UsePipes(new ZodValidationPipe(markupSchema))
+  markup(@Auth() auth: AuthContext, @Param("id") id: string, @Body() dto: z.infer<typeof markupSchema>) {
+    return this.expenses.setMarkup(auth.orgId, { userId: auth.userId, role: auth.role }, id, dto);
   }
 
   @Post(":id/adjust")

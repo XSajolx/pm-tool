@@ -32,6 +32,8 @@ export function ExpensesPage() {
   const [filter, setFilter] = useState(() => new URLSearchParams(window.location.search).get("filter") ?? "all");
   const [adjusting, setAdjusting] = useState<Expense | null>(null);
   const [rejecting, setRejecting] = useState<Expense | null>(null);
+  const [marking, setMarking] = useState<Expense | null>(null);
+  const { data: catSettings = [] } = useQuery({ queryKey: ["expense-category-settings"], queryFn: api.getExpenseCategorySettings });
   const [q, setQ] = useState("");
   const [adding, setAdding] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -122,6 +124,22 @@ export function ExpensesPage() {
                           {e.approvalStatus === "rejected" && <span className="mr-1 rounded bg-red-50 px-1 text-[10px] font-medium text-red-700" title={e.decisionNote ?? undefined}>rejected{e.decisionNote ? `: ${e.decisionNote}` : ""}</span>}
                           {approved && <span className="mr-1 rounded bg-emerald-50 px-1 text-[10px] text-emerald-700" title={`Approved by ${e.decidedBy?.name ?? "—"}${e.decisionNote ? ` · ${e.decisionNote}` : ""}`}>approved · locked</span>}
                           {e.adjustsExpenseId && <span className="mr-1 rounded bg-slate-100 px-1 text-[10px] text-slate-600">adjustment</span>}
+                          {e.billable && !e.personal && (() => {
+                            const cat = catSettings.find((c) => c.name === e.category);
+                            const pct = e.markupPct ?? cat?.markupPct ?? 0;
+                            return (
+                              <button
+                                type="button"
+                                disabled={!admin || locked}
+                                onClick={() => setMarking(e)}
+                                title={e.markupPct != null ? `Overridden by a manager: ${e.markupNote ?? ""}` : cat ? `${cat.name} default markup` : "No category markup"}
+                                className={cn("mr-1 rounded px-1 text-[10px]", e.markupPct != null ? "bg-amber-50 text-amber-800" : "bg-indigo-50 text-indigo-700", admin && !locked && "hover:ring-1 hover:ring-indigo-300")}
+                                data-testid="markup-chip"
+                              >
+                                +{pct}% markup{e.markupPct != null ? " (override)" : ""} → {fmtMoney(e.amount * (1 + pct / 100), e.currency)}
+                              </button>
+                            );
+                          })()}
                           {e.description}
                           {e.source === "import" && <span className="ml-1 rounded bg-slate-100 px-1 text-[10px]">imported{e.account ? ` · ${e.account}` : ""}</span>}
                           {e.invoice && <Link to="/finance/invoices/$invoiceId" params={{ invoiceId: e.invoice.id }} className="ml-1 rounded bg-emerald-50 px-1 text-[10px] text-emerald-700">on {e.invoice.number}</Link>}
@@ -183,6 +201,7 @@ export function ExpensesPage() {
           <button onClick={() => setRemember(null)} className="text-slate-400 hover:text-slate-700">No</button>
         </div>
       )}
+      {marking && <MarkupDialog expense={marking} categories={catSettings} onClose={() => setMarking(null)} onDone={() => { setMarking(null); refresh(); }} />}
       {rejecting && <RejectDialog expense={rejecting} onClose={() => setRejecting(null)} onDone={() => { setRejecting(null); refresh(); }} />}
       {adjusting && <AdjustDialog expense={adjusting} onClose={() => setAdjusting(null)} onDone={() => { setAdjusting(null); refresh(); }} />}
       {adding && <AddExpenseDialog categories={categories} onClose={() => setAdding(false)} onDone={() => { setAdding(false); refresh(); }} />}
@@ -199,6 +218,38 @@ function Tile({ label, value, hint, tone, onClick, active }: { label: string; va
       <p className={cn("mt-1 text-lg font-semibold tabular-nums text-slate-900", tone)}>{value}</p>
       {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
     </Cmp>
+  );
+}
+
+/** Row 134: a manager overrides the category markup on one expense, with a note. */
+function MarkupDialog({ expense, categories, onClose, onDone }: { expense: Expense; categories: { name: string; markupPct: number }[]; onClose: () => void; onDone: () => void }) {
+  useEscape(onClose);
+  const def = categories.find((c) => c.name === expense.category)?.markupPct ?? 0;
+  const [pct, setPct] = useState(String(expense.markupPct ?? def));
+  const [note, setNote] = useState(expense.markupNote ?? "");
+  const [error, setError] = useState<string | null>(null);
+  const save = useMutation({ mutationFn: (reset: boolean) => api.setExpenseMarkup(expense.id, reset ? { markupPct: null } : { markupPct: Number(pct) || 0, note: note.trim() }), onSuccess: onDone, onError: (e) => setError(errorMessage(e)) });
+  const bill = expense.amount * (1 + (Number(pct) || 0) / 100);
+  return (
+    <>
+      <div className="fixed inset-0 z-40 bg-black/20" onClick={onClose} />
+      <form onSubmit={(e) => { e.preventDefault(); if (note.trim()) save.mutate(false); }} className="fixed left-1/2 top-1/2 z-50 w-[440px] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-white p-5 shadow-xl" data-testid="markup-dialog">
+        <h2 className="text-base font-semibold text-slate-900">Markup for {expense.vendor}</h2>
+        <p className="mt-0.5 text-xs text-muted-foreground">{expense.category ? `${expense.category} defaults to +${def}%` : "No category, so the default is +0%"} (set in Settings › Expense categories). Override here for this expense only.</p>
+        <div className="mt-3 grid grid-cols-2 gap-3">
+          <CrmField label="Markup %"><input type="number" min="0" max="500" step="0.5" value={pct} onChange={(e) => setPct(e.target.value)} className={input} autoFocus /></CrmField>
+          <div className="self-end pb-1.5 text-xs text-slate-700">Bills as <b className="tabular-nums">{fmtMoney(bill, expense.currency)}</b> on {fmtMoney(expense.amount, expense.currency)}</div>
+          <div className="col-span-2"><CrmField label="Why (required)"><input value={note} onChange={(e) => setNote(e.target.value)} className={input} placeholder="Client contract caps expenses at cost / rush print / …" /></CrmField></div>
+        </div>
+        {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
+        <div className="mt-4 flex items-center gap-2">
+          {expense.markupPct != null && <button type="button" onClick={() => save.mutate(true)} className="text-xs text-slate-500 hover:text-slate-800">Back to the category default</button>}
+          <span className="flex-1" />
+          <button type="button" onClick={onClose} className="rounded-md px-3 py-1.5 text-sm text-slate-600 hover:bg-muted">Cancel</button>
+          <button type="submit" disabled={!note.trim() || save.isPending} className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50">Override</button>
+        </div>
+      </form>
+    </>
   );
 }
 

@@ -509,11 +509,14 @@ function AddExpensesDialog({ inv, onClose, onDone }: { inv: Invoice; onClose: ()
   useEscape(onClose);
   const { data: candidates = [], isLoading } = useQuery({ queryKey: ["billable-expenses", inv.project?.id, inv.company?.id], queryFn: () => api.getBillableExpenses({ projectId: inv.project?.id, companyId: inv.company?.id }) });
   const [picked, setPicked] = useState<Set<string>>(new Set());
-  const [markup, setMarkup] = useState("0");
+  const [markup, setMarkup] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const add = useMutation({ mutationFn: () => api.addExpensesToInvoice(inv.id, [...picked], Number(markup) || 0), onSuccess: onDone, onError: (e) => setError((e as Error).message.replace(/^API \d+: /, "")) });
+  const override = markup.trim() === "" ? null : Number(markup) || 0;
+  const add = useMutation({ mutationFn: () => api.addExpensesToInvoice(inv.id, [...picked], override), onSuccess: onDone, onError: (e) => setError((e as Error).message.replace(/^API \d+: /, "")) });
   const toggle = (id: string) => setPicked((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
-  const total = candidates.filter((e) => picked.has(e.id)).reduce((a, e) => a + e.amount, 0) * (1 + (Number(markup) || 0) / 100);
+  // Row 134: each expense brings its own markup (override or category default) unless one is forced for all.
+  const billOf = (e: (typeof candidates)[number]) => (override == null ? e.billAmount : e.amount * (1 + override / 100));
+  const total = candidates.filter((e) => picked.has(e.id)).reduce((a, e) => a + billOf(e), 0);
   return (
     <>
       <div className="fixed inset-0 z-40 bg-black/20" onClick={onClose} />
@@ -526,12 +529,16 @@ function AddExpensesDialog({ inv, onClose, onDone }: { inv: Invoice; onClose: ()
               <input type="checkbox" checked={picked.has(e.id)} onChange={() => toggle(e.id)} />
               <span className="w-14 text-muted-foreground">{fmtShortDate(e.date)}</span>
               <span className="min-w-0 flex-1 truncate"><b className="text-slate-800">{e.vendor}</b>{e.description ? <span className="text-muted-foreground"> · {e.description}</span> : null}</span>
-              <span className="tabular-nums text-slate-800">{fmtMoney(e.amount, e.currency)}</span>
+              <span className="tabular-nums text-muted-foreground">{fmtMoney(e.amount, e.currency)}</span>
+              <span className={cn("w-16 text-right text-[10px]", e.markupSource === "override" ? "text-amber-700" : "text-muted-foreground")} title={e.markupSource === "override" ? `Overridden: ${e.markupNote ?? ""}` : e.markupSource === "category" ? `${e.category} default` : "no category markup"}>
+                {override == null ? `+${e.effectiveMarkupPct}%${e.markupSource === "override" ? "*" : ""}` : `+${override}%`}
+              </span>
+              <span className="w-20 text-right tabular-nums text-slate-800">{fmtMoney(billOf(e), e.currency)}</span>
             </label>
           )) : <p className="p-3 text-xs text-muted-foreground">Nothing billable and unbilled here. Mark expenses as billable on the Expenses page.</p>}
         </div>
         <div className="mt-3 flex items-center gap-3 text-xs">
-          <label className="flex items-center gap-2 text-slate-700">Markup <input type="number" min="0" max="100" value={markup} onChange={(e) => setMarkup(e.target.value)} className="w-16 rounded border border-border px-1.5 py-0.5" /> %</label>
+          <label className="flex items-center gap-2 text-slate-700" title="Leave blank to use each expense's own markup (category default or manager override)">Override all <input type="number" min="0" max="500" value={markup} onChange={(e) => setMarkup(e.target.value)} placeholder="own" className="w-16 rounded border border-border px-1.5 py-0.5" /> %</label>
           <span className="ml-auto text-slate-700">{picked.size} selected · adds {fmtMoney(total, inv.currency)}</span>
         </div>
         {error && <p className="mt-2 text-xs text-red-600">{error}</p>}

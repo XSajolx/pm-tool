@@ -114,6 +114,8 @@ export const organizations = pgTable(
     taxSettings: jsonb("tax_settings").$type<TaxSettings>(),
     /** Row 131 */
     accounting: jsonb("accounting").$type<AccountingSettings>(),
+    /** Row 134: expense categories with a default re-billing markup each. */
+    expenseCategories: jsonb("expense_categories").$type<ExpenseCategory[]>(),
     ...timestamps,
   },
   (t) => [uniqueIndex("organizations_slug_uq").on(t.slug)],
@@ -2986,6 +2988,13 @@ export const contractEventsRelations = relations(contractEvents, ({ one }) => ({
  * ------------------------------------------------------------------ */
 export const expenseKind = pgEnum("expense_kind", ["expense", "refund"]);
 export const expenseSource = pgEnum("expense_source", ["manual", "import"]);
+/** Row 134 */
+export interface ExpenseCategory {
+  name: string;
+  /** Default markup when the expense is re-billed; a manager can override per expense with a note. */
+  markupPct: number;
+  active: boolean;
+}
 /** Row 133: members' expenses wait in a queue; only approved costs reach an invoice. */
 export const expenseApproval = pgEnum("expense_approval", ["pending", "approved", "rejected"]);
 
@@ -3043,6 +3052,9 @@ export const expenses = pgTable(
     decisionNote: text("decision_note"),
     /** An approved expense is locked; a correction is a new row pointing back at it. */
     adjustsExpenseId: uuid("adjusts_expense_id").references((): AnyPgColumn => expenses.id, { onDelete: "set null" }),
+    /** Row 134: null = use the category default. Set only by a manager, with a note. */
+    markupPct: doublePrecision("markup_pct"),
+    markupNote: text("markup_note"),
     source: expenseSource("source").notNull().default("manual"),
     importId: uuid("import_id").references(() => expenseImports.id, { onDelete: "set null" }),
     account: varchar("account", { length: 120 }),

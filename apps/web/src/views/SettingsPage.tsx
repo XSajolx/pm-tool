@@ -17,13 +17,14 @@ import { CustomFieldSettings } from "../components/CustomFieldSettings.js";
 import { AuditLogSettings } from "../components/AuditLogSettings.js";
 import { DataExportSettings } from "../components/DataExportSettings.js";
 import { ClickUpImportSettings } from "../components/ClickUpImportSettings.js";
+import { ExpenseCategorySettings } from "../components/ExpenseCategorySettings.js";
 import type { Priority } from "../lib/api.js";
 
 /**
  * Workspace settings. Sections are added as the roadmap lands; each one is a
  * self-contained panel that owns its own queries.
  */
-type Section = "people" | "workhours" | "notifications" | "connections" | "fields" | "audit" | "export" | "import" | "timecodes" | "statuses" | "priorities" | "stages" | "tags" | "templates" | "dealstages" | "proposals" | "snippets" | "branding" | "dockit" | "sso" | "security";
+type Section = "expensecats" | "people" | "workhours" | "notifications" | "connections" | "fields" | "audit" | "export" | "import" | "timecodes" | "statuses" | "priorities" | "stages" | "tags" | "templates" | "dealstages" | "proposals" | "snippets" | "branding" | "dockit" | "sso" | "security";
 
 const SECTIONS: { id: Section; label: string; hint: string }[] = [
   { id: "people", label: "People & roles", hint: "Who's in the workspace and what each role can do" },
@@ -32,6 +33,7 @@ const SECTIONS: { id: Section; label: string; hint: string }[] = [
   { id: "notifications", label: "Notifications", hint: "Defaults for new members, and workspace quiet hours" },
   { id: "connections", label: "Connections & health", hint: "Drive, Dropbox, email: connected, needs reconnect or failing" },
   { id: "timecodes", label: "Time codes & reminders", hint: "Internal codes, and when to nudge unfinished timesheets" },
+  { id: "expensecats", label: "Expense categories", hint: "Categories and the default markup when re-billed" },
   { id: "priorities", label: "Priorities", hint: "The four priority levels" },
   { id: "stages", label: "Stage templates", hint: "Default stage sequences for new projects" },
   { id: "tags", label: "Tags", hint: "Workspace tags: rename, recolour, merge, retire" },
@@ -89,6 +91,7 @@ export function SettingsPage() {
           {section === "connections" && <ConnectionsSettings canEdit={canEdit} />}
           {section === "fields" && <CustomFieldSettings canEdit={canEdit} />}
           {section === "timecodes" && <TimeCodeSettings canEdit={canEdit} />}
+          {section === "expensecats" && <ExpenseCategorySettings canEdit={canEdit} />}
           {section === "priorities" && <PrioritySettings canEdit={canEdit} />}
           {section === "stages" && <StageTemplateSettings canEdit={canEdit} />}
           {section === "tags" && <TagSettings canEdit={canEdit} />}
