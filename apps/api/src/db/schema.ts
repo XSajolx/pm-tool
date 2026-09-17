@@ -13,7 +13,7 @@
  * shard by `organization_id`.
  */
 import { AnyPgColumn, boolean, doublePrecision, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid, varchar } from "drizzle-orm/pg-core";
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 
 /* ------------------------------------------------------------------ *
  * Enums
@@ -1174,12 +1174,14 @@ export const allocations = pgTable(
     /** Monday 00:00 UTC of the week. Always normalised by the service. */
     weekStart: timestamp("week_start", { withTimezone: true }).notNull(),
     hours: doublePrecision("hours").notNull(),
+    /** Row 147: planned against a project stage (null = the project as a whole). */
+    stageId: uuid("stage_id").references((): AnyPgColumn => projectStages.id, { onDelete: "set null" }),
     note: text("note"),
     createdById: uuid("created_by_id").references(() => users.id),
     ...timestamps,
   },
   (t) => [
-    uniqueIndex("allocations_user_project_week_uq").on(t.userId, t.projectId, t.weekStart),
+    uniqueIndex("allocations_user_project_stage_week_uq").on(t.userId, t.projectId, t.weekStart, sql`coalesce(${t.stageId}, '00000000-0000-0000-0000-000000000000'::uuid)`),
     index("allocations_org_week_idx").on(t.organizationId, t.weekStart),
   ],
 );

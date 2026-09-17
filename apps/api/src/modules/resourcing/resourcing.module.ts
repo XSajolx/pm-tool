@@ -2,9 +2,10 @@ import { Module } from "@nestjs/common";
 import { ResourcingController } from "./resourcing.controller.js";
 import { ResourcingService } from "./resourcing.service.js";
 import { TimeModule } from "../time/time.module.js";
+import { NotificationsModule } from "../notifications/notifications.module.js";
 
 @Module({
-  imports: [TimeModule],
+  imports: [TimeModule, NotificationsModule],
   controllers: [ResourcingController],
   providers: [ResourcingService],
 })

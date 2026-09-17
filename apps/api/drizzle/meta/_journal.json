@@ -617,6 +617,13 @@
       "when": 1789607846349,
       "tag": "0087_freezing_paibok",
       "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "7",
+      "when": 1789608913129,
+      "tag": "0088_curly_marten_broadcloak",
+      "breakpoints": true
     }
   ]
 }

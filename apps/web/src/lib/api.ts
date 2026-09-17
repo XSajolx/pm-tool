@@ -1262,14 +1262,29 @@ export interface ProjectTimeSummary {
 export interface ResourcingCell {
   weekStart: string;
   allocated: number;
+  /** Row 147: capacity − holidays − approved leave for that week. */
+  available: number;
   logged: number;
   utilization: number;
+  /** Row 148: planned past what the person has. */
+  over: boolean;
   byProject: Record<string, number>;
+  /** projectId → stageId ('' = no stage) → hours */
+  byStage: Record<string, Record<string, number>>;
+  loggedByProject: Record<string, number>;
+  loggedByStage: Record<string, Record<string, number>>;
+}
+
+export interface PlanVsLogged {
+  project: { id: string; name: string; color: string };
+  weeks: string[];
+  rows: { userId: string; name: string; stageId: string; stage: string; planned: number; logged: number; weeks: { weekStart: string; planned: number; logged: number }[] }[];
+  byStage: { id: string; name: string; planned: number; logged: number }[];
 }
 
 export interface ResourcingBoard {
   weeks: string[];
-  projects: { id: string; name: string; color: string }[];
+  projects: { id: string; name: string; color: string; stages: { id: string; name: string; status: StageStatus }[] }[];
   members: {
     userId: string;
     name: string;
@@ -3007,13 +3022,19 @@ export const api = {
     request<ProjectTimeSummary>(`/time/summary/${projectId}`),
 
   // ---- Resourcing ----
-  getResourcing: (from?: string, weeks = 8) => {
+  getPlanVsLogged: (projectId: string, from?: string, weeks = 12) => {
+    const q = new URLSearchParams();
+    if (from) q.set("from", from);
+    q.set("weeks", String(weeks));
+    return request<PlanVsLogged>(`/resourcing/plan-vs-logged/${projectId}?${q.toString()}`);
+  },
+  getResourcing: (from?: string, weeks = 12) => {
     const q = new URLSearchParams();
     if (from) q.set("from", from);
     q.set("weeks", String(weeks));
     return request<ResourcingBoard>(`/resourcing?${q.toString()}`);
   },
-  setAllocation: (body: { userId: string; projectId: string; weekStart: string; hours: number; note?: string }) =>
+  setAllocation: (body: { userId: string; projectId: string; stageId?: string | null; weekStart: string; hours: number; note?: string }) =>
     request<{ ok: boolean }>(`/resourcing/allocations`, { method: "PUT", body: JSON.stringify(body) }),
   setCapacity: (userId: string, hours: number) =>
     request<{ userId: string; weeklyCapacityHours: number }>(`/resourcing/capacity/${userId}`, {

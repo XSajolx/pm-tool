@@ -8,6 +8,7 @@ import type { AuthContext } from "../auth/auth.types.js";
 const allocationSchema = z.object({
   userId: z.string().uuid(),
   projectId: z.string().uuid(),
+  stageId: z.string().uuid().nullable().optional(),
   /** Any date inside the target week. */
   weekStart: z.string().min(8),
   hours: z.number().min(0).max(168),
@@ -30,8 +31,14 @@ export class ResourcingController {
     return this.resourcing.board(
       auth.orgId,
       from ?? new Date().toISOString(),
-      weeks ? Number(weeks) : 8,
+      weeks ? Number(weeks) : 12,
     );
+  }
+
+  /** Row 149: one project's planned vs logged hours per person and stage. */
+  @Get("plan-vs-logged/:projectId")
+  planVsLogged(@Auth() auth: AuthContext, @Param("projectId") projectId: string, @Query("from") from?: string, @Query("weeks") weeks?: string) {
+    return this.resourcing.projectPlanVsLogged(auth.orgId, projectId, from ?? new Date().toISOString(), weeks ? Number(weeks) : 12);
   }
 
   @Get("allocations")
@@ -45,7 +52,7 @@ export class ResourcingController {
       auth.orgId,
       userIds ? userIds.split(",").filter(Boolean) : [],
       from ?? new Date().toISOString(),
-      weeks ? Number(weeks) : 8,
+      weeks ? Number(weeks) : 12,
     );
   }
 
