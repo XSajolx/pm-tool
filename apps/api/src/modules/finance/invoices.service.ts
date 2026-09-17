@@ -17,6 +17,9 @@ export interface InvoiceItemDto {
   description: string;
   quantity: number;
   unitPrice: number;
+  /** Row 137 */
+  stageId?: string | null;
+  billedPct?: number | null;
 }
 
 export interface InvoiceDto {
@@ -256,7 +259,7 @@ export class InvoicesService {
     if (before.status !== "draft") throw new BadRequestException("Only draft invoices can be edited — move it back to draft first");
     await this.assertLinks(orgId, dto);
 
-    const items = dto.items ?? before.items.map((i) => ({ description: i.description, quantity: i.quantity, unitPrice: i.unitPrice }));
+    const items = dto.items ?? before.items.map((i) => ({ description: i.description, quantity: i.quantity, unitPrice: i.unitPrice, stageId: i.stageId, billedPct: i.billedPct }));
     const taxRate = dto.taxRate ?? before.taxRate;
     const discountPercent = dto.discountPercent ?? before.discountPercent;
     const totals = computeTotals(items, discountPercent, taxRate);
@@ -543,11 +546,11 @@ export function computeTotals(items: InvoiceItemDto[], discountPercent: number, 
 }
 
 function itemRows(orgId: string, invoiceId: string, items: InvoiceItemDto[]) {
-  return items.map((i, idx) => ({ organizationId: orgId, invoiceId, description: i.description, quantity: i.quantity, unitPrice: i.unitPrice, amount: round2(i.quantity * i.unitPrice), position: idx + 1 }));
+  return items.map((i, idx) => ({ organizationId: orgId, invoiceId, description: i.description, quantity: i.quantity, unitPrice: i.unitPrice, amount: round2(i.quantity * i.unitPrice), position: idx + 1, stageId: i.stageId ?? null, billedPct: i.billedPct ?? null }));
 }
 
 function shapeItem(i: typeof invoiceItems.$inferSelect) {
-  return { id: i.id, description: i.description, quantity: i.quantity, unitPrice: i.unitPrice, amount: i.amount };
+  return { id: i.id, description: i.description, quantity: i.quantity, unitPrice: i.unitPrice, amount: i.amount, stageId: i.stageId, billedPct: i.billedPct };
 }
 
 function shape(

@@ -11,6 +11,8 @@ const orderSchema = z.object({ ids: z.array(z.string().uuid()).min(1) });
 const applySchema = z.object({ templateId: z.string().uuid() });
 const stagePatchSchema = z.object({
   name: z.string().min(1).max(120).optional(),
+  /** Row 137 */
+  feeAmount: z.number().min(0).nullable().optional(),
   status: z.enum(["not_started", "active", "completed"]).optional(),
   /** Required when reopening a completed stage. */
   note: z.string().max(500).optional(),

@@ -10,6 +10,7 @@ import { NotFound } from "../components/NotFound.js";
 import { ProjectTeam } from "../components/ProjectTeam.js";
 import { ProjectContractors } from "../components/ProjectContractors.js";
 import { UnbilledWorkDialog } from "../components/UnbilledWorkDialog.js";
+import { ProgressInvoiceDialog } from "../components/ProgressInvoiceDialog.js";
 import { DocsTab } from "../components/DocsTab.js";
 import { MuteButton } from "../components/MuteButton.js";
 import { FollowButton } from "../components/FollowButton.js";
@@ -30,6 +31,7 @@ export function ProjectPage() {
   const { role, user } = useAuth();
   const isAdmin = role === "owner" || role === "admin";
   const [billing, setBilling] = useState(false); // row 136
+  const [progressing, setProgressing] = useState(false); // row 137
 
   const { data: project, isError } = useQuery({
     queryKey: ["project", projectId],
@@ -159,6 +161,11 @@ export function ProjectPage() {
             </button>
           )}
           {canManage && (
+            <button type="button" onClick={() => setProgressing(true)} className="rounded-full border border-border bg-white px-2.5 py-1 text-slate-700 hover:border-indigo-300 hover:text-indigo-700" title="Fixed-fee invoice from each stage's % complete (row 137)">
+              📈 Progress invoice
+            </button>
+          )}
+          {canManage && (
             <Link to="/portal/preview/$projectId" params={{ projectId: project.id }} className="rounded-full border border-border bg-white px-2.5 py-1 text-slate-700 hover:border-indigo-300 hover:text-indigo-700" title="See exactly what a client guest sees (row 118)">
               👁 Preview as client
             </Link>
@@ -234,6 +241,7 @@ export function ProjectPage() {
         {/* Row 135 */}
         <ProjectContractors projectId={project.id} canManage={canManage} />
         {billing && <UnbilledWorkDialog projectId={project.id} onClose={() => setBilling(false)} />}
+        {progressing && <ProgressInvoiceDialog projectId={project.id} onClose={() => setProgressing(false)} />}
         <ProjectStages projectId={project.id} canManage={canManage} />
         <ProjectMilestones projectId={project.id} canManage={canManage} startDate={project.startDate} endDate={project.endDate} />
         {canManage && <ApplyTemplate projectId={project.id} />}
@@ -543,6 +551,7 @@ function ProjectStages({ projectId, canManage }: { projectId: string; canManage:
                 <p className="text-[10px] text-muted-foreground" title="Task counts are context only - they never drive the percent">
                   Tasks {st.progress.done}/{st.progress.total}{st.progress.total ? ` (${pct}% ticked)` : ""}
                 </p>
+                {st.feeAmount != null && <p className="text-[10px] text-slate-600" title="Fixed fee billed by % complete (row 137)">Fee {fmtMoney(st.feeAmount)} · earned {fmtMoney(st.feeAmount * (st.progressPct / 100))}</p>}
                 <p className="text-[10px] text-muted-foreground">
                   {st.startedAt ? `Started ${fmtShortDate(st.startedAt)}` : "Not started"}
                   {st.completedAt ? ` · Done ${fmtShortDate(st.completedAt)}` : ""}

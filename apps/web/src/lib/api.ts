@@ -769,6 +769,8 @@ export interface Stage {
   progressSetAt: string | null;
   progressSetBy: { id: string; name: string } | null;
   progressNote: string | null;
+  /** Row 137: fixed fee for the stage. */
+  feeAmount: number | null;
 }
 export interface StageProgressEvent {
   id: string;
@@ -1503,6 +1505,9 @@ export interface InvoiceItem {
   quantity: number;
   unitPrice: number;
   amount?: number;
+  /** Row 137 */
+  stageId?: string | null;
+  billedPct?: number | null;
 }
 
 export interface InvoicePayment {
@@ -1999,6 +2004,26 @@ export interface ContractorDetail extends Omit<Contractor, "invoiced" | "unpaid"
 export interface ProjectContractors {
   engagements: (ContractorEngagement & { contractor: Omit<Contractor, "invoiced" | "unpaid" | "invoiceCount" | "projectCount">; invoiced: number; unpaid: number; billable: number; invoices: ContractorInvoice[] })[];
   totals: { invoiced: number; unpaid: number; billable: number; pendingApproval: number; currency: string; categoryMarkupPct: number };
+}
+// ---- Row 137: progress billing ----
+export interface ProgressBilling {
+  project: { id: string; name: string; currency: string; budgetAmount: number | null };
+  stages: {
+    id: string;
+    index: number;
+    name: string;
+    status: StageStatus;
+    progressPct: number;
+    progressSetAt: string | null;
+    feeAmount: number | null;
+    earned: number;
+    billed: number;
+    billedPct: number;
+    due: number;
+    overBilled: number;
+    invoices: { id: string; number: string; status: InvoiceStatus; amount: number }[];
+  }[];
+  totals: { fee: number; earned: number; billed: number; due: number; feesMissing: number };
 }
 // ---- Row 136: unbilled work ----
 export type UnbilledGroupBy = "person" | "task" | "single";
@@ -2665,7 +2690,7 @@ export const api = {
     request<Stage[]>(`/projects/${projectId}/stages/order`, { method: "PUT", body: JSON.stringify({ ids }) }),
   applyStageTemplate: (projectId: string, templateId: string) =>
     request<Stage[]>(`/projects/${projectId}/stages/apply-template`, { method: "POST", body: JSON.stringify({ templateId }) }),
-  updateStage: (id: string, body: { name?: string; status?: StageStatus; note?: string }) =>
+  updateStage: (id: string, body: { name?: string; status?: StageStatus; note?: string; feeAmount?: number | null }) =>
     request<Stage>(`/stages/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteStage: (id: string) => request<{ id: string }>(`/stages/${id}`, { method: "DELETE" }),
   /** Row 105 */
@@ -3107,6 +3132,9 @@ export const api = {
   },
   /** markupPercent null = each expense keeps its own (override or category default). */
   addExpensesToInvoice: (invoiceId: string, expenseIds: string[], markupPercent: number | null = null) => request<Invoice>(`/finance/expenses/invoice/${invoiceId}`, { method: "POST", body: JSON.stringify({ expenseIds, markupPercent }) }),
+  /** Row 137 */
+  getProgressBilling: (projectId: string) => request<ProgressBilling>(`/finance/progress/${projectId}`),
+  draftProgressInvoice: (body: { projectId: string; stageIds?: string[] | null; title?: string | null }) => request<Invoice>(`/finance/progress/draft`, { method: "POST", body: JSON.stringify(body) }),
   /** Row 136 */
   getUnbilled: (projectId: string, opts: { through?: string; onlyApproved?: boolean } = {}) => {
     const q = new URLSearchParams();

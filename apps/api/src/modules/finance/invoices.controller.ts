@@ -10,6 +10,8 @@ const itemSchema = z.object({
   description: z.string().min(1).max(2000),
   quantity: z.number().nonnegative(),
   unitPrice: z.number(),
+  stageId: z.string().uuid().nullable().optional(),
+  billedPct: z.number().int().min(0).max(100).nullable().optional(),
 });
 
 const writeSchema = z.object({

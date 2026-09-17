@@ -1250,6 +1250,8 @@ export const projectStages = pgTable(
     progressSetById: uuid("progress_set_by_id").references(() => users.id, { onDelete: "set null" }),
     progressSetAt: timestamp("progress_set_at", { withTimezone: true }),
     progressNote: text("progress_note"),
+    /** Row 137: the fixed fee the client pays for this stage; progress invoices bill fee × % complete − already billed. */
+    feeAmount: doublePrecision("fee_amount"),
     ...timestamps,
   },
   (t) => [index("project_stages_project_idx").on(t.projectId)],
@@ -2693,8 +2695,11 @@ export const invoiceItems = pgTable(
     unitPrice: doublePrecision("unit_price").notNull().default(0),
     amount: doublePrecision("amount").notNull().default(0),
     position: doublePrecision("position").notNull().default(0),
+    /** Row 137: a progress-billing line remembers the stage and the % it billed up to. */
+    stageId: uuid("stage_id").references((): AnyPgColumn => projectStages.id, { onDelete: "set null" }),
+    billedPct: integer("billed_pct"),
   },
-  (t) => [index("invoice_items_invoice_idx").on(t.invoiceId)],
+  (t) => [index("invoice_items_invoice_idx").on(t.invoiceId), index("invoice_items_stage_idx").on(t.stageId)],
 );
 
 /** Money received against an invoice. Several partial payments add up; overpayment is refused. */
