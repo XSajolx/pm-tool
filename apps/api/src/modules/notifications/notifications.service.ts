@@ -55,7 +55,7 @@ export type MutableEntity = "task" | "document" | "project";
  * domain service that registered the kind (docs, milestones, timesheets),
  * then every pending card for that entity flips to the outcome.
  */
-export type ApprovalKind = "doc_review" | "milestone" | "timesheet" | "leave" | "expense" | "invoice_review";
+export type ApprovalKind = "doc_review" | "milestone" | "timesheet" | "leave" | "expense" | "invoice_review" | "invoice_issue";
 export interface ApprovalMeta {
   kind: ApprovalKind;
   status: "pending" | "approved" | "rejected";

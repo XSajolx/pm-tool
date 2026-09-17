@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Link, useParams } from "@tanstack/react-router";
+import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type Invoice, type InvoiceItem, type PaymentMethod } from "../lib/api.js";
 import { fmtMoney, fmtShortDate, isoDay } from "../lib/format.js";
@@ -7,7 +7,7 @@ import { useAuth } from "../lib/auth.js";
 import { useEscape } from "../lib/useEscape.js";
 import { NotFound } from "../components/NotFound.js";
 import { CrmField, input } from "./CompaniesPage.js";
-import { InvoiceChip } from "./InvoicesPage.js";
+import { INVOICE_STATUS, InvoiceChip } from "./InvoicesPage.js";
 import { NewScheduleDialog } from "./SchedulesPage.js";
 import { AccountingChip } from "./AccountingPage.js";
 import { cn } from "../lib/utils.js";
@@ -34,6 +34,7 @@ const METHODS: { key: PaymentMethod; label: string }[] = [
 export function InvoicePage() {
   const { invoiceId } = useParams({ from: "/finance/invoices/$invoiceId" });
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const { role } = useAuth();
   const admin = role === "owner" || role === "admin";
   const { data: inv, isError } = useQuery({ queryKey: ["invoice", invoiceId], queryFn: () => api.getInvoice(invoiceId) });
@@ -58,6 +59,10 @@ export function InvoicePage() {
   const [shareOpen, setShareOpen] = useState(false);
   const [recurring, setRecurring] = useState(false);
   const [addingExpenses, setAddingExpenses] = useState(false);
+  const [revising, setRevising] = useState(false); // row 139
+  const [returning, setReturning] = useState(false);
+  const { data: versions = [] } = useQuery({ queryKey: ["invoice-versions", invoiceId], queryFn: () => api.getInvoiceVersions(invoiceId) });
+  const { data: invoicing } = useQuery({ queryKey: ["invoicing-settings"], queryFn: api.getInvoicingSettings });
 
   const { data: contacts = [] } = useQuery({ queryKey: ["contacts", "company", companyId], queryFn: () => api.getContacts({ companyId }), enabled: Boolean(companyId) });
 
@@ -111,12 +116,27 @@ export function InvoicePage() {
   const doVoid = useMutation({ mutationFn: (reason: string) => api.voidInvoice(invoiceId, reason), onSuccess: () => { ok(); setVoiding(false); }, onError: fail });
   const unpay = useMutation({ mutationFn: (pid: string) => api.removeInvoicePayment(invoiceId, pid), onSuccess: ok, onError: fail });
   const pdf = useMutation({ mutationFn: () => api.openInvoicePdf(invoiceId), onError: fail });
+  // Row 139
+  const submit = useMutation({ mutationFn: () => api.submitInvoice(invoiceId), onSuccess: ok, onError: fail });
+  const doReturn = useMutation({ mutationFn: (note: string) => api.returnInvoice(invoiceId, note), onSuccess: () => { ok(); setReturning(false); }, onError: fail });
+  const revise = useMutation({
+    mutationFn: (reason: string) => api.reviseInvoice(invoiceId, reason),
+    onSuccess: (v2) => {
+      ok();
+      setRevising(false);
+      void navigate({ to: "/finance/invoices/$invoiceId", params: { invoiceId: v2.id } });
+    },
+    onError: fail,
+  });
 
   if (isError) return <NotFound what="invoice" />;
   if (!inv) return <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">Loading…</div>;
 
   const editable = inv.status === "draft";
   const open = inv.status === "sent" || inv.status === "viewed" || inv.status === "partially_paid";
+  const issued = open || inv.status === "paid";
+  const inReview = inv.status === "review";
+  const mustReview = Boolean(invoicing?.requireReview);
   const subtotal = items.reduce((a, i) => a + i.quantity * i.unitPrice, 0);
   const discountAmt = subtotal * ((Number(discount) || 0) / 100);
   const tax = (subtotal - discountAmt) * ((Number(taxRate) || 0) / 100);
@@ -138,8 +158,9 @@ export function InvoicePage() {
       <div className="flex flex-wrap items-center gap-3 border-b border-border px-6 py-3">
         <Link to="/finance/invoices" className="text-sm text-muted-foreground hover:text-slate-700">Invoices</Link>
         <span className="text-muted-foreground">/</span>
-        <h1 className="text-sm font-semibold text-slate-800">{inv.number}</h1>
+        <h1 className="text-sm font-semibold text-slate-800">{inv.number}{inv.version > 1 && <span className="ml-1 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600" title={inv.revisionReason ?? undefined}>v{inv.version}</span>}</h1>
         <InvoiceChip inv={inv} />
+        {inReview && <span className="text-xs text-amber-800">waiting for an admin to issue{inv.submittedForReviewAt ? ` · since ${fmtShortDate(inv.submittedForReviewAt)}` : ""}</span>}
         {inv.sentAt && <span className="text-xs text-muted-foreground">sent {fmtShortDate(inv.sentAt)}</span>}
         {inv.viewedAt && <span className="text-xs text-indigo-700">viewed {fmtShortDate(inv.viewedAt)} ({inv.viewCount}×)</span>}
         {inv.paidAt && <span className="text-xs text-emerald-700">paid {fmtShortDate(inv.paidAt)}</span>}
@@ -160,11 +181,25 @@ export function InvoicePage() {
               {save.isPending ? "Saving…" : dirty ? "Save changes" : "Saved"}
             </button>
           )}
-          {editable && admin && (
+          {editable && (!admin || mustReview) && (
+            <button onClick={() => submit.mutate()} disabled={dirty || submit.isPending || !items.length} title={dirty ? "Save first" : "Hand it to an admin to issue"} className={`${btn} bg-indigo-600 text-white hover:bg-indigo-700`} data-testid="submit-review">
+              {submit.isPending ? "Submitting…" : "Submit for review"}
+            </button>
+          )}
+          {editable && admin && !mustReview && (
             <button onClick={() => send.mutate()} disabled={dirty || send.isPending || !items.length} title={dirty ? "Save first" : undefined} className={`${btn} bg-indigo-600 text-white hover:bg-indigo-700`}>
               {send.isPending ? "Sending…" : "Send"}
             </button>
           )}
+          {inReview && admin && (
+            <>
+              <button onClick={() => setReturning(true)} className={ghost}>Return to draft</button>
+              <button onClick={() => send.mutate()} disabled={send.isPending} className={`${btn} bg-indigo-600 text-white hover:bg-indigo-700`} data-testid="issue">
+                {send.isPending ? "Issuing…" : "Issue & send"}
+              </button>
+            </>
+          )}
+          {issued && admin && !inv.supersededById && <button onClick={() => setRevising(true)} className={ghost} title="Issued invoices never change - a revision becomes the next version">Revise…</button>}
           {open && admin && <button onClick={() => setPaying(true)} className={`${btn} bg-emerald-600 text-white hover:bg-emerald-700`}>Record payment</button>}
           {open && admin && inv.amountPaid === 0 && <button onClick={() => reopen.mutate()} disabled={reopen.isPending} className="text-sm text-slate-500 hover:text-slate-700">Back to draft</button>}
           {(open || editable) && admin && inv.amountPaid === 0 && <button onClick={() => setVoiding(true)} className="text-sm text-slate-500 hover:text-red-700">Void</button>}
@@ -172,6 +207,16 @@ export function InvoicePage() {
         </div>
       </div>
 
+      {inv.status === "superseded" && (
+        <div className="mx-6 mt-4 rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700" data-testid="superseded-banner">
+          This is version {inv.version}, kept for the record. It was replaced{inv.supersededById ? <> by <Link to="/finance/invoices/$invoiceId" params={{ invoiceId: inv.supersededById }} className="font-medium text-indigo-700 hover:underline">the next version</Link></> : ""}.
+        </div>
+      )}
+      {inv.revisionReason && inv.status !== "superseded" && (
+        <div className="mx-6 mt-4 rounded-md border border-amber-200 bg-amber-50/60 px-4 py-2 text-xs text-slate-700">
+          Version {inv.version}: <b>{inv.revisionReason}</b>{inv.revisionOfId && <> · <Link to="/finance/invoices/$invoiceId" params={{ invoiceId: inv.revisionOfId }} className="text-indigo-700 hover:underline">see version {inv.version - 1}</Link></>}
+        </div>
+      )}
       {error && (
         <div className="flex items-center gap-3 border-b border-red-200 bg-red-50 px-6 py-2 text-xs text-red-700">
           <span>{error}</span>
@@ -310,6 +355,20 @@ export function InvoicePage() {
                 {inv.company && <div className="flex justify-between"><dt>Client</dt><dd><Link to="/crm/companies/$companyId" params={{ companyId: inv.company.id }} className="text-indigo-600 hover:underline">{inv.company.name}</Link></dd></div>}
                 {inv.project && <div className="flex justify-between"><dt>Project</dt><dd><Link to="/projects/$projectId" params={{ projectId: inv.project.id }} className="text-indigo-600 hover:underline">{inv.project.name}</Link></dd></div>}
               </dl>
+              {versions.length > 1 && (
+                <div className="mt-3 border-t border-border pt-2" data-testid="versions">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Versions</p>
+                  <ul className="mt-1 space-y-0.5">
+                    {versions.map((v) => (
+                      <li key={v.id} className="flex items-center gap-2">
+                        {v.current ? <span className="font-medium text-slate-800">v{v.version}</span> : <Link to="/finance/invoices/$invoiceId" params={{ invoiceId: v.id }} className="text-indigo-600 hover:underline">v{v.version}</Link>}
+                        <span>{INVOICE_STATUS[v.status]?.label ?? v.status}</span>
+                        <span className="ml-auto tabular-nums">{fmtMoney(v.total, inv.currency)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </section>
 
             {admin && inv.status !== "draft" && <AccountingCard inv={inv} />}
@@ -317,6 +376,8 @@ export function InvoicePage() {
         </div>
       </div>
 
+      {revising && <ReasonDialog title={`Revise ${inv.number}`} blurb="The issued version stays on record as superseded. A new version opens as a draft with the same number, lines, payments and billed work carried over." label="What changed" cta="Create next version" pending={revise.isPending} onClose={() => setRevising(false)} onConfirm={(r) => revise.mutate(r)} />}
+      {returning && <ReasonDialog title={`Return ${inv.number} to draft`} blurb="The person who submitted it will see your note." label="Why" cta="Return to draft" pending={doReturn.isPending} onClose={() => setReturning(false)} onConfirm={(r) => doReturn.mutate(r)} />}
       {paying && <PaymentDialog inv={inv} onClose={() => setPaying(false)} onDone={() => { setPaying(false); ok(); }} />}
       {voiding && <VoidDialog onClose={() => setVoiding(false)} onConfirm={(r) => doVoid.mutate(r)} pending={doVoid.isPending} />}
       {shareOpen && inv.token && <ShareDialog inv={inv} onClose={() => setShareOpen(false)} />}
@@ -439,6 +500,26 @@ function ShareDialog({ inv, onClose }: { inv: Invoice; onClose: () => void }) {
           <button type="button" onClick={onClose} className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700">Done</button>
         </div>
       </div>
+    </>
+  );
+}
+
+/** Row 139: a short required note, used for revisions and returns. */
+function ReasonDialog({ title, blurb, label, cta, pending, onClose, onConfirm }: { title: string; blurb: string; label: string; cta: string; pending: boolean; onClose: () => void; onConfirm: (reason: string) => void }) {
+  useEscape(onClose);
+  const [reason, setReason] = useState("");
+  return (
+    <>
+      <div className="fixed inset-0 z-40 bg-black/20" onClick={onClose} />
+      <form onSubmit={(e) => { e.preventDefault(); if (reason.trim()) onConfirm(reason.trim()); }} className="fixed left-1/2 top-1/2 z-50 w-[440px] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-white p-5 shadow-xl" data-testid="reason-dialog">
+        <h2 className="text-base font-semibold text-slate-900">{title}</h2>
+        <p className="mt-0.5 text-xs text-muted-foreground">{blurb}</p>
+        <CrmField label={label}><input autoFocus value={reason} onChange={(e) => setReason(e.target.value)} className={cn(input, "mt-1")} /></CrmField>
+        <div className="mt-4 flex justify-end gap-2">
+          <button type="button" onClick={onClose} className="rounded-md px-3 py-1.5 text-sm text-slate-600 hover:bg-muted">Cancel</button>
+          <button type="submit" disabled={!reason.trim() || pending} className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50">{cta}</button>
+        </div>
+      </form>
     </>
   );
 }

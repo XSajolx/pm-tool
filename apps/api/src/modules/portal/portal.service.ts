@@ -161,7 +161,7 @@ Keep the link private; it is your access.`,
       ? eq(invoices.projectId, projectId)
       : or(a.projectIds.length ? inArray(invoices.projectId, a.projectIds) : sql`false`, contact?.companyId ? eq(invoices.companyId, contact.companyId) : sql`false`);
     const rows = await this.db.query.invoices.findMany({
-      where: and(eq(invoices.organizationId, a.organizationId), isNull(invoices.archivedAt), notInArray(invoices.status, ["draft", "void"]), scope),
+      where: and(eq(invoices.organizationId, a.organizationId), isNull(invoices.archivedAt), notInArray(invoices.status, ["draft", "review", "void", "superseded"]), scope),
       orderBy: [desc(invoices.issueDate)],
       columns: { id: true, number: true, title: true, status: true, currency: true, issueDate: true, dueDate: true, total: true, amountPaid: true, token: true, paidAt: true, projectId: true },
       limit: 100,

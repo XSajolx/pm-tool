@@ -44,6 +44,18 @@ const paymentSchema = z.object({
 
 const voidSchema = z.object({ reason: z.string().max(500).nullable().optional() });
 const onlineSchema = z.object({ enabled: z.boolean() });
+const reviseSchema = z.object({ reason: z.string().min(1).max(500) });
+const returnSchema = z.object({ note: z.string().max(500).nullable().optional() });
+const settingsSchema = z.object({
+  prefix: z.string().max(12).optional(),
+  padding: z.number().int().min(1).max(8).optional(),
+  nextNumber: z.number().int().min(1).nullable().optional(),
+  defaultDueDays: z.number().int().min(0).max(365).optional(),
+  defaultTaxRate: z.number().min(0).max(100).optional(),
+  defaultCurrency: z.string().length(3).optional(),
+  defaultNotes: z.string().max(5000).optional(),
+  requireReview: z.boolean().optional(),
+});
 
 /** Row 156. Members can draft; issuing, money and voiding are owner/admin work. */
 @Controller("finance/invoices")
@@ -58,6 +70,44 @@ export class InvoicesController {
   @Get("summary")
   summary(@Auth() auth: AuthContext) {
     return this.invoices.summary(auth.orgId);
+  }
+
+  /* row 139 */
+  @Get("settings")
+  settings(@Auth() auth: AuthContext) {
+    return this.invoices.settings(auth.orgId);
+  }
+
+  @Patch("settings")
+  @Roles("owner", "admin")
+  @UsePipes(new ZodValidationPipe(settingsSchema))
+  updateSettings(@Auth() auth: AuthContext, @Body() dto: z.infer<typeof settingsSchema>) {
+    return this.invoices.updateSettings(auth.orgId, auth.userId, dto);
+  }
+
+  @Get(":id/versions")
+  versions(@Auth() auth: AuthContext, @Param("id") id: string) {
+    return this.invoices.versions(auth.orgId, id);
+  }
+
+  @Post(":id/submit")
+  @Roles("owner", "admin", "member")
+  submit(@Auth() auth: AuthContext, @Param("id") id: string) {
+    return this.invoices.submitForReview(auth.orgId, auth.userId, id);
+  }
+
+  @Post(":id/return")
+  @Roles("owner", "admin")
+  @UsePipes(new ZodValidationPipe(returnSchema))
+  returnToDraft(@Auth() auth: AuthContext, @Param("id") id: string, @Body() dto: z.infer<typeof returnSchema>) {
+    return this.invoices.returnToDraft(auth.orgId, auth.userId, id, dto.note);
+  }
+
+  @Post(":id/revise")
+  @Roles("owner", "admin")
+  @UsePipes(new ZodValidationPipe(reviseSchema))
+  revise(@Auth() auth: AuthContext, @Param("id") id: string, @Body() dto: z.infer<typeof reviseSchema>) {
+    return this.invoices.revise(auth.orgId, auth.userId, id, dto.reason);
   }
 
   @Get(":id")

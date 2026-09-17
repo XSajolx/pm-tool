@@ -10,11 +10,13 @@ import { UnbilledWorkDialog } from "../components/UnbilledWorkDialog.js";
 
 export const INVOICE_STATUS: Record<InvoiceStatus, { label: string; cls: string }> = {
   draft: { label: "Draft", cls: "bg-slate-100 text-slate-600 border-slate-200" },
+  review: { label: "In review", cls: "bg-amber-50 text-amber-800 border-amber-200" },
   sent: { label: "Sent", cls: "bg-sky-50 text-sky-700 border-sky-200" },
   viewed: { label: "Viewed", cls: "bg-indigo-50 text-indigo-700 border-indigo-200" },
   partially_paid: { label: "Partially paid", cls: "bg-amber-50 text-amber-700 border-amber-200" },
   paid: { label: "Paid", cls: "bg-emerald-50 text-emerald-700 border-emerald-200" },
   void: { label: "Void", cls: "bg-slate-100 text-slate-500 border-slate-200 line-through" },
+  superseded: { label: "Superseded", cls: "bg-slate-100 text-slate-500 border-slate-200" },
 };
 
 /** The chip shown in lists: an open invoice past its due date reads "Overdue" whatever its stored status. */
@@ -26,6 +28,7 @@ export function InvoiceChip({ inv }: { inv: Pick<InvoiceSummary, "status" | "ove
 const FILTERS: { key: string; label: string }[] = [
   { key: "all", label: "All" },
   { key: "draft", label: "Drafts" },
+  { key: "review", label: "In review" },
   { key: "outstanding", label: "Outstanding" },
   { key: "overdue", label: "Overdue" },
   { key: "paid", label: "Paid" },
@@ -61,7 +64,7 @@ export function InvoicesPage() {
           <Tile label="Outstanding" value={fmtMoney(totals?.outstanding ?? 0)} hint={`${totals?.openCount ?? 0} open`} onClick={() => setFilter("outstanding")} active={filter === "outstanding"} />
           <Tile label="Overdue" value={fmtMoney(totals?.overdue ?? 0)} hint={`${totals?.overdueCount ?? 0} past due`} tone={totals?.overdue ? "text-red-700" : undefined} onClick={() => setFilter("overdue")} active={filter === "overdue"} />
           <Tile label="Paid, last 30 days" value={fmtMoney(totals?.paidLast30 ?? 0)} tone="text-emerald-700" onClick={() => setFilter("paid")} active={filter === "paid"} />
-          <Tile label="Drafts" value={String(totals?.drafts ?? 0)} hint="not yet sent" onClick={() => setFilter("draft")} active={filter === "draft"} />
+          <Tile label={totals?.inReview ? "Drafts · in review" : "Drafts"} value={totals?.inReview ? `${totals.drafts} · ${totals.inReview}` : String(totals?.drafts ?? 0)} hint={totals?.inReview ? `${totals.inReview} waiting for an admin to issue` : "not yet sent"} tone={totals?.inReview ? "text-amber-700" : undefined} onClick={() => setFilter(totals?.inReview ? "review" : "draft")} active={filter === "draft" || filter === "review"} />
         </div>
 
         <div className="mb-3 flex flex-wrap gap-1">

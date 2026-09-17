@@ -22,7 +22,7 @@ export const DEFAULT_ACCOUNTING: AccountingSettings = {
 };
 
 /** Statuses that exist as documents in the ledger. Drafts are ours alone. */
-const SYNCABLE = ["sent", "viewed", "partially_paid", "paid", "void"] as const;
+const SYNCABLE = ["sent", "viewed", "partially_paid", "paid", "void", "superseded"] as const;
 
 type Link = typeof accountingLinks.$inferSelect;
 type LoadedInvoice = NonNullable<Awaited<ReturnType<AccountingService["loadInvoices"]>>[number]>;
@@ -148,7 +148,7 @@ export class AccountingService implements OnModuleInit, OnModuleDestroy {
   private async pendingCount(orgId: string, settings: AccountingSettings) {
     if (!settings.provider) return 0;
     // Void-before-sync invoices never go over, so they are not "waiting".
-    const rows = await this.db.select({ id: invoices.id }).from(invoices).where(and(eq(invoices.organizationId, orgId), isNull(invoices.archivedAt), inArray(invoices.status, SYNCABLE.filter((x) => x !== "void"))));
+    const rows = await this.db.select({ id: invoices.id }).from(invoices).where(and(eq(invoices.organizationId, orgId), isNull(invoices.archivedAt), inArray(invoices.status, SYNCABLE.filter((x) => x !== "void" && x !== "superseded"))));
     if (!rows.length) return 0;
     const linked = await this.db.select({ entityId: accountingLinks.entityId }).from(accountingLinks).where(and(eq(accountingLinks.organizationId, orgId), eq(accountingLinks.provider, settings.provider), eq(accountingLinks.entityType, "invoice")));
     const has = new Set(linked.map((l) => l.entityId));
@@ -424,7 +424,7 @@ function toPayload(inv: LoadedInvoice, customerRemoteId: string): InvoicePayload
     taxAmount: inv.taxAmount,
     total: inv.total,
     notes: inv.notes,
-    void: inv.status === "void",
+    void: inv.status === "void" || inv.status === "superseded",
   };
 }
 

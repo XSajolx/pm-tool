@@ -116,6 +116,8 @@ export const organizations = pgTable(
     accounting: jsonb("accounting").$type<AccountingSettings>(),
     /** Row 134: expense categories with a default re-billing markup each. */
     expenseCategories: jsonb("expense_categories").$type<ExpenseCategory[]>(),
+    /** Row 139 */
+    invoicing: jsonb("invoicing").$type<InvoicingSettings>(),
     ...timestamps,
   },
   (t) => [uniqueIndex("organizations_slug_uq").on(t.slug)],
@@ -2620,7 +2622,23 @@ export const leaveRequestsRelations = relations(leaveRequests, ({ one }) => ({
 /* ------------------------------------------------------------------ *
  * Finance — row 156: invoices (create, send, track, get paid)
  * ------------------------------------------------------------------ */
-export const invoiceStatus = pgEnum("invoice_status", ["draft", "sent", "viewed", "partially_paid", "paid", "void"]);
+/** Row 139: draft → review → sent (issued). A revised issued invoice is kept as "superseded" by its next version. */
+export const invoiceStatus = pgEnum("invoice_status", ["draft", "review", "sent", "viewed", "partially_paid", "paid", "void", "superseded"]);
+
+/** Row 139: numbering, terms and tax defaults — set once in Settings › Invoicing. */
+export interface InvoicingSettings {
+  prefix: string;
+  padding: number;
+  /** Next number to allocate (null = continue from the highest used). */
+  nextNumber: number | null;
+  defaultDueDays: number;
+  defaultTaxRate: number;
+  defaultCurrency: string;
+  /** Payment terms / notes pre-filled on every new invoice. */
+  defaultNotes: string;
+  /** Members may draft; when true a draft must go through review before an admin issues it. */
+  requireReview: boolean;
+}
 
 export const invoices = pgTable(
   "invoices",
@@ -2666,11 +2684,19 @@ export const invoices = pgTable(
     voidReason: text("void_reason"),
     /** Row 129: show a "Pay now" (Stripe Checkout) button on the client link. */
     onlinePayments: boolean("online_payments").notNull().default(true),
+    /** Row 139: versions. v1 is the original; a revision copies it as v(n+1) and marks the old one superseded. */
+    version: integer("version").notNull().default(1),
+    revisionOfId: uuid("revision_of_id").references((): AnyPgColumn => invoices.id, { onDelete: "set null" }),
+    supersededById: uuid("superseded_by_id").references((): AnyPgColumn => invoices.id, { onDelete: "set null" }),
+    revisionReason: text("revision_reason"),
+    submittedForReviewAt: timestamp("submitted_for_review_at", { withTimezone: true }),
+    submittedById: uuid("submitted_by_id").references(() => users.id, { onDelete: "set null" }),
+    issuedById: uuid("issued_by_id").references(() => users.id, { onDelete: "set null" }),
     createdById: uuid("created_by_id").references(() => users.id),
     ...timestamps,
   },
   (t) => [
-    uniqueIndex("invoices_org_number_uq").on(t.organizationId, t.number),
+    uniqueIndex("invoices_org_number_uq").on(t.organizationId, t.number, t.version),
     uniqueIndex("invoices_token_uq").on(t.token),
     index("invoices_org_status_idx").on(t.organizationId, t.status),
     index("invoices_company_idx").on(t.companyId),

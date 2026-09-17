@@ -50,6 +50,14 @@ export function PublicInvoicePage() {
       </Shell>
     );
   const { invoice: inv, from } = data;
+  if (inv.superseded)
+    return (
+      <Shell brand={from}>
+        <p className="text-xs uppercase tracking-wide text-slate-500">Invoice {inv.number} · version {inv.version}</p>
+        <h1 className="mt-1 text-lg font-semibold text-slate-900">This version has been replaced</h1>
+        <p className="mt-1 text-sm text-slate-600">{from.name} issued a corrected version of this invoice. Use the newest link they sent you, or reply to them for it.</p>
+      </Shell>
+    );
   const state = inv.status === "paid" ? { label: "Paid", cls: "bg-emerald-50 text-emerald-700 border-emerald-200" } : inv.status === "void" ? { label: "Void", cls: "bg-slate-100 text-slate-500 border-slate-200" } : inv.overdue ? { label: "Overdue", cls: "bg-red-50 text-red-700 border-red-200" } : inv.amountPaid > 0 ? { label: "Partially paid", cls: "bg-amber-50 text-amber-700 border-amber-200" } : { label: "Due", cls: "bg-sky-50 text-sky-700 border-sky-200" };
   const bill = [inv.billTo.company, inv.billTo.contact, inv.billTo.email, inv.billTo.address].filter(Boolean) as string[];
 

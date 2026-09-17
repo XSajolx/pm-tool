@@ -793,7 +793,7 @@ export interface MyTask extends Task {
 
 /** Row 75: approval request carried by a notification (`data.approval`). */
 export interface ApprovalMeta {
-  kind: "doc_review" | "milestone" | "timesheet" | "leave" | "expense" | "invoice_review";
+  kind: "doc_review" | "milestone" | "timesheet" | "leave" | "expense" | "invoice_review" | "invoice_issue";
   status: "pending" | "approved" | "rejected";
   decidedAt?: string;
   decidedById?: string;
@@ -1496,7 +1496,29 @@ export interface PublicProposal {
 }
 
 // ---- Finance: invoices (row 156) ----
-export type InvoiceStatus = "draft" | "sent" | "viewed" | "partially_paid" | "paid" | "void";
+export type InvoiceStatus = "draft" | "review" | "sent" | "viewed" | "partially_paid" | "paid" | "void" | "superseded";
+/** Row 139 */
+export interface InvoicingSettings {
+  prefix: string;
+  padding: number;
+  nextNumber: number | null;
+  defaultDueDays: number;
+  defaultTaxRate: number;
+  defaultCurrency: string;
+  defaultNotes: string;
+  requireReview: boolean;
+}
+export interface InvoiceVersion {
+  id: string;
+  version: number;
+  status: InvoiceStatus;
+  total: number;
+  issueDate: string;
+  sentAt: string | null;
+  revisionReason: string | null;
+  createdAt: string;
+  current: boolean;
+}
 export type PaymentMethod = "bank_transfer" | "card" | "cash" | "cheque" | "other";
 
 export interface InvoiceItem {
@@ -1564,6 +1586,14 @@ export interface InvoiceSummary {
 export interface Invoice extends InvoiceSummary {
   /** Row 129: show "Pay now" on the client link. */
   onlinePayments: boolean;
+  /** Row 139 */
+  version: number;
+  revisionOfId: string | null;
+  supersededById: string | null;
+  revisionReason: string | null;
+  submittedForReviewAt: string | null;
+  submittedById: string | null;
+  issuedById: string | null;
   deal: { id: string; title: string } | null;
   createdBy: { id: string; name: string } | null;
   items: Required<InvoiceItem>[];
@@ -1591,6 +1621,7 @@ export interface InvoiceTotals {
   overdueCount: number;
   paidLast30: number;
   drafts: number;
+  inReview: number;
   openCount: number;
 }
 
@@ -1598,6 +1629,8 @@ export interface PublicInvoice {
   token: string;
   invoice: {
     number: string;
+    version: number;
+    superseded: boolean;
     title: string;
     status: InvoiceStatus;
     overdue: boolean;
@@ -3025,6 +3058,13 @@ export const api = {
   voidInvoice: (id: string, reason?: string) => request<Invoice>(`/finance/invoices/${id}/void`, { method: "POST", body: JSON.stringify({ reason: reason ?? null }) }),
   recordInvoicePayment: (id: string, body: { amount: number; method?: PaymentMethod; paidAt?: string | null; reference?: string | null; note?: string | null }) =>
     request<Invoice>(`/finance/invoices/${id}/payments`, { method: "POST", body: JSON.stringify(body) }),
+  /** Row 139 */
+  getInvoicingSettings: () => request<InvoicingSettings>(`/finance/invoices/settings`),
+  updateInvoicingSettings: (body: Partial<InvoicingSettings>) => request<InvoicingSettings>(`/finance/invoices/settings`, { method: "PATCH", body: JSON.stringify(body) }),
+  getInvoiceVersions: (id: string) => request<InvoiceVersion[]>(`/finance/invoices/${id}/versions`),
+  submitInvoice: (id: string) => request<Invoice>(`/finance/invoices/${id}/submit`, { method: "POST" }),
+  returnInvoice: (id: string, note?: string) => request<Invoice>(`/finance/invoices/${id}/return`, { method: "POST", body: JSON.stringify({ note: note ?? null }) }),
+  reviseInvoice: (id: string, reason: string) => request<Invoice>(`/finance/invoices/${id}/revise`, { method: "POST", body: JSON.stringify({ reason }) }),
   removeInvoicePayment: (id: string, paymentId: string) => request<Invoice>(`/finance/invoices/${id}/payments/${paymentId}`, { method: "DELETE" }),
   archiveInvoice: (id: string) => request<{ id: string }>(`/finance/invoices/${id}`, { method: "DELETE" }),
   /** Authenticated PDF: fetched with the bearer token and opened from a blob URL (a plain link can't carry the header). */

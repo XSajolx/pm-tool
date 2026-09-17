@@ -1,16 +1,18 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, asc, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
+import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException, type OnModuleInit } from "@nestjs/common";
+import { and, asc, desc, eq, gte, inArray, isNull, lt, ne, sql } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
 import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
-import { companies, contacts, deals, estimateItems, estimates, expenses, invoiceItems, invoicePayments, invoices, organizations, projects, proposals, timeEntries } from "../../db/schema.js";
+import { companies, contacts, deals, estimateItems, estimates, expenses, invoiceItems, invoicePayments, invoices, memberships, organizations, projects, proposals, timeEntries, type InvoicingSettings } from "../../db/schema.js";
 import { ActivityService } from "../activity/activity.service.js";
-import { NotificationsService } from "../notifications/notifications.service.js";
+import { NotificationsService, pendingApproval } from "../notifications/notifications.service.js";
 import { renderInvoicePdf } from "./invoice-pdf.js";
 import { ProfitFirstService } from "./profit-first.service.js";
 import { stripeConfigured } from "./stripe.config.js";
 
-export type InvoiceStatus = "draft" | "sent" | "viewed" | "partially_paid" | "paid" | "void";
+export type InvoiceStatus = "draft" | "review" | "sent" | "viewed" | "partially_paid" | "paid" | "void" | "superseded";
+
+export const DEFAULT_INVOICING: InvoicingSettings = { prefix: "INV-", padding: 4, nextNumber: null, defaultDueDays: 14, defaultTaxRate: 0, defaultCurrency: "USD", defaultNotes: "", requireReview: false };
 export type PaymentMethod = "bank_transfer" | "card" | "cash" | "cheque" | "other";
 
 export interface InvoiceItemDto {
@@ -62,7 +64,7 @@ const OPEN: InvoiceStatus[] = ["sent", "viewed", "partially_paid"];
 const EPS = 0.005;
 
 @Injectable()
-export class InvoicesService {
+export class InvoicesService implements OnModuleInit {
   constructor(
     @Inject(DRIZZLE) private readonly db: DB,
     private readonly activity: ActivityService,
@@ -70,10 +72,162 @@ export class InvoicesService {
     private readonly profitFirst: ProfitFirstService,
   ) {}
 
+  /** Row 139: the review card in an admin's inbox — Approve issues the invoice, Reject returns it to draft. */
+  onModuleInit() {
+    this.notifications.registerApproval("invoice_issue", (d) => (d.approve ? this.send(d.orgId, d.userId, d.entityId).then(() => undefined) : this.returnToDraft(d.orgId, d.userId, d.entityId, d.note).then(() => undefined)));
+  }
+
+  /* ---------------- row 139: settings ---------------- */
+
+  async settings(orgId: string): Promise<InvoicingSettings> {
+    const org = await this.db.query.organizations.findFirst({ where: eq(organizations.id, orgId), columns: { invoicing: true } });
+    return { ...DEFAULT_INVOICING, ...(org?.invoicing ?? {}) };
+  }
+
+  async updateSettings(orgId: string, userId: string, patch: Partial<InvoicingSettings>) {
+    const before = await this.settings(orgId);
+    const next: InvoicingSettings = {
+      ...before,
+      ...patch,
+      prefix: (patch.prefix ?? before.prefix).trim().slice(0, 12),
+      padding: Math.min(8, Math.max(1, Math.round(patch.padding ?? before.padding))),
+      defaultCurrency: (patch.defaultCurrency ?? before.defaultCurrency).toUpperCase().slice(0, 3),
+    };
+    if (next.nextNumber != null) {
+      const used = await this.highestNumber(orgId, next.prefix);
+      if (next.nextNumber <= used) throw new BadRequestException(`${next.prefix}${String(used).padStart(next.padding, "0")} is already used — the next number must be at least ${used + 1}`);
+    }
+    await this.db.update(organizations).set({ invoicing: next, updatedAt: new Date() }).where(eq(organizations.id, orgId));
+    await this.activity.record({ orgId, actorId: userId, entityType: "workspace", entityId: orgId, action: "invoicing_settings_updated", changes: (Object.keys(patch) as (keyof InvoicingSettings)[]).filter((k) => before[k] !== next[k]).map((k) => ({ field: k, from: String(before[k] ?? ""), to: String(next[k] ?? "") })) });
+    return next;
+  }
+
+  /** Highest numeric suffix used with this prefix (revisions share their original's number). */
+  private async highestNumber(orgId: string, prefix: string) {
+    const rows = await this.db.select({ number: invoices.number }).from(invoices).where(and(eq(invoices.organizationId, orgId), sql`${invoices.number} like ${prefix + "%"}`));
+    let max = 0;
+    for (const r of rows) {
+      const n = Number(r.number.slice(prefix.length));
+      if (Number.isInteger(n) && n > max) max = n;
+    }
+    return max;
+  }
+
+  /* ---------------- row 139: review & issue ---------------- */
+
+  /** A member (or anyone) hands a draft to the admins; they get an inbox card with Approve = issue. */
+  async submitForReview(orgId: string, userId: string, id: string) {
+    const inv = await this.get(orgId, id);
+    if (inv.status !== "draft") throw new BadRequestException("Only a draft can be submitted for review");
+    if (!inv.items.length || inv.total <= 0) throw new BadRequestException("Add lines with a total before submitting");
+    const now = new Date();
+    await this.db.update(invoices).set({ status: "review", submittedForReviewAt: now, submittedById: userId, updatedAt: now }).where(eq(invoices.id, id));
+    await this.activity.record({ orgId, actorId: userId, entityType: "invoice", entityId: id, action: "submitted_for_review", changes: [{ field: "status", from: "draft", to: "review" }] });
+    const admins = await this.db.query.memberships.findMany({ where: and(eq(memberships.organizationId, orgId), inArray(memberships.role, ["owner", "admin"])), columns: { userId: true } });
+    for (const a of admins) {
+      if (a.userId === userId) continue;
+      await this.notifications.notifyDirect({
+        orgId,
+        receiverId: a.userId,
+        actorId: userId,
+        entityType: "invoice",
+        entityId: id,
+        verb: "invoice_review_requested",
+        title: `Review & issue ${inv.number} — ${inv.title} (${inv.currency} ${inv.total.toFixed(2)})`,
+        body: `For ${inv.company?.name ?? inv.contact?.name ?? "the client"}. Approve to issue it, or return it to draft with a note.`,
+        data: { invoiceId: id, approval: pendingApproval("invoice_issue") },
+      });
+    }
+    return this.get(orgId, id);
+  }
+
+  /** Back to draft from review (admin), with the reason attached to the trail. */
+  async returnToDraft(orgId: string, userId: string, id: string, note?: string | null) {
+    const inv = await this.get(orgId, id);
+    if (inv.status !== "review") throw new BadRequestException("Only an invoice in review can be returned");
+    await this.db.update(invoices).set({ status: "draft", updatedAt: new Date() }).where(eq(invoices.id, id));
+    await this.notifications.resolveApproval("invoice", id, "rejected", note, userId);
+    await this.activity.record({ orgId, actorId: userId, entityType: "invoice", entityId: id, action: "returned_to_draft", changes: [{ field: "status", from: "review", to: "draft" }, ...(note?.trim() ? [{ field: "note", from: null, to: note.trim() }] : [])] });
+    if (inv.submittedById && inv.submittedById !== userId) {
+      await this.notifications.notifyDirect({ orgId, receiverId: inv.submittedById, actorId: userId, entityType: "invoice", entityId: id, verb: "invoice_returned", title: `${inv.number} was returned to draft`, body: note?.trim() || "Please check it and submit again.", data: { invoiceId: id } });
+    }
+    return this.get(orgId, id);
+  }
+
+  /**
+   * Row 139: an issued invoice never changes. A revision copies it into
+   * version n+1 (same number, back in draft), moves any payments and the
+   * hours / expenses it billed across, and marks the old version superseded
+   * — its link keeps working, pointing at the replacement once that is sent.
+   */
+  async revise(orgId: string, userId: string, id: string, reason: string) {
+    const inv = await this.get(orgId, id);
+    if (!["sent", "viewed", "partially_paid", "paid"].includes(inv.status)) throw new BadRequestException("Only an issued invoice can be revised — drafts are simply edited");
+    if (inv.supersededById) throw new BadRequestException("This version was already revised");
+    if (!reason?.trim()) throw new BadRequestException("Say what changed — it goes on the record");
+    const now = new Date();
+    const newId = await this.db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(invoices)
+        .values({
+          organizationId: orgId,
+          createdById: userId,
+          number: inv.number,
+          version: inv.version + 1,
+          revisionOfId: inv.id,
+          revisionReason: reason.trim(),
+          title: inv.title,
+          companyId: inv.company?.id ?? null,
+          contactId: inv.contact?.id ?? null,
+          projectId: inv.project?.id ?? null,
+          dealId: inv.dealId,
+          estimateId: inv.estimateId,
+          proposalId: inv.proposalId,
+          scheduleId: inv.schedule?.id ?? null,
+          status: "draft",
+          currency: inv.currency,
+          issueDate: inv.issueDate,
+          dueDate: inv.dueDate,
+          notes: inv.notes,
+          subtotal: inv.subtotal,
+          discountPercent: inv.discountPercent,
+          discountAmount: inv.discountAmount,
+          taxRate: inv.taxRate,
+          taxAmount: inv.taxAmount,
+          total: inv.total,
+          onlinePayments: inv.onlinePayments,
+        })
+        .returning({ id: invoices.id });
+      const nid = row!.id;
+      if (inv.items.length) await tx.insert(invoiceItems).values(itemRows(orgId, nid, inv.items.map((i) => ({ description: i.description, quantity: i.quantity, unitPrice: i.unitPrice, stageId: i.stageId, billedPct: i.billedPct }))));
+      // Money and billed work follow the live version.
+      await tx.update(invoicePayments).set({ invoiceId: nid }).where(eq(invoicePayments.invoiceId, inv.id));
+      await tx.update(expenses).set({ invoiceId: nid, updatedAt: now }).where(eq(expenses.invoiceId, inv.id));
+      await tx.update(timeEntries).set({ invoiceId: nid, updatedAt: now }).where(eq(timeEntries.invoiceId, inv.id));
+      await tx.update(invoices).set({ status: "superseded", supersededById: nid, amountPaid: 0, updatedAt: now }).where(eq(invoices.id, inv.id));
+      // Carry the paid total, but the new version stays a draft until it is issued again.
+      const [sum] = await tx.select({ n: sql<number>`coalesce(sum(${invoicePayments.amount}), 0)::float` }).from(invoicePayments).where(eq(invoicePayments.invoiceId, nid));
+      await tx.update(invoices).set({ amountPaid: round2(sum?.n ?? 0) }).where(eq(invoices.id, nid));
+      return nid;
+    });
+    await this.activity.record({ orgId, actorId: userId, entityType: "invoice", entityId: inv.id, action: "superseded", changes: [{ field: "version", from: String(inv.version), to: String(inv.version + 1) }, { field: "reason", from: null, to: reason.trim() }] });
+    await this.activity.record({ orgId, actorId: userId, entityType: "invoice", entityId: newId, action: "revised_from", changes: [{ field: "revisionOf", from: null, to: inv.id }] });
+    return this.get(orgId, newId);
+  }
+
+  /** Every version of a number, oldest first. */
+  async versions(orgId: string, id: string) {
+    const inv = await this.get(orgId, id);
+    const rows = await this.db.query.invoices.findMany({ where: and(eq(invoices.organizationId, orgId), eq(invoices.number, inv.number)), columns: { id: true, version: true, status: true, total: true, issueDate: true, sentAt: true, revisionReason: true, createdAt: true }, orderBy: asc(invoices.version) });
+    return rows.map((r) => ({ id: r.id, version: r.version, status: r.status, total: r.total, issueDate: r.issueDate, sentAt: r.sentAt, revisionReason: r.revisionReason, createdAt: r.createdAt, current: r.id === inv.id }));
+  }
+
   /* ---------------- read ---------------- */
 
   async list(orgId: string, opts: { status?: string; companyId?: string; projectId?: string; scheduleId?: string } = {}) {
     const filters = [eq(invoices.organizationId, orgId), isNull(invoices.archivedAt)];
+    // Row 139: old versions stay out of the list unless asked for by status.
+    if (opts.status !== "superseded") filters.push(ne(invoices.status, "superseded"));
     if (opts.companyId) filters.push(eq(invoices.companyId, opts.companyId));
     if (opts.scheduleId) filters.push(eq(invoices.scheduleId, opts.scheduleId));
     if (opts.projectId) filters.push(eq(invoices.projectId, opts.projectId));
@@ -115,7 +269,11 @@ export class InvoicesService {
       .select({ n: sql<number>`count(*)::int` })
       .from(invoices)
       .where(and(eq(invoices.organizationId, orgId), isNull(invoices.archivedAt), eq(invoices.status, "draft")));
-    return { outstanding: round2(outstanding), overdue: round2(overdue), overdueCount, paidLast30: round2(paid?.n ?? 0), drafts: drafts?.n ?? 0, openCount: open.length };
+    const [review] = await this.db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(invoices)
+      .where(and(eq(invoices.organizationId, orgId), isNull(invoices.archivedAt), eq(invoices.status, "review")));
+    return { outstanding: round2(outstanding), overdue: round2(overdue), overdueCount, paidLast30: round2(paid?.n ?? 0), drafts: drafts?.n ?? 0, inReview: review?.n ?? 0, openCount: open.length };
   }
 
   async get(orgId: string, id: string) {
@@ -206,13 +364,15 @@ export class InvoicesService {
     }
 
     // Explicit fields win over what the source suggested.
+    // Row 139: workspace defaults (terms, tax, due days, currency) apply unless the caller says otherwise.
+    const cfg = await this.settings(orgId);
     const title = (dto.title?.trim() || seed.title || "Invoice").slice(0, 255);
     const items = dto.items ?? seed.items ?? [];
-    const taxRate = dto.taxRate ?? seed.taxRate ?? 0;
+    const taxRate = dto.taxRate ?? seed.taxRate ?? cfg.defaultTaxRate;
     const discountPercent = dto.discountPercent ?? 0;
     const totals = computeTotals(items, discountPercent, taxRate);
     const issueDate = dto.issueDate ? new Date(dto.issueDate) : new Date();
-    const dueDate = dto.dueDate ? new Date(dto.dueDate) : new Date(issueDate.getTime() + 14 * 86_400_000);
+    const dueDate = dto.dueDate ? new Date(dto.dueDate) : new Date(issueDate.getTime() + cfg.defaultDueDays * 86_400_000);
 
     for (let attempt = 0; attempt < 3; attempt++) {
       const number = await this.nextNumber(orgId);
@@ -232,10 +392,10 @@ export class InvoicesService {
               estimateId: seed.estimateId ?? null,
               proposalId: seed.proposalId ?? null,
               scheduleId: dto.scheduleId ?? null,
-              currency: (dto.currency ?? seed.currency ?? "USD").toUpperCase(),
+              currency: (dto.currency ?? seed.currency ?? cfg.defaultCurrency).toUpperCase(),
               issueDate,
               dueDate,
-              notes: dto.notes !== undefined ? dto.notes : (seed.notes ?? null),
+              notes: dto.notes !== undefined ? dto.notes : (seed.notes ?? (cfg.defaultNotes || null)),
               taxRate,
               discountPercent,
               ...totals,
@@ -289,15 +449,27 @@ export class InvoicesService {
    */
   async send(orgId: string, userId: string, id: string, opts: { system?: boolean } = {}) {
     const inv = await this.get(orgId, id);
-    if (inv.status !== "draft") throw new BadRequestException("Only a draft can be sent");
+    if (inv.status !== "draft" && inv.status !== "review") throw new BadRequestException("Only a draft can be sent");
+    // Row 139: when the workspace insists on review, even admins go draft → review → issued (schedules are exempt).
+    if (inv.status === "draft" && !opts.system && (await this.settings(orgId)).requireReview) throw new BadRequestException("This workspace requires review before issuing — submit it for review first");
     if (!inv.items.length) throw new BadRequestException("Add at least one line item before sending");
     if (inv.total <= 0) throw new BadRequestException("The invoice total must be greater than zero");
     const now = new Date();
+    // Row 139: a revision inherits the previous version's client link so the old URL shows the new document.
+    const prev = inv.revisionOfId ? await this.db.query.invoices.findFirst({ where: eq(invoices.id, inv.revisionOfId), columns: { token: true } }) : null;
+    let token = inv.token ?? randomBytes(24).toString("hex");
+    if (prev?.token) {
+      await this.db.update(invoices).set({ token: null }).where(eq(invoices.id, inv.revisionOfId!));
+      token = prev.token;
+    }
     await this.db
       .update(invoices)
-      .set({ status: "sent", sentAt: now, token: inv.token ?? randomBytes(24).toString("hex"), updatedAt: now })
+      .set({ status: "sent", sentAt: now, token, issuedById: userId || null, updatedAt: now })
       .where(eq(invoices.id, id));
-    await this.activity.record({ orgId, actorId: userId || null, entityType: "invoice", entityId: id, action: opts.system ? "auto_sent" : "sent", changes: [{ field: "status", from: "draft", to: "sent" }] });
+    if (inv.status === "review") await this.notifications.resolveApproval("invoice", id, "approved", null, userId);
+    // A re-issued revision may already carry payments: let them set the status (partially paid / paid).
+    if (inv.amountPaid > EPS) await this.syncPaid(this.db, id);
+    await this.activity.record({ orgId, actorId: userId || null, entityType: "invoice", entityId: id, action: opts.system ? "auto_sent" : "sent", changes: [{ field: "status", from: inv.status, to: "sent" }] });
     return this.get(orgId, id);
   }
 
@@ -427,7 +599,7 @@ export class InvoicesService {
   private async byToken(token: string) {
     if (!token || token.length < 16) throw new NotFoundException("This link is not valid");
     const row = await this.db.query.invoices.findFirst({ where: and(eq(invoices.token, token), isNull(invoices.archivedAt)), columns: { id: true, organizationId: true, status: true, viewedAt: true, viewCount: true, createdById: true, number: true, title: true, onlinePayments: true } });
-    if (!row || row.status === "draft") throw new NotFoundException("This link is not valid");
+    if (!row || row.status === "draft" || row.status === "review") throw new NotFoundException("This link is not valid");
     return row;
   }
 
@@ -477,6 +649,8 @@ export class InvoicesService {
       token,
       invoice: {
         number: inv.number,
+        version: inv.version,
+        superseded: inv.status === "superseded",
         title: inv.title,
         status: inv.status,
         overdue: inv.overdue,
@@ -521,9 +695,13 @@ export class InvoicesService {
     await tx.update(invoices).set({ amountPaid: paid, status, paidAt: settled ? new Date() : null, updatedAt: new Date() }).where(eq(invoices.id, id));
   }
 
+  /** Row 139: prefix + zero-padded counter from Settings; a custom "next number" restarts the sequence. */
   private async nextNumber(orgId: string) {
-    const [row] = await this.db.select({ n: sql<number>`count(*)::int` }).from(invoices).where(eq(invoices.organizationId, orgId));
-    return `INV-${String((row?.n ?? 0) + 1).padStart(4, "0")}`;
+    const cfg = await this.settings(orgId);
+    const used = await this.highestNumber(orgId, cfg.prefix);
+    const n = Math.max(used + 1, cfg.nextNumber ?? 1);
+    if (cfg.nextNumber != null) await this.db.update(organizations).set({ invoicing: { ...cfg, nextNumber: null } }).where(eq(organizations.id, orgId));
+    return `${cfg.prefix}${String(n).padStart(cfg.padding, "0")}`;
   }
 
   private async assertLinks(orgId: string, dto: Partial<InvoiceDto>) {
@@ -590,6 +768,13 @@ function shape(
     voidedAt: r.voidedAt,
     voidReason: r.voidReason,
     onlinePayments: r.onlinePayments,
+    version: r.version,
+    revisionOfId: r.revisionOfId,
+    supersededById: r.supersededById,
+    revisionReason: r.revisionReason,
+    submittedForReviewAt: r.submittedForReviewAt,
+    submittedById: r.submittedById,
+    issuedById: r.issuedById,
     estimateId: r.estimateId,
     proposalId: r.proposalId,
     dealId: r.dealId,
