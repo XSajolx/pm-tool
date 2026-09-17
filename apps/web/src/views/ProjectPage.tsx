@@ -12,6 +12,7 @@ import { ProjectContractors } from "../components/ProjectContractors.js";
 import { UnbilledWorkDialog } from "../components/UnbilledWorkDialog.js";
 import { ProgressInvoiceDialog } from "../components/ProgressInvoiceDialog.js";
 import { ProjectRates } from "../components/ProjectRates.js";
+import { StageBudgetLine } from "../components/StageBudget.js";
 import { DocsTab } from "../components/DocsTab.js";
 import { MuteButton } from "../components/MuteButton.js";
 import { FollowButton } from "../components/FollowButton.js";
@@ -463,7 +464,11 @@ const STAGE_STATUS: Record<Stage["status"], { label: string; cls: string; bar: s
 
 function ProjectStages({ projectId, canManage }: { projectId: string; canManage: boolean }) {
   const qc = useQueryClient();
+  const { role } = useAuth();
+  const admin = role === "owner" || role === "admin";
   const { data: stages = [] } = useQuery({ queryKey: ["stages", projectId], queryFn: () => api.getStages(projectId) });
+  // Rows 150-152
+  const { data: burn } = useQuery({ queryKey: ["stage-burn", projectId], queryFn: () => api.getStageBurn(projectId) });
   const { data: templates = [] } = useQuery({ queryKey: ["stage-templates"], queryFn: api.getStageTemplates });
   const [newName, setNewName] = useState("");
   const [reopening, setReopening] = useState<Stage | null>(null);
@@ -554,7 +559,8 @@ function ProjectStages({ projectId, canManage }: { projectId: string; canManage:
                 <p className="text-[10px] text-muted-foreground" title="Task counts are context only - they never drive the percent">
                   Tasks {st.progress.done}/{st.progress.total}{st.progress.total ? ` (${pct}% ticked)` : ""}
                 </p>
-                {st.feeAmount != null && <p className="text-[10px] text-slate-600" title="Fixed fee billed by % complete (row 137)">Fee {fmtMoney(st.feeAmount)} · earned {fmtMoney(st.feeAmount * (st.progressPct / 100))}</p>}
+                {st.feeAmount != null && admin && <p className="text-[10px] text-slate-600" title="Fixed fee billed by % complete (row 137)">Fee {fmtMoney(st.feeAmount, burn?.project.currency)} · earned {fmtMoney(st.feeAmount * (st.progressPct / 100), burn?.project.currency)}</p>}
+                <StageBudgetLine burn={burn?.stages.find((b) => b.id === st.id)} projectId={projectId} currency={burn?.project.currency ?? "USD"} canManage={canManage} admin={admin} />
                 <p className="text-[10px] text-muted-foreground">
                   {st.startedAt ? `Started ${fmtShortDate(st.startedAt)}` : "Not started"}
                   {st.completedAt ? ` · Done ${fmtShortDate(st.completedAt)}` : ""}

@@ -771,6 +771,34 @@ export interface Stage {
   progressNote: string | null;
   /** Row 137: fixed fee for the stage. */
   feeAmount: number | null;
+  /** Row 150 */
+  budgetHours: number | null;
+  budgetAmount: number | null;
+}
+/** Rows 150-152 */
+export interface StageBurn {
+  id: string;
+  index: number;
+  name: string;
+  status: StageStatus;
+  progressPct: number;
+  feeAmount: number | null;
+  budgetHours: number | null;
+  budgetAmount: number | null;
+  usedHours: number;
+  usedCost: number;
+  hoursPct: number | null;
+  costPct: number | null;
+  remainingHours: number | null;
+  remainingAmount: number | null;
+  atRisk: boolean;
+  overBudget: boolean;
+  alerts: string[];
+}
+export interface StageBurnReport {
+  project: { id: string; name: string; currency: string };
+  stages: StageBurn[];
+  totals: { budgetHours: number; usedHours: number; budgetAmount: number; usedCost: number };
 }
 export interface StageProgressEvent {
   id: string;
@@ -2803,7 +2831,8 @@ export const api = {
     request<Stage[]>(`/projects/${projectId}/stages/order`, { method: "PUT", body: JSON.stringify({ ids }) }),
   applyStageTemplate: (projectId: string, templateId: string) =>
     request<Stage[]>(`/projects/${projectId}/stages/apply-template`, { method: "POST", body: JSON.stringify({ templateId }) }),
-  updateStage: (id: string, body: { name?: string; status?: StageStatus; note?: string; feeAmount?: number | null }) =>
+  getStageBurn: (projectId: string) => request<StageBurnReport>(`/projects/${projectId}/stages/burn`),
+  updateStage: (id: string, body: { name?: string; status?: StageStatus; note?: string; feeAmount?: number | null; budgetHours?: number | null; budgetAmount?: number | null }) =>
     request<Stage>(`/stages/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteStage: (id: string) => request<{ id: string }>(`/stages/${id}`, { method: "DELETE" }),
   /** Row 105 */

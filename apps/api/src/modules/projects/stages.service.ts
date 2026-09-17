@@ -95,7 +95,7 @@ export class StagesService {
     orgId: string,
     userId: string,
     id: string,
-    dto: { name?: string; status?: StageStatus; note?: string; feeAmount?: number | null },
+    dto: { name?: string; status?: StageStatus; note?: string; feeAmount?: number | null; budgetHours?: number | null; budgetAmount?: number | null },
   ) {
     const stage = await this.db.query.projectStages.findFirst({
       where: and(eq(projectStages.id, id), eq(projectStages.organizationId, orgId)),
@@ -105,6 +105,8 @@ export class StagesService {
     const patch: Record<string, unknown> = { updatedAt: new Date() };
     if (dto.name !== undefined) patch.name = dto.name.trim();
     if (dto.feeAmount !== undefined) patch.feeAmount = dto.feeAmount;
+    if (dto.budgetHours !== undefined) patch.budgetHours = dto.budgetHours;
+    if (dto.budgetAmount !== undefined) patch.budgetAmount = dto.budgetAmount;
     let action: string | null = null;
     if (dto.status && dto.status !== stage.status) {
       const now = new Date();

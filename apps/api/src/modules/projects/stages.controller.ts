@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, UsePipes
 import { z } from "zod";
 import { ZodValidationPipe } from "../../common/zod-validation.pipe.js";
 import { StagesService } from "./stages.service.js";
+import { StageBudgetsService } from "./stage-budgets.service.js";
 import { ProjectAccessService } from "../access/project-access.service.js";
 import { Auth, Roles } from "../auth/auth.decorators.js";
 import type { AuthContext } from "../auth/auth.types.js";
@@ -13,6 +14,9 @@ const stagePatchSchema = z.object({
   name: z.string().min(1).max(120).optional(),
   /** Row 137 */
   feeAmount: z.number().min(0).nullable().optional(),
+  /** Row 150 */
+  budgetHours: z.number().min(0).nullable().optional(),
+  budgetAmount: z.number().min(0).nullable().optional(),
   status: z.enum(["not_started", "active", "completed"]).optional(),
   /** Required when reopening a completed stage. */
   note: z.string().max(500).optional(),
@@ -30,7 +34,22 @@ export class StagesController {
   constructor(
     private readonly stages: StagesService,
     private readonly access: ProjectAccessService,
+    private readonly budgets: StageBudgetsService,
   ) {}
+
+  /** Rows 150-152: budget vs burn per stage. Cost figures are admin-only. */
+  @Get("projects/:projectId/stages/burn")
+  async burn(@Auth() auth: AuthContext, @Param("projectId") projectId: string) {
+    const b = await this.budgets.burn(auth.orgId, projectId);
+    if (auth.role === "owner" || auth.role === "admin") return b;
+    return { ...b, stages: b.stages.map((s) => ({ ...s, budgetAmount: null, usedCost: 0, costPct: null, remainingAmount: null })), totals: { ...b.totals, budgetAmount: 0, usedCost: 0 } };
+  }
+
+  @Post("projects/:projectId/stages/check-budgets")
+  @Roles("owner", "admin")
+  checkBudgets(@Auth() auth: AuthContext, @Param("projectId") projectId: string) {
+    return this.budgets.check(auth.orgId, projectId).then((sent) => ({ sent }));
+  }
 
   @Get("projects/:projectId/stages")
   async list(@Auth() auth: AuthContext, @Param("projectId") projectId: string) {

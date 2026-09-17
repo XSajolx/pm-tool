@@ -624,6 +624,13 @@
       "when": 1789608913129,
       "tag": "0088_curly_marten_broadcloak",
       "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "7",
+      "when": 1789609377691,
+      "tag": "0089_funny_sharon_carter",
+      "breakpoints": true
     }
   ]
 }

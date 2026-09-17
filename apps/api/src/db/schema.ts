@@ -1256,6 +1256,9 @@ export const projectStages = pgTable(
     progressNote: text("progress_note"),
     /** Row 137: the fixed fee the client pays for this stage; progress invoices bill fee × % complete − already billed. */
     feeAmount: doublePrecision("fee_amount"),
+    /** Row 150: the ceiling for the team — hours and internal cost — before the stage starts. */
+    budgetHours: doublePrecision("budget_hours"),
+    budgetAmount: doublePrecision("budget_amount"),
     ...timestamps,
   },
   (t) => [index("project_stages_project_idx").on(t.projectId)],
