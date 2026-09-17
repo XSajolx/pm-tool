@@ -534,9 +534,10 @@ function ApprovalCard({ n, approval }: { n: AppNotification; approval: ApprovalM
       qc.invalidateQueries({ queryKey: ["milestones"] });
       qc.invalidateQueries({ queryKey: ["timesheet"] });
       qc.invalidateQueries({ queryKey: ["document"] });
+      qc.invalidateQueries({ queryKey: ["expenses"] });
     },
   });
-  const kindLabel = approval.kind === "doc_review" ? "Doc review" : approval.kind === "milestone" ? "Milestone sign-off" : approval.kind === "leave" ? "Time off" : "Timesheet";
+  const kindLabel = approval.kind === "doc_review" ? "Doc review" : approval.kind === "milestone" ? "Milestone sign-off" : approval.kind === "leave" ? "Time off" : approval.kind === "expense" ? "Expense" : "Timesheet";
 
   if (approval.status !== "pending") {
     const ok = approval.status === "approved";

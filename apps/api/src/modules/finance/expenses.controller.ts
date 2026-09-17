@@ -24,6 +24,8 @@ const expenseSchema = z.object({
   reference: z.string().max(255).nullable().optional(),
 });
 const updateSchema = expenseSchema.extend({ rememberVendor: z.boolean().optional(), applyToSimilar: z.boolean().optional() });
+const decisionSchema = z.object({ note: z.string().max(2000).nullable().optional() });
+const adjustSchema = z.object({ amount: z.number().min(0), note: z.string().min(1).max(2000) });
 const ruleSchema = z.object({
   match: z.string().min(2).max(255),
   category: z.string().max(64).nullable().optional(),
@@ -149,6 +151,13 @@ export class ExpensesController {
     return this.expenses.removeFromInvoice(auth.orgId, auth.userId, invoiceId, expenseId);
   }
 
+  /* ---- row 133: approval queue ---- */
+
+  @Get("queue")
+  queue(@Auth() auth: AuthContext) {
+    return this.expenses.queue(auth.orgId, { userId: auth.userId, role: auth.role });
+  }
+
   @Get(":id")
   get(@Auth() auth: AuthContext, @Param("id") id: string) {
     return this.expenses.get(auth.orgId, id, auth.role === "member" ? auth.userId : undefined);
@@ -158,7 +167,31 @@ export class ExpensesController {
   @Roles("owner", "admin", "member")
   @UsePipes(new ZodValidationPipe(expenseSchema))
   create(@Auth() auth: AuthContext, @Body() dto: z.infer<typeof expenseSchema>) {
-    return this.expenses.create(auth.orgId, auth.userId, dto);
+    return this.expenses.create(auth.orgId, auth.userId, dto, auth.role);
+  }
+
+  @Post(":id/approve")
+  @UsePipes(new ZodValidationPipe(decisionSchema))
+  approve(@Auth() auth: AuthContext, @Param("id") id: string, @Body() dto: z.infer<typeof decisionSchema>) {
+    return this.expenses.decide(auth.orgId, { userId: auth.userId, role: auth.role }, id, true, dto.note);
+  }
+
+  @Post(":id/reject")
+  @UsePipes(new ZodValidationPipe(decisionSchema))
+  reject(@Auth() auth: AuthContext, @Param("id") id: string, @Body() dto: z.infer<typeof decisionSchema>) {
+    return this.expenses.decide(auth.orgId, { userId: auth.userId, role: auth.role }, id, false, dto.note);
+  }
+
+  @Post(":id/resubmit")
+  @Roles("owner", "admin", "member")
+  resubmit(@Auth() auth: AuthContext, @Param("id") id: string) {
+    return this.expenses.resubmit(auth.orgId, auth.userId, id, auth.role === "member" ? auth.userId : undefined);
+  }
+
+  @Post(":id/adjust")
+  @UsePipes(new ZodValidationPipe(adjustSchema))
+  adjust(@Auth() auth: AuthContext, @Param("id") id: string, @Body() dto: z.infer<typeof adjustSchema>) {
+    return this.expenses.adjust(auth.orgId, { userId: auth.userId, role: auth.role }, id, dto);
   }
 
   @Patch(":id")

@@ -1,9 +1,10 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException, type OnModuleInit } from "@nestjs/common";
 import { and, asc, desc, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
 import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
-import { companies, expenseImports, expenseRules, expenses, projects } from "../../db/schema.js";
+import { companies, expenseImports, expenseRules, expenses, memberships, projects, users } from "../../db/schema.js";
 import { ActivityService } from "../activity/activity.service.js";
+import { NotificationsService, pendingApproval } from "../notifications/notifications.service.js";
 import { parseStatement, type ParsedRow } from "./statement-csv.js";
 import { InvoicesService } from "./invoices.service.js";
 
@@ -86,13 +87,22 @@ export interface ImportRowInput {
   skip?: boolean;
 }
 
+/** Fields an approved expense can no longer change (row 133) — corrections are adjustments. */
+const LOCKED_FIELDS = ["date", "vendor", "amount", "currency", "kind", "category", "projectId", "companyId", "billable", "personal"] as const;
+
 @Injectable()
-export class ExpensesService {
+export class ExpensesService implements OnModuleInit {
   constructor(
     @Inject(DRIZZLE) private readonly db: DB,
     private readonly activity: ActivityService,
     private readonly invoicesService: InvoicesService,
+    private readonly notifications: NotificationsService,
   ) {}
+
+  /** Row 133: the inbox approval card's Approve / Reject buttons land here. */
+  onModuleInit() {
+    this.notifications.registerApproval("expense", (d) => this.decide(d.orgId, { userId: d.userId, role: d.role }, d.entityId, d.approve, d.note));
+  }
 
   categories() {
     return CATEGORIES;
@@ -128,10 +138,16 @@ export class ExpensesService {
       case "imported":
         f.push(eq(expenses.source, "import"));
         break;
+      case "pending":
+        f.push(eq(expenses.approvalStatus, "pending"));
+        break;
+      case "rejected":
+        f.push(eq(expenses.approvalStatus, "rejected"));
+        break;
     }
     const rows = await this.db.query.expenses.findMany({
       where: and(...f),
-      with: { project: { columns: { id: true, name: true } }, company: { columns: { id: true, name: true } }, invoice: { columns: { id: true, number: true } }, createdBy: { columns: { id: true, name: true } } },
+      with: { project: { columns: { id: true, name: true } }, company: { columns: { id: true, name: true } }, invoice: { columns: { id: true, number: true } }, createdBy: { columns: { id: true, name: true } }, decidedBy: { columns: { id: true, name: true } } },
       orderBy: [desc(expenses.date), desc(expenses.createdAt)],
       limit: 1000,
     });
@@ -150,32 +166,46 @@ export class ExpensesService {
     const [bill] = await this.db
       .select({ n: sql<number>`coalesce(sum(${expenses.amount}), 0)::float`, c: sql<number>`count(*)::int` })
       .from(expenses)
-      .where(and(base, eq(expenses.billable, true), isNull(expenses.invoiceId), eq(expenses.kind, "expense")));
+      .where(and(base, eq(expenses.billable, true), isNull(expenses.invoiceId), eq(expenses.kind, "expense"), eq(expenses.approvalStatus, "approved")));
+    const [pending] = await this.db.select({ c: sql<number>`count(*)::int`, n: sql<number>`coalesce(sum(${expenses.amount}), 0)::float` }).from(expenses).where(and(eq(expenses.organizationId, orgId), isNull(expenses.archivedAt), eq(expenses.approvalStatus, "pending")));
     const [personal] = await this.db.select({ n: sql<number>`coalesce(sum(${expenses.amount}), 0)::float` }).from(expenses).where(and(eq(expenses.organizationId, orgId), isNull(expenses.archivedAt), eq(expenses.personal, true), gte(expenses.date, monthStart)));
-    return { thisMonth: round2(month?.n ?? 0), uncategorised: uncat?.n ?? 0, unbilledBillable: round2(bill?.n ?? 0), unbilledCount: bill?.c ?? 0, personalThisMonth: round2(personal?.n ?? 0) };
+    return { thisMonth: round2(month?.n ?? 0), uncategorised: uncat?.n ?? 0, unbilledBillable: round2(bill?.n ?? 0), unbilledCount: bill?.c ?? 0, personalThisMonth: round2(personal?.n ?? 0), pendingCount: pending?.c ?? 0, pendingAmount: round2(pending?.n ?? 0) };
   }
 
   async get(orgId: string, id: string, ownerId?: string) {
     const row = await this.db.query.expenses.findFirst({
       where: and(eq(expenses.id, id), eq(expenses.organizationId, orgId)),
-      with: { project: { columns: { id: true, name: true } }, company: { columns: { id: true, name: true } }, invoice: { columns: { id: true, number: true } }, createdBy: { columns: { id: true, name: true } } },
+      with: {
+        project: { columns: { id: true, name: true } },
+        company: { columns: { id: true, name: true } },
+        invoice: { columns: { id: true, number: true } },
+        createdBy: { columns: { id: true, name: true } },
+        decidedBy: { columns: { id: true, name: true } },
+        adjustments: { columns: { id: true, amount: true, kind: true, description: true, createdAt: true }, orderBy: [asc(expenses.createdAt)] },
+      },
     });
     if (!row || (ownerId && row.createdById !== ownerId)) throw new NotFoundException("Expense not found");
-    return shape(row);
+    return { ...shape(row), adjustments: row.adjustments.map((a) => ({ id: a.id, amount: a.amount, kind: a.kind, description: a.description, createdAt: a.createdAt })) };
   }
 
   /* ---------------- write ---------------- */
 
-  async create(orgId: string, userId: string, dto: ExpenseDto) {
+  async create(orgId: string, userId: string, dto: ExpenseDto, role = "owner") {
     await this.assertLinks(orgId, dto);
     if (!dto.vendor?.trim()) throw new BadRequestException("Vendor is required");
     if (!(Number(dto.amount) > 0)) throw new BadRequestException("Amount must be greater than zero");
     const guess = dto.category === undefined ? await this.suggest(orgId, dto.vendor, dto.description ?? "") : null;
+    // Row 133: what a member logs waits for a project manager; what an admin logs is approved by definition.
+    const needsApproval = role === "member";
     const [row] = await this.db
       .insert(expenses)
       .values({
         organizationId: orgId,
         createdById: userId,
+        approvalStatus: needsApproval ? "pending" : "approved",
+        submittedAt: needsApproval ? new Date() : null,
+        decidedAt: needsApproval ? null : new Date(),
+        decidedById: needsApproval ? null : userId,
         date: dto.date ? new Date(dto.date) : new Date(),
         vendor: dto.vendor.trim().slice(0, 255),
         description: dto.description?.trim() || null,
@@ -195,12 +225,154 @@ export class ExpensesService {
       })
       .returning();
     await this.activity.record({ orgId, actorId: userId, entityType: "expense", entityId: row!.id, action: "created", changes: [{ field: "amount", from: null, to: row!.amount }] });
+    if (needsApproval) await this.askApprovers(orgId, row!.id);
+    return this.get(orgId, row!.id);
+  }
+
+  /* ---------------- row 133: approval queue ---------------- */
+
+  /** Who can approve: owners / admins, plus the lead of the expense's project. */
+  private async approverIds(orgId: string, projectId: string | null) {
+    const admins = await this.db.select({ userId: memberships.userId }).from(memberships).where(and(eq(memberships.organizationId, orgId), inArray(memberships.role, ["owner", "admin"])));
+    const ids = new Set(admins.map((a) => a.userId));
+    if (projectId) {
+      const p = await this.db.query.projects.findFirst({ where: eq(projects.id, projectId), columns: { leadId: true } });
+      if (p?.leadId) ids.add(p.leadId);
+    }
+    return ids;
+  }
+
+  private async askApprovers(orgId: string, id: string) {
+    const e = await this.get(orgId, id);
+    const [who] = await this.db.select({ name: users.name }).from(users).where(eq(users.id, e.createdBy?.id ?? ""));
+    for (const approver of await this.approverIds(orgId, e.projectId)) {
+      if (approver === e.createdBy?.id) continue;
+      await this.notifications.notifyDirect({
+        orgId,
+        receiverId: approver,
+        actorId: e.createdBy?.id ?? null,
+        entityType: "expense",
+        entityId: id,
+        verb: "expense_submitted",
+        title: `Expense to approve: ${who?.name ?? "Someone"} · ${e.currency} ${e.amount.toFixed(2)} at ${e.vendor}`,
+        body: [e.project?.name, e.category, e.description, e.billable ? "billable" : null].filter(Boolean).join(" · "),
+        data: { expenseId: id, approval: pendingApproval("expense"), link: "/finance/expenses?filter=pending" },
+      });
+    }
+  }
+
+  /** The queue: pending expenses an approver can act on (admins: all; a project lead: their projects). */
+  async queue(orgId: string, actor: { userId: string; role: string }) {
+    const admin = actor.role === "owner" || actor.role === "admin";
+    const f = [eq(expenses.organizationId, orgId), isNull(expenses.archivedAt), eq(expenses.approvalStatus, "pending")];
+    if (!admin) {
+      const led = await this.db.select({ id: projects.id }).from(projects).where(and(eq(projects.organizationId, orgId), eq(projects.leadId, actor.userId)));
+      if (!led.length) return [];
+      f.push(inArray(expenses.projectId, led.map((p) => p.id)));
+    }
+    const rows = await this.db.query.expenses.findMany({
+      where: and(...f),
+      with: { project: { columns: { id: true, name: true } }, company: { columns: { id: true, name: true } }, invoice: { columns: { id: true, number: true } }, createdBy: { columns: { id: true, name: true } }, decidedBy: { columns: { id: true, name: true } } },
+      orderBy: [asc(expenses.submittedAt)],
+      limit: 300,
+    });
+    return rows.map(shape);
+  }
+
+  async decide(orgId: string, actor: { userId: string; role: string }, id: string, approve: boolean, note?: string | null) {
+    const e = await this.get(orgId, id);
+    if (e.approvalStatus !== "pending") throw new BadRequestException(`This expense was already ${e.approvalStatus}`);
+    const allowed = await this.approverIds(orgId, e.projectId);
+    if (!allowed.has(actor.userId)) throw new ForbiddenException("Only a project manager can approve expenses");
+    if (e.createdBy?.id === actor.userId && actor.role === "member") throw new ForbiddenException("You cannot approve your own expense");
+    if (!approve && !note?.trim()) throw new BadRequestException("Say why it was rejected so it can be fixed");
+    const now = new Date();
+    await this.db
+      .update(expenses)
+      .set({ approvalStatus: approve ? "approved" : "rejected", decidedAt: now, decidedById: actor.userId, decisionNote: note?.trim() || null, updatedAt: now })
+      .where(eq(expenses.id, id));
+    await this.notifications.resolveApproval("expense", id, approve ? "approved" : "rejected", note, actor.userId);
+    await this.activity.record({ orgId, actorId: actor.userId, entityType: "expense", entityId: id, action: approve ? "approved" : "rejected", changes: [{ field: "approvalStatus", from: "pending", to: approve ? "approved" : "rejected" }, ...(note?.trim() ? [{ field: "note", from: null, to: note.trim() }] : [])] });
+    if (e.createdBy && e.createdBy.id !== actor.userId) {
+      await this.notifications.notifyDirect({
+        orgId,
+        receiverId: e.createdBy.id,
+        actorId: actor.userId,
+        entityType: "expense",
+        entityId: id,
+        verb: approve ? "expense_approved" : "expense_rejected",
+        title: `${approve ? "Approved" : "Rejected"}: ${e.currency} ${e.amount.toFixed(2)} at ${e.vendor}`,
+        body: note?.trim() || (approve ? "It can now be billed." : null),
+        data: { expenseId: id, link: "/finance/expenses" },
+      });
+    }
+    return this.get(orgId, id);
+  }
+
+  /** A rejected expense, fixed, goes back in the queue. */
+  async resubmit(orgId: string, userId: string, id: string, ownerId?: string) {
+    const e = await this.get(orgId, id, ownerId);
+    if (e.approvalStatus !== "rejected") throw new BadRequestException("Only a rejected expense can be resubmitted");
+    await this.db.update(expenses).set({ approvalStatus: "pending", submittedAt: new Date(), decidedAt: null, decidedById: null, decisionNote: null, updatedAt: new Date() }).where(eq(expenses.id, id));
+    await this.activity.record({ orgId, actorId: userId, entityType: "expense", entityId: id, action: "resubmitted" });
+    await this.askApprovers(orgId, id);
+    return this.get(orgId, id);
+  }
+
+  /**
+   * An approved expense never changes; a correction is a new, already-approved
+   * row for the difference (a refund when the amount goes down) that points
+   * back at the original, so the trail stays honest and the invoice math
+   * still adds up.
+   */
+  async adjust(orgId: string, actor: { userId: string; role: string }, id: string, dto: { amount: number; note: string }) {
+    const e = await this.get(orgId, id);
+    if (e.approvalStatus !== "approved") throw new BadRequestException("Only an approved expense needs an adjustment — edit it instead");
+    if (!(await this.approverIds(orgId, e.projectId)).has(actor.userId)) throw new ForbiddenException("Only a project manager can adjust an approved expense");
+    const target = round2(Number(dto.amount));
+    if (!(target >= 0)) throw new BadRequestException("The corrected amount must be zero or more");
+    const current = round2(e.amount + e.adjustments.reduce((a, x) => a + (x.kind === "refund" ? -x.amount : x.amount), 0));
+    const diff = round2(target - current);
+    if (Math.abs(diff) < 0.005) throw new BadRequestException("That is already the amount");
+    if (!dto.note?.trim()) throw new BadRequestException("Say what the correction is for");
+    const now = new Date();
+    const [row] = await this.db
+      .insert(expenses)
+      .values({
+        organizationId: orgId,
+        createdById: actor.userId,
+        date: e.date,
+        vendor: e.vendor,
+        description: `Adjustment to ${e.vendor} (${e.date.toISOString().slice(0, 10)}): ${dto.note.trim()}`,
+        amount: Math.abs(diff),
+        currency: e.currency,
+        kind: diff < 0 ? "refund" : "expense",
+        category: e.category,
+        projectId: e.projectId,
+        companyId: e.companyId,
+        billable: e.billable,
+        personal: e.personal,
+        notes: dto.note.trim(),
+        approvalStatus: "approved",
+        decidedAt: now,
+        decidedById: actor.userId,
+        adjustsExpenseId: e.id,
+        source: "manual",
+      })
+      .returning();
+    await this.activity.record({ orgId, actorId: actor.userId, entityType: "expense", entityId: e.id, action: "adjusted", changes: [{ field: "amount", from: current, to: target }, { field: "note", from: null, to: dto.note.trim() }] });
     return this.get(orgId, row!.id);
   }
 
   async update(orgId: string, userId: string, id: string, dto: ExpenseDto & { rememberVendor?: boolean; applyToSimilar?: boolean }, ownerId?: string) {
     const before = await this.get(orgId, id, ownerId);
     if (before.invoiceId && (dto.amount !== undefined || dto.billable === false)) throw new BadRequestException("This expense is on an invoice — remove it from the invoice first");
+    // Row 133: approved = locked. Category / project may still be tidied by an approver; money fields need an adjustment.
+    if (before.approvalStatus === "approved" && before.source === "manual" && before.submittedAt) {
+      const touched = LOCKED_FIELDS.filter((k) => dto[k] !== undefined && dto[k] !== (before as Record<string, unknown>)[k]);
+      const money = touched.filter((k) => ["date", "vendor", "amount", "currency", "kind", "billable", "personal"].includes(k));
+      if (money.length) throw new BadRequestException("This expense is approved and locked — record an adjustment instead");
+    }
     await this.assertLinks(orgId, dto);
     const patch: Record<string, unknown> = { updatedAt: new Date() };
     if (dto.date !== undefined) patch.date = new Date(dto.date);
@@ -384,7 +556,7 @@ export class ExpensesService {
 
   /** Unbilled billable expenses that fit an invoice's project/company. */
   async billableFor(orgId: string, opts: { projectId?: string | null; companyId?: string | null }) {
-    const f = [eq(expenses.organizationId, orgId), isNull(expenses.archivedAt), eq(expenses.billable, true), isNull(expenses.invoiceId), eq(expenses.personal, false), eq(expenses.kind, "expense")];
+    const f = [eq(expenses.organizationId, orgId), isNull(expenses.archivedAt), eq(expenses.billable, true), isNull(expenses.invoiceId), eq(expenses.personal, false), eq(expenses.kind, "expense"), eq(expenses.approvalStatus, "approved")];
     if (opts.projectId) f.push(eq(expenses.projectId, opts.projectId));
     else if (opts.companyId) f.push(eq(expenses.companyId, opts.companyId));
     const rows = await this.db.query.expenses.findMany({ where: and(...f), with: { project: { columns: { id: true, name: true } }, company: { columns: { id: true, name: true } }, invoice: { columns: { id: true, number: true } } }, orderBy: [asc(expenses.date)], limit: 200 });
@@ -397,6 +569,8 @@ export class ExpensesService {
     if (!expenseIds.length) throw new BadRequestException("Pick at least one expense");
     const rows = await this.db.query.expenses.findMany({ where: and(eq(expenses.organizationId, orgId), inArray(expenses.id, expenseIds), isNull(expenses.archivedAt)) });
     if (rows.length !== expenseIds.length) throw new BadRequestException("Some expenses were not found");
+    const unapproved = rows.filter((r) => r.approvalStatus !== "approved");
+    if (unapproved.length) throw new BadRequestException(`${unapproved.length} of those expense${unapproved.length === 1 ? " is" : "s are"} not approved yet`);
     const already = rows.filter((r) => r.invoiceId);
     if (already.length) throw new BadRequestException(`${already.length} of these are already on an invoice`);
     const pct = Math.min(100, Math.max(0, markup));
@@ -454,10 +628,16 @@ function keyOf(vendor: string) {
   return vendor.replace(/[^A-Za-z0-9 &.-]/g, " ").replace(/\s+/g, " ").trim().slice(0, 24).trim();
 }
 
-function shape(r: typeof expenses.$inferSelect & { project: { id: string; name: string } | null; company: { id: string; name: string } | null; invoice: { id: string; number: string } | null; createdBy?: { id: string; name: string } | null }) {
+function shape(r: typeof expenses.$inferSelect & { project: { id: string; name: string } | null; company: { id: string; name: string } | null; invoice: { id: string; number: string } | null; createdBy?: { id: string; name: string } | null; decidedBy?: { id: string; name: string } | null }) {
   return {
     id: r.id,
     createdBy: r.createdBy ? { id: r.createdBy.id, name: r.createdBy.name } : null,
+    approvalStatus: r.approvalStatus,
+    submittedAt: r.submittedAt,
+    decidedAt: r.decidedAt,
+    decidedBy: r.decidedBy ? { id: r.decidedBy.id, name: r.decidedBy.name } : null,
+    decisionNote: r.decisionNote,
+    adjustsExpenseId: r.adjustsExpenseId,
     date: r.date,
     vendor: r.vendor,
     description: r.description,

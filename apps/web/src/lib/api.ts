@@ -791,7 +791,7 @@ export interface MyTask extends Task {
 
 /** Row 75: approval request carried by a notification (`data.approval`). */
 export interface ApprovalMeta {
-  kind: "doc_review" | "milestone" | "timesheet" | "leave";
+  kind: "doc_review" | "milestone" | "timesheet" | "leave" | "expense";
   status: "pending" | "approved" | "rejected";
   decidedAt?: string;
   decidedById?: string;
@@ -1868,6 +1868,14 @@ export interface Expense {
   receiptUrl: string | null;
   /** Row 132 */
   createdBy?: { id: string; name: string } | null;
+  /** Row 133 */
+  approvalStatus: "pending" | "approved" | "rejected";
+  submittedAt: string | null;
+  decidedAt: string | null;
+  decidedBy: { id: string; name: string } | null;
+  decisionNote: string | null;
+  adjustsExpenseId: string | null;
+  adjustments?: { id: string; amount: number; kind: "expense" | "refund"; description: string | null; createdAt: string }[];
   notes: string | null;
   source: "manual" | "import";
   importId: string | null;
@@ -1902,6 +1910,8 @@ export interface ExpenseTotals {
   unbilledBillable: number;
   unbilledCount: number;
   personalThisMonth: number;
+  pendingCount: number;
+  pendingAmount: number;
 }
 export interface ExpenseRule {
   id: string;
@@ -2940,6 +2950,12 @@ export const api = {
   createExpense: (body: ExpenseInput) => request<Expense>(`/finance/expenses`, { method: "POST", body: JSON.stringify(body) }),
   updateExpense: (id: string, body: ExpenseInput & { rememberVendor?: boolean; applyToSimilar?: boolean }) => request<Expense>(`/finance/expenses/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteExpense: (id: string) => request<{ id: string }>(`/finance/expenses/${id}`, { method: "DELETE" }),
+  /** Row 133 */
+  getExpenseQueue: () => request<Expense[]>(`/finance/expenses/queue`),
+  approveExpense: (id: string, note?: string) => request<Expense>(`/finance/expenses/${id}/approve`, { method: "POST", body: JSON.stringify({ note: note ?? null }) }),
+  rejectExpense: (id: string, note: string) => request<Expense>(`/finance/expenses/${id}/reject`, { method: "POST", body: JSON.stringify({ note }) }),
+  resubmitExpense: (id: string) => request<Expense>(`/finance/expenses/${id}/resubmit`, { method: "POST" }),
+  adjustExpense: (id: string, body: { amount: number; note: string }) => request<Expense>(`/finance/expenses/${id}/adjust`, { method: "POST", body: JSON.stringify(body) }),
   getExpenseRules: () => request<ExpenseRule[]>(`/finance/expenses/rules`),
   createExpenseRule: (body: { match: string; category?: string | null; projectId?: string | null; billable?: boolean | null; personal?: boolean | null }) => request<ExpenseRule>(`/finance/expenses/rules`, { method: "POST", body: JSON.stringify(body) }),
   deleteExpenseRule: (id: string) => request<{ id: string }>(`/finance/expenses/rules/${id}`, { method: "DELETE" }),

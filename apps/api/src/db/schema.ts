@@ -2986,6 +2986,8 @@ export const contractEventsRelations = relations(contractEvents, ({ one }) => ({
  * ------------------------------------------------------------------ */
 export const expenseKind = pgEnum("expense_kind", ["expense", "refund"]);
 export const expenseSource = pgEnum("expense_source", ["manual", "import"]);
+/** Row 133: members' expenses wait in a queue; only approved costs reach an invoice. */
+export const expenseApproval = pgEnum("expense_approval", ["pending", "approved", "rejected"]);
 
 /** A statement upload: one row per file so imports can be reviewed and undone. */
 export const expenseImports = pgTable(
@@ -3033,6 +3035,14 @@ export const expenses = pgTable(
     personal: boolean("personal").notNull().default(false),
     receiptUrl: text("receipt_url"),
     notes: text("notes"),
+    /** Row 133 */
+    approvalStatus: expenseApproval("approval_status").notNull().default("approved"),
+    submittedAt: timestamp("submitted_at", { withTimezone: true }),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    decidedById: uuid("decided_by_id").references(() => users.id, { onDelete: "set null" }),
+    decisionNote: text("decision_note"),
+    /** An approved expense is locked; a correction is a new row pointing back at it. */
+    adjustsExpenseId: uuid("adjusts_expense_id").references((): AnyPgColumn => expenses.id, { onDelete: "set null" }),
     source: expenseSource("source").notNull().default("manual"),
     importId: uuid("import_id").references(() => expenseImports.id, { onDelete: "set null" }),
     account: varchar("account", { length: 120 }),
@@ -3047,6 +3057,8 @@ export const expenses = pgTable(
     index("expenses_invoice_idx").on(t.invoiceId),
     index("expenses_import_idx").on(t.importId),
     index("expenses_org_vendor_idx").on(t.organizationId, t.vendor),
+    index("expenses_org_approval_idx").on(t.organizationId, t.approvalStatus),
+    index("expenses_adjusts_idx").on(t.adjustsExpenseId),
   ],
 );
 
@@ -3071,12 +3083,15 @@ export const expenseRules = pgTable(
   (t) => [index("expense_rules_org_idx").on(t.organizationId)],
 );
 
-export const expensesRelations = relations(expenses, ({ one }) => ({
+export const expensesRelations = relations(expenses, ({ one, many }) => ({
   project: one(projects, { fields: [expenses.projectId], references: [projects.id] }),
   company: one(companies, { fields: [expenses.companyId], references: [companies.id] }),
   invoice: one(invoices, { fields: [expenses.invoiceId], references: [invoices.id] }),
   import: one(expenseImports, { fields: [expenses.importId], references: [expenseImports.id] }),
   createdBy: one(users, { fields: [expenses.createdById], references: [users.id] }),
+  decidedBy: one(users, { fields: [expenses.decidedById], references: [users.id] }),
+  adjusts: one(expenses, { fields: [expenses.adjustsExpenseId], references: [expenses.id], relationName: "expense_adjustments" }),
+  adjustments: many(expenses, { relationName: "expense_adjustments" }),
 }));
 
 export const expenseRulesRelations = relations(expenseRules, ({ one }) => ({

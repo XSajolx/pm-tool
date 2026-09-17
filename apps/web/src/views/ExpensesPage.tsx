@@ -10,6 +10,8 @@ import { cn } from "../lib/utils.js";
 
 const FILTERS: { key: string; label: string }[] = [
   { key: "all", label: "All" },
+  { key: "pending", label: "Awaiting approval" },
+  { key: "rejected", label: "Rejected" },
   { key: "uncategorised", label: "Uncategorised" },
   { key: "billable", label: "Billable, not yet invoiced" },
   { key: "billed", label: "Invoiced" },
@@ -27,7 +29,9 @@ export function ExpensesPage() {
   const { role } = useAuth();
   const admin = role === "owner" || role === "admin";
   const qc = useQueryClient();
-  const [filter, setFilter] = useState("all");
+  const [filter, setFilter] = useState(() => new URLSearchParams(window.location.search).get("filter") ?? "all");
+  const [adjusting, setAdjusting] = useState<Expense | null>(null);
+  const [rejecting, setRejecting] = useState<Expense | null>(null);
   const [q, setQ] = useState("");
   const [adding, setAdding] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -43,6 +47,9 @@ export function ExpensesPage() {
   };
   const update = useMutation({ mutationFn: ({ id, body }: { id: string; body: Parameters<typeof api.updateExpense>[1] }) => api.updateExpense(id, body), onSuccess: refresh });
   const remove = useMutation({ mutationFn: (id: string) => api.deleteExpense(id), onSuccess: refresh });
+  // Row 133
+  const approve = useMutation({ mutationFn: (id: string) => api.approveExpense(id), onSuccess: refresh });
+  const resubmit = useMutation({ mutationFn: (id: string) => api.resubmitExpense(id), onSuccess: refresh });
   const [remember, setRemember] = useState<{ id: string; vendor: string; category: string } | null>(null);
   const shown = expenses.reduce((a, e) => a + (e.kind === "refund" ? -e.amount : e.amount), 0);
 
@@ -62,7 +69,11 @@ export function ExpensesPage() {
 
       <div className="flex-1 overflow-auto p-6">
         <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <Tile label="This month" value={fmtMoney(totals?.thisMonth ?? 0)} hint="business spend, net of refunds" />
+          {admin ? (
+            <Tile label="Awaiting approval" value={String(totals?.pendingCount ?? 0)} hint={totals?.pendingAmount ? `${fmtMoney(totals.pendingAmount)} waiting` : "queue is clear"} tone={totals?.pendingCount ? "text-amber-700" : undefined} onClick={() => setFilter("pending")} active={filter === "pending"} />
+          ) : (
+            <Tile label="This month" value={fmtMoney(totals?.thisMonth ?? 0)} hint="business spend, net of refunds" />
+          )}
           <Tile label="Uncategorised" value={String(totals?.uncategorised ?? 0)} hint="need a category" tone={totals?.uncategorised ? "text-amber-700" : undefined} onClick={() => setFilter("uncategorised")} active={filter === "uncategorised"} />
           <Tile label="Billable, not invoiced" value={fmtMoney(totals?.unbilledBillable ?? 0)} hint={`${totals?.unbilledCount ?? 0} to re-bill`} tone="text-indigo-700" onClick={() => setFilter("billable")} active={filter === "billable"} />
           <Tile label="Personal this month" value={fmtMoney(totals?.personalThisMonth ?? 0)} hint="excluded from P&L" onClick={() => setFilter("personal")} active={filter === "personal"} />
@@ -98,6 +109,7 @@ export function ExpensesPage() {
               <tbody>
                 {expenses.map((e) => {
                   const locked = Boolean(e.invoiceId);
+                  const approved = e.approvalStatus === "approved" && Boolean(e.submittedAt);
                   return (
                     <tr key={e.id} className={cn("border-t border-border hover:bg-[#fbfbfa]", e.personal && "opacity-60")}>
                       <td className="px-3 py-1.5 text-xs text-muted-foreground">{fmtShortDate(e.date)}</td>
@@ -106,6 +118,10 @@ export function ExpensesPage() {
                         <p className="max-w-md truncate text-[11px] text-muted-foreground">
                           {e.receiptUrl && <a href={e.receiptUrl} target="_blank" rel="noreferrer" className="mr-1 rounded bg-slate-100 px-1 text-[10px] text-slate-700 hover:bg-slate-200" title="Open receipt">🧾 receipt</a>}
                           {admin && e.createdBy && <span className="mr-1 text-[10px]">by {e.createdBy.name} ·</span>}
+                          {e.approvalStatus === "pending" && <span className="mr-1 rounded bg-amber-50 px-1 text-[10px] font-medium text-amber-800">awaiting approval</span>}
+                          {e.approvalStatus === "rejected" && <span className="mr-1 rounded bg-red-50 px-1 text-[10px] font-medium text-red-700" title={e.decisionNote ?? undefined}>rejected{e.decisionNote ? `: ${e.decisionNote}` : ""}</span>}
+                          {approved && <span className="mr-1 rounded bg-emerald-50 px-1 text-[10px] text-emerald-700" title={`Approved by ${e.decidedBy?.name ?? "—"}${e.decisionNote ? ` · ${e.decisionNote}` : ""}`}>approved · locked</span>}
+                          {e.adjustsExpenseId && <span className="mr-1 rounded bg-slate-100 px-1 text-[10px] text-slate-600">adjustment</span>}
                           {e.description}
                           {e.source === "import" && <span className="ml-1 rounded bg-slate-100 px-1 text-[10px]">imported{e.account ? ` · ${e.account}` : ""}</span>}
                           {e.invoice && <Link to="/finance/invoices/$invoiceId" params={{ invoiceId: e.invoice.id }} className="ml-1 rounded bg-emerald-50 px-1 text-[10px] text-emerald-700">on {e.invoice.number}</Link>}
@@ -131,10 +147,20 @@ export function ExpensesPage() {
                           {projects.filter((p) => p.kind !== "internal").map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                         </select>
                       </td>
-                      <td className="px-3 py-1.5 text-center"><input type="checkbox" checked={e.billable} disabled={locked} onChange={(ev) => update.mutate({ id: e.id, body: { billable: ev.target.checked } })} /></td>
-                      <td className="px-3 py-1.5 text-center"><input type="checkbox" checked={e.personal} disabled={locked} onChange={(ev) => update.mutate({ id: e.id, body: { personal: ev.target.checked } })} /></td>
+                      <td className="px-3 py-1.5 text-center"><input type="checkbox" checked={e.billable} disabled={locked || approved} onChange={(ev) => update.mutate({ id: e.id, body: { billable: ev.target.checked } })} /></td>
+                      <td className="px-3 py-1.5 text-center"><input type="checkbox" checked={e.personal} disabled={locked || approved} onChange={(ev) => update.mutate({ id: e.id, body: { personal: ev.target.checked } })} /></td>
                       <td className={cn("px-3 py-1.5 text-right tabular-nums", e.kind === "refund" ? "text-emerald-700" : "text-slate-800")}>{e.kind === "refund" ? "+" : ""}{fmtMoney(e.amount, e.currency)}</td>
-                      <td className="px-2 text-center">{admin && !locked && <button onClick={() => remove.mutate(e.id)} className="text-slate-300 hover:text-red-500" title="Delete">✕</button>}</td>
+                      <td className="whitespace-nowrap px-2 text-center text-[11px]">
+                        {e.approvalStatus === "pending" && admin && (
+                          <span className="inline-flex gap-1" data-testid="approve-strip">
+                            <button onClick={() => approve.mutate(e.id)} className="rounded bg-emerald-600 px-1.5 py-0.5 font-medium text-white hover:bg-emerald-700">Approve</button>
+                            <button onClick={() => setRejecting(e)} className="rounded border border-border px-1.5 py-0.5 text-slate-700 hover:bg-muted">Reject</button>
+                          </span>
+                        )}
+                        {e.approvalStatus === "rejected" && <button onClick={() => resubmit.mutate(e.id)} className="rounded border border-border px-1.5 py-0.5 text-slate-700 hover:bg-muted">Resubmit</button>}
+                        {approved && admin && !locked && <button onClick={() => setAdjusting(e)} className="rounded border border-border px-1.5 py-0.5 text-slate-700 hover:bg-muted" title="Approved expenses are locked; record a correction">Adjust</button>}
+                        {admin && !locked && !approved && e.approvalStatus !== "pending" && <button onClick={() => remove.mutate(e.id)} className="text-slate-300 hover:text-red-500" title="Delete">✕</button>}
+                      </td>
                     </tr>
                   );
                 })}
@@ -157,6 +183,8 @@ export function ExpensesPage() {
           <button onClick={() => setRemember(null)} className="text-slate-400 hover:text-slate-700">No</button>
         </div>
       )}
+      {rejecting && <RejectDialog expense={rejecting} onClose={() => setRejecting(null)} onDone={() => { setRejecting(null); refresh(); }} />}
+      {adjusting && <AdjustDialog expense={adjusting} onClose={() => setAdjusting(null)} onDone={() => { setAdjusting(null); refresh(); }} />}
       {adding && <AddExpenseDialog categories={categories} onClose={() => setAdding(false)} onDone={() => { setAdding(false); refresh(); }} />}
       {importing && <ImportDialog categories={categories} onClose={() => setImporting(false)} onDone={() => { setImporting(false); refresh(); setFilter("imported"); }} />}
     </div>
@@ -171,6 +199,59 @@ function Tile({ label, value, hint, tone, onClick, active }: { label: string; va
       <p className={cn("mt-1 text-lg font-semibold tabular-nums text-slate-900", tone)}>{value}</p>
       {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
     </Cmp>
+  );
+}
+
+/** Row 133: a rejection always carries a reason so the member can fix it. */
+function RejectDialog({ expense, onClose, onDone }: { expense: Expense; onClose: () => void; onDone: () => void }) {
+  useEscape(onClose);
+  const [note, setNote] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const reject = useMutation({ mutationFn: () => api.rejectExpense(expense.id, note.trim()), onSuccess: onDone, onError: (e) => setError(errorMessage(e)) });
+  return (
+    <>
+      <div className="fixed inset-0 z-40 bg-black/20" onClick={onClose} />
+      <form onSubmit={(e) => { e.preventDefault(); if (note.trim()) reject.mutate(); }} className="fixed left-1/2 top-1/2 z-50 w-[420px] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-white p-5 shadow-xl" data-testid="reject-dialog">
+        <h2 className="text-base font-semibold text-slate-900">Reject {fmtMoney(expense.amount, expense.currency)} at {expense.vendor}</h2>
+        <p className="mt-0.5 text-xs text-muted-foreground">{expense.createdBy?.name ?? "The submitter"} will see this note and can fix and resubmit.</p>
+        <textarea autoFocus value={note} onChange={(e) => setNote(e.target.value)} rows={3} placeholder="Why it is not approved…" className={cn(input, "mt-3 resize-none")} />
+        {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
+        <div className="mt-4 flex justify-end gap-2">
+          <button type="button" onClick={onClose} className="rounded-md px-3 py-1.5 text-sm text-slate-600 hover:bg-muted">Cancel</button>
+          <button type="submit" disabled={!note.trim() || reject.isPending} className="rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50">Reject</button>
+        </div>
+      </form>
+    </>
+  );
+}
+
+/** Row 133: approved expenses are locked; a correction is a linked adjustment for the difference. */
+function AdjustDialog({ expense, onClose, onDone }: { expense: Expense; onClose: () => void; onDone: () => void }) {
+  useEscape(onClose);
+  const current = expense.amount + (expense.adjustments ?? []).reduce((a, x) => a + (x.kind === "refund" ? -x.amount : x.amount), 0);
+  const [amount, setAmount] = useState(String(current));
+  const [note, setNote] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const adjust = useMutation({ mutationFn: () => api.adjustExpense(expense.id, { amount: Number(amount), note: note.trim() }), onSuccess: onDone, onError: (e) => setError(errorMessage(e)) });
+  const diff = Number(amount) - current;
+  return (
+    <>
+      <div className="fixed inset-0 z-40 bg-black/20" onClick={onClose} />
+      <form onSubmit={(e) => { e.preventDefault(); if (note.trim() && Number(amount) >= 0) adjust.mutate(); }} className="fixed left-1/2 top-1/2 z-50 w-[440px] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-white p-5 shadow-xl" data-testid="adjust-dialog">
+        <h2 className="text-base font-semibold text-slate-900">Adjust {expense.vendor}</h2>
+        <p className="mt-0.5 text-xs text-muted-foreground">The approved {fmtMoney(expense.amount, expense.currency)} stays as recorded. A linked correction of the difference is added, already approved.</p>
+        <div className="mt-3 grid grid-cols-2 gap-3">
+          <CrmField label="Corrected amount"><input type="number" min="0" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} className={input} autoFocus /></CrmField>
+          <div className="self-end pb-1.5 text-xs text-slate-700">{Number.isFinite(diff) && Math.abs(diff) >= 0.005 ? <>Records a {diff < 0 ? <b className="text-emerald-700">refund of {fmtMoney(-diff, expense.currency)}</b> : <b>charge of {fmtMoney(diff, expense.currency)}</b>}</> : "No change yet"}</div>
+          <div className="col-span-2"><CrmField label="Reason"><input value={note} onChange={(e) => setNote(e.target.value)} className={input} placeholder="Tip was personal / wrong currency / …" /></CrmField></div>
+        </div>
+        {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
+        <div className="mt-4 flex justify-end gap-2">
+          <button type="button" onClick={onClose} className="rounded-md px-3 py-1.5 text-sm text-slate-600 hover:bg-muted">Cancel</button>
+          <button type="submit" disabled={!note.trim() || Math.abs(diff) < 0.005 || adjust.isPending} className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50">Record adjustment</button>
+        </div>
+      </form>
+    </>
   );
 }
 

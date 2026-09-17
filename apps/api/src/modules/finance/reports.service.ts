@@ -1,5 +1,5 @@
 import { BadRequestException, Inject, Injectable } from "@nestjs/common";
-import { and, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull, lt, sql, ne } from "drizzle-orm";
 import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
 import { companies, expenses, invoicePayments, invoices, projects } from "../../db/schema.js";
@@ -51,7 +51,8 @@ export class ReportsService {
     const spend = await this.db
       .select({ date: expenses.date, amount: expenses.amount, kind: expenses.kind, category: expenses.category, projectId: expenses.projectId, vendor: expenses.vendor })
       .from(expenses)
-      .where(and(eq(expenses.organizationId, orgId), isNull(expenses.archivedAt), eq(expenses.personal, false), gte(expenses.date, from), lt(expenses.date, to)));
+      // Row 133: rejected expenses never count.
+      .where(and(eq(expenses.organizationId, orgId), isNull(expenses.archivedAt), eq(expenses.personal, false), ne(expenses.approvalStatus, "rejected"), gte(expenses.date, from), lt(expenses.date, to)));
 
     // ---- buckets
     const keys = bucketKeys(from, to, granularity);

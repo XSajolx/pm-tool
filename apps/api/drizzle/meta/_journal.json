@@ -561,6 +561,13 @@
       "when": 1789604062491,
       "tag": "0079_tan_dreadnoughts",
       "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "7",
+      "when": 1789604386060,
+      "tag": "0080_shocking_charles_xavier",
+      "breakpoints": true
     }
   ]
 }
