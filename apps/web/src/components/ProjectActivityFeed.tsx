@@ -206,6 +206,7 @@ export function ProjectActivityFeed({ projectId }: { projectId: string }) {
                       {e.actor ? <Avatar user={{ id: e.actor.id, name: e.actor.name, avatarUrl: e.actor.avatarUrl, email: "", role: "member" }} size={18} /> : <span className="h-[18px] w-[18px] rounded-full bg-slate-200" />}
                       <p className="min-w-0 flex-1 text-slate-600">
                         <span className="font-medium text-slate-800">{e.actor?.name ?? "System"}</span> {describe(e, data!)} {entityLink(e)}
+                        {e.rule && <span className="ml-1.5 rounded bg-violet-50 px-1.5 py-0.5 text-[10px] font-medium text-violet-700" title="Done by an automation rule">⚙ {e.rule.name}</span>}
                         <span className="ml-1.5 text-xs text-muted-foreground" title={new Date(e.createdAt).toLocaleString()}>{relativeTime(e.createdAt)}</span>
                       </p>
                     </li>

@@ -61,6 +61,18 @@ export function InvoicingSettings({ canEdit }: { canEdit: boolean }) {
           Admins must also go through review before issuing (draft → review → issued for everyone)
         </label>
       </section>
+      <section className="mt-4 rounded-lg border border-border bg-white p-4" data-testid="reminder-settings">
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Overdue reminders (row 154)</h2>
+        <p className="mt-2 text-xs text-muted-foreground">Emails the client&apos;s billing contact at each step after the due date — each step once, the highest due step only, never a burst. Pause per invoice from the invoice page.</p>
+        <label className="mt-3 flex items-center gap-2 text-sm text-slate-800">
+          <input type="checkbox" checked={f.remindersEnabled ?? true} disabled={!canEdit} onChange={(e) => setF({ ...f, remindersEnabled: e.target.checked })} />
+          Send reminders automatically
+        </label>
+        <div className="mt-3 grid grid-cols-2 gap-3">
+          <CrmField label="Days overdue (comma-separated)"><input value={(f.reminderDays ?? [3, 14, 30]).join(", ")} disabled={!canEdit} onChange={(e) => setF({ ...f, reminderDays: e.target.value.split(/[,\s]+/).map((x) => Number(x)).filter((n) => Number.isInteger(n) && n > 0) })} className={input} placeholder="3, 14, 30" /></CrmField>
+          <CrmField label="Note added to every reminder"><input value={f.reminderNote ?? ""} disabled={!canEdit} onChange={(e) => setF({ ...f, reminderNote: e.target.value })} className={input} placeholder="Bank details, who to call…" /></CrmField>
+        </div>
+      </section>
       {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
       {canEdit && dirty && (
         <button type="button" onClick={() => save.mutate()} disabled={save.isPending} className="mt-4 rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50">

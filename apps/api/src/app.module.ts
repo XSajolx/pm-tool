@@ -31,6 +31,7 @@ import { TrashModule } from "./modules/trash/trash.module.js";
 import { ImportModule } from "./modules/import/import.module.js";
 import { FinanceModule } from "./modules/finance/finance.module.js";
 import { AccountingModule } from "./modules/accounting/accounting.module.js";
+import { AutomationsModule } from "./modules/automations/automations.module.js";
 
 @Module({
   imports: [
@@ -65,6 +66,7 @@ import { AccountingModule } from "./modules/accounting/accounting.module.js";
     ImportModule,
     FinanceModule,
     AccountingModule,
+    AutomationsModule,
   ],
   controllers: [HealthController],
 })

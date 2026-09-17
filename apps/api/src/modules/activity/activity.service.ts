@@ -1,8 +1,9 @@
 import { Inject, Injectable } from "@nestjs/common";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
-import { activityLog, documents, milestones, projectStages, projects, statuses, tasks, users } from "../../db/schema.js";
+import { activityLog, documents, milestones, projectStages, projects, statuses, tasks, users, automationRules } from "../../db/schema.js";
 import { desc as descOrder, gte, ilike, lt, lte } from "drizzle-orm";
 
 /** One field-level change. Stored as an array in `activity_log.changes`. */
@@ -54,11 +55,30 @@ export interface RecordActivity {
  * which is what lets the UI render "moved from To Do to In Progress" without the
  * writer having to compose a sentence.
  */
+export type ActivityRow = typeof activityLog.$inferSelect;
+export type ActivityListener = (row: ActivityRow) => Promise<void> | void;
+
+/** Row 155: while an automation acts, every activity row it produces is stamped with the rule. */
+const ruleContext = new AsyncLocalStorage<{ ruleId: string }>();
+
 @Injectable()
 export class ActivityService {
+  private readonly listeners: ActivityListener[] = [];
+
   constructor(@Inject(DRIZZLE) private readonly db: DB) {}
 
+  /** Row 153: automations subscribe here — one hook, every mutation, no per-call-site wiring. */
+  onRecord(fn: ActivityListener) {
+    this.listeners.push(fn);
+  }
+
+  /** Run `fn` as rule `ruleId`: activity written inside carries the rule id (and never re-triggers rules). */
+  runAsRule<T>(ruleId: string, fn: () => Promise<T>) {
+    return ruleContext.run({ ruleId }, fn);
+  }
+
   async record(input: RecordActivity) {
+    const ruleId = ruleContext.getStore()?.ruleId ?? null;
     const [row] = await this.db
       .insert(activityLog)
       .values({
@@ -68,8 +88,11 @@ export class ActivityService {
         entityId: input.entityId,
         action: input.action,
         changes: input.changes?.length ? { fields: input.changes } : null,
+        ruleId,
       })
       .returning();
+    // Rows made by a rule do not feed rules again — no chains, no loops.
+    if (!ruleId) for (const fn of this.listeners) void Promise.resolve().then(() => fn(row!)).catch(() => undefined);
     return row!;
   }
 
@@ -257,13 +280,17 @@ export class ActivityService {
   /** One extra query for all actors rather than a join per row. */
   private async withActors(rows: (typeof activityLog.$inferSelect)[]) {
     const actorIds = [...new Set(rows.map((r) => r.actorId).filter(Boolean))] as string[];
-    const actors = actorIds.length
-      ? await this.db.select().from(users).where(inArray(users.id, actorIds))
-      : [];
+    const ruleIds = [...new Set(rows.map((r) => r.ruleId).filter(Boolean))] as string[];
+    const [actors, rules] = await Promise.all([
+      actorIds.length ? this.db.select().from(users).where(inArray(users.id, actorIds)) : [],
+      ruleIds.length ? this.db.select({ id: automationRules.id, name: automationRules.name }).from(automationRules).where(inArray(automationRules.id, ruleIds)) : [],
+    ]);
     const byId = new Map(actors.map((a) => [a.id, a]));
+    const ruleBy = new Map(rules.map((r) => [r.id, r]));
 
     return rows.map((r) => {
       const actor = r.actorId ? byId.get(r.actorId) : undefined;
+      const rule = r.ruleId ? ruleBy.get(r.ruleId) : undefined;
       return {
         id: r.id,
         entityType: r.entityType,
@@ -274,6 +301,8 @@ export class ActivityService {
         actor: actor
           ? { id: actor.id, name: actor.name, avatarUrl: actor.avatarUrl }
           : null,
+        /** Row 155: which automation rule did this, if any. */
+        rule: rule ? { id: rule.id, name: rule.name } : null,
       };
     });
   }

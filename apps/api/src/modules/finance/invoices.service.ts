@@ -12,7 +12,7 @@ import { stripeConfigured } from "./stripe.config.js";
 
 export type InvoiceStatus = "draft" | "review" | "sent" | "viewed" | "partially_paid" | "paid" | "void" | "superseded";
 
-export const DEFAULT_INVOICING: InvoicingSettings = { prefix: "INV-", padding: 4, nextNumber: null, defaultDueDays: 14, defaultTaxRate: 0, defaultCurrency: "USD", defaultNotes: "", requireReview: false };
+export const DEFAULT_INVOICING: InvoicingSettings = { prefix: "INV-", padding: 4, nextNumber: null, defaultDueDays: 14, defaultTaxRate: 0, defaultCurrency: "USD", defaultNotes: "", requireReview: false, reminderDays: [3, 14, 30], remindersEnabled: true, reminderNote: "" };
 export type PaymentMethod = "bank_transfer" | "card" | "cash" | "cheque" | "other";
 
 export interface InvoiceItemDto {
@@ -768,6 +768,7 @@ function shape(
     voidedAt: r.voidedAt,
     voidReason: r.voidReason,
     onlinePayments: r.onlinePayments,
+    remindersPaused: r.remindersPaused,
     version: r.version,
     revisionOfId: r.revisionOfId,
     supersededById: r.supersededById,

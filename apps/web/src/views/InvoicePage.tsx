@@ -372,6 +372,7 @@ export function InvoicePage() {
             </section>
 
             {admin && inv.status !== "draft" && <AccountingCard inv={inv} />}
+            {(open || inv.status === "paid") && <RemindersCard inv={inv} admin={admin} />}
           </aside>
         </div>
       </div>
@@ -521,6 +522,47 @@ function ReasonDialog({ title, blurb, label, cta, pending, onClose, onConfirm }:
         </div>
       </form>
     </>
+  );
+}
+
+/** Row 154: the overdue reminder sequence for this invoice — what went to the client, what is next, pause. */
+function RemindersCard({ inv, admin }: { inv: Invoice; admin: boolean }) {
+  const qc = useQueryClient();
+  const { data } = useQuery({ queryKey: ["invoice-reminders", inv.id], queryFn: () => api.getInvoiceReminders(inv.id) });
+  const set = (d: Awaited<ReturnType<typeof api.getInvoiceReminders>>) => qc.setQueryData(["invoice-reminders", inv.id], d);
+  const pause = useMutation({ mutationFn: (paused: boolean) => api.pauseInvoiceReminders(inv.id, paused), onSuccess: set });
+  const send = useMutation({ mutationFn: () => api.sendInvoiceReminder(inv.id), onSuccess: (d) => { set(d); void qc.invalidateQueries({ queryKey: ["invoice", inv.id] }); } });
+  if (!data) return null;
+  const open = inv.status === "sent" || inv.status === "viewed" || inv.status === "partially_paid";
+  return (
+    <section className="rounded-lg border border-border bg-white p-4 text-xs" data-testid="invoice-reminders">
+      <div className="flex items-center gap-2">
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Overdue reminders</h2>
+        {data.paused ? <span className="ml-auto rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600">paused</span> : !data.enabled ? <span className="ml-auto rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600">off in Settings</span> : null}
+      </div>
+      <p className="mt-2 text-muted-foreground">
+        {data.to ? <>To <b className="text-slate-700">{data.to}</b> at {data.days.join(" / ")} days overdue.</> : <span className="text-amber-700">No client email — add one to the contact or company.</span>}
+        {open && data.nextStep != null && data.nextAt && <> Next: <b className="text-slate-700">{data.nextStep}-day</b> reminder {new Date(data.nextAt) <= new Date() ? "on the next sweep" : `on ${fmtShortDate(data.nextAt)}`}.</>}
+        {!data.mailConfigured && <span className="block text-[10px] text-amber-700">Mail provider not configured (RESEND_API_KEY) — reminders are logged, not emailed.</span>}
+      </p>
+      {data.sent.length > 0 && (
+        <ul className="mt-2 space-y-1">
+          {data.sent.map((r) => (
+            <li key={r.id} className="flex items-center gap-2" title={r.subject}>
+              <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-medium", r.subject.startsWith("(skipped") ? "bg-slate-100 text-slate-500" : r.delivered ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-800")}>{r.manual ? "manual" : `${r.step}d`}</span>
+              <span className="min-w-0 flex-1 truncate text-slate-700">{r.subject.startsWith("(skipped") ? r.subject : `${r.delivered ? "emailed" : "logged"} to ${r.sentTo}`}</span>
+              <span className="text-muted-foreground">{fmtShortDate(r.sentAt)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {admin && open && (
+        <div className="mt-3 flex gap-2">
+          <button type="button" disabled={send.isPending || !data.to} onClick={() => send.mutate()} className="rounded-md border border-border px-2.5 py-1 font-medium text-slate-700 hover:bg-muted disabled:opacity-50">{send.isPending ? "Sending…" : "Send a reminder now"}</button>
+          <button type="button" disabled={pause.isPending} onClick={() => pause.mutate(!data.paused)} className="rounded-md px-2.5 py-1 text-slate-600 hover:bg-muted">{data.paused ? "Resume sequence" : "Pause sequence"}</button>
+        </div>
+      )}
+    </section>
   );
 }
 

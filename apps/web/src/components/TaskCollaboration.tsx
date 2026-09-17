@@ -23,6 +23,26 @@ const RELATION_LABEL: Record<RelationKind, string> = {
   relates_to: "Relates to",
 };
 
+/** Row 155: the automation runs that acted on this record, with what each did. */
+export function AutomationTrail({ entityType, entityId }: { entityType: string; entityId: string }) {
+  const { data = [] } = useQuery({ queryKey: ["automation-trail", entityType, entityId], queryFn: () => api.getAutomationTrail(entityType, entityId) });
+  if (!data.length) return null;
+  return (
+    <div className="mb-3 rounded-md border border-violet-100 bg-violet-50/50 px-3 py-2" data-testid="automation-trail">
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-violet-700">Automations</p>
+      <ul className="mt-1 space-y-0.5 text-xs">
+        {data.map((r) => (
+          <li key={r.id} className="flex flex-wrap items-center gap-x-2 text-slate-700">
+            <span className="font-medium">⚙ {r.rule?.name ?? "Deleted rule"}</span>
+            <span className={r.status === "ok" ? "text-muted-foreground" : "text-red-700"}>{r.status === "ok" ? r.summary.join(" · ") : `failed — ${r.error}`}</span>
+            <span className="ml-auto text-[10px] text-muted-foreground">{relativeTime(r.createdAt)}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 /** Field names as a person would say them, for the activity feed. */
 const FIELD_LABEL: Record<string, string> = {
   statusId: "status",
@@ -304,6 +324,8 @@ export function TaskCollaboration({ taskId, listId, statuses }: Props) {
           </div>
         ) : (
           <div className="px-5 py-3">
+            {/* Row 155: which rules touched this record */}
+            <AutomationTrail entityType="task" entityId={taskId} />
             {activity.length ? (
               <ul className="space-y-2.5">
                 {activity.map((entry) => (
@@ -395,6 +417,7 @@ function ActivityRow({
           {entry.actor?.name ?? "Someone"}
         </span>{" "}
         {describe()}
+        {entry.rule && <span className="ml-1.5 rounded bg-violet-50 px-1.5 py-0.5 text-[10px] font-medium text-violet-700" title="Done by an automation rule (row 155)">⚙ {entry.rule.name}</span>}
         <span className="ml-1.5 text-xs text-muted-foreground" title={when.toLocaleString()}>
           {relativeTime(entry.createdAt)}
         </span>

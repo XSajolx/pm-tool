@@ -20,13 +20,14 @@ import { ClickUpImportSettings } from "../components/ClickUpImportSettings.js";
 import { ExpenseCategorySettings } from "../components/ExpenseCategorySettings.js";
 import { InvoicingSettings } from "../components/InvoicingSettings.js";
 import { RateCardSettings } from "../components/RateCardSettings.js";
+import { AutomationSettings } from "../components/AutomationSettings.js";
 import type { Priority } from "../lib/api.js";
 
 /**
  * Workspace settings. Sections are added as the roadmap lands; each one is a
  * self-contained panel that owns its own queries.
  */
-type Section = "rates" | "invoicing" | "expensecats" | "people" | "workhours" | "notifications" | "connections" | "fields" | "audit" | "export" | "import" | "timecodes" | "statuses" | "priorities" | "stages" | "tags" | "templates" | "dealstages" | "proposals" | "snippets" | "branding" | "dockit" | "sso" | "security";
+type Section = "automations" | "rates" | "invoicing" | "expensecats" | "people" | "workhours" | "notifications" | "connections" | "fields" | "audit" | "export" | "import" | "timecodes" | "statuses" | "priorities" | "stages" | "tags" | "templates" | "dealstages" | "proposals" | "snippets" | "branding" | "dockit" | "sso" | "security";
 
 const SECTIONS: { id: Section; label: string; hint: string }[] = [
   { id: "people", label: "People & roles", hint: "Who's in the workspace and what each role can do" },
@@ -38,6 +39,7 @@ const SECTIONS: { id: Section; label: string; hint: string }[] = [
   { id: "expensecats", label: "Expense categories", hint: "Categories and the default markup when re-billed" },
   { id: "invoicing", label: "Invoicing", hint: "Number format, terms, tax defaults, review policy" },
   { id: "rates", label: "Rate cards", hint: "Bill and cost rate per person, effective-dated" },
+  { id: "automations", label: "Automations", hint: "When X happens, notify / assign / move / create a task" },
   { id: "priorities", label: "Priorities", hint: "The four priority levels" },
   { id: "stages", label: "Stage templates", hint: "Default stage sequences for new projects" },
   { id: "tags", label: "Tags", hint: "Workspace tags: rename, recolour, merge, retire" },
@@ -98,6 +100,7 @@ export function SettingsPage() {
           {section === "expensecats" && <ExpenseCategorySettings canEdit={canEdit} />}
           {section === "invoicing" && <InvoicingSettings canEdit={canEdit} />}
           {section === "rates" && <RateCardSettings canEdit={canEdit} />}
+          {section === "automations" && <AutomationSettings canEdit={canEdit} />}
           {section === "priorities" && <PrioritySettings canEdit={canEdit} />}
           {section === "stages" && <StageTemplateSettings canEdit={canEdit} />}
           {section === "tags" && <TagSettings canEdit={canEdit} />}

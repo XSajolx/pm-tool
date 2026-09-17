@@ -13,6 +13,7 @@ import { RatesController } from "./rates.controller.js";
 import { RatesService } from "./rates.service.js";
 import { AgencyReportsController } from "./agency-reports.controller.js";
 import { AgencyReportsService } from "./agency-reports.service.js";
+import { DunningService } from "./dunning.service.js";
 import { InvoicesService } from "./invoices.service.js";
 import { SchedulesController } from "./schedules.controller.js";
 import { SchedulesService } from "./schedules.service.js";
@@ -34,7 +35,7 @@ import { FinanceOverviewService } from "./finance-overview.service.js";
 @Module({
   imports: [NotificationsModule],
   controllers: [InvoicesController, PublicInvoicesController, StripeWebhookController, SchedulesController, ExpensesController, ReportsController, ProfitFirstController, TaxController, FinanceOverviewController, ContractorsController, UnbilledController, ProgressBillingController, RatesController, AgencyReportsController],
-  providers: [InvoicesService, StripeService, SchedulesService, ExpensesService, ReportsService, ProfitFirstService, TaxService, FinanceOverviewService, ContractorsService, UnbilledService, ProgressBillingService, RatesService, AgencyReportsService],
+  providers: [InvoicesService, StripeService, SchedulesService, ExpensesService, ReportsService, ProfitFirstService, TaxService, FinanceOverviewService, ContractorsService, UnbilledService, ProgressBillingService, RatesService, AgencyReportsService, DunningService],
   exports: [InvoicesService, StripeService, SchedulesService, ExpensesService, ProfitFirstService, RatesService, UnbilledService],
 })
 export class FinanceModule {}

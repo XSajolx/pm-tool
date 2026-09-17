@@ -430,6 +430,8 @@ export const activityLog = pgTable(
     entityId: uuid("entity_id").notNull(),
     action: varchar("action", { length: 32 }).notNull(), // "created" | "updated" | ...
     changes: jsonb("changes").$type<Record<string, unknown>>(),
+    /** Row 155: set when an automation rule made this change. */
+    ruleId: uuid("rule_id").references((): AnyPgColumn => automationRules.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [
@@ -2643,6 +2645,11 @@ export interface InvoicingSettings {
   defaultNotes: string;
   /** Members may draft; when true a draft must go through review before an admin issues it. */
   requireReview: boolean;
+  /** Row 154: dunning — email the billing contact at these days overdue (empty = off). */
+  reminderDays?: number[];
+  remindersEnabled?: boolean;
+  /** Optional note added to every reminder email. */
+  reminderNote?: string;
 }
 
 export const invoices = pgTable(
@@ -2694,6 +2701,8 @@ export const invoices = pgTable(
     revisionOfId: uuid("revision_of_id").references((): AnyPgColumn => invoices.id, { onDelete: "set null" }),
     supersededById: uuid("superseded_by_id").references((): AnyPgColumn => invoices.id, { onDelete: "set null" }),
     revisionReason: text("revision_reason"),
+    /** Row 154: stop the reminder sequence for this invoice (e.g. disputed, payment plan agreed). */
+    remindersPaused: boolean("reminders_paused").notNull().default(false),
     submittedForReviewAt: timestamp("submitted_for_review_at", { withTimezone: true }),
     submittedById: uuid("submitted_by_id").references(() => users.id, { onDelete: "set null" }),
     issuedById: uuid("issued_by_id").references(() => users.id, { onDelete: "set null" }),
@@ -3494,3 +3503,102 @@ export const projectMemberRatesRelations = relations(projectMemberRates, ({ one 
   user: one(users, { fields: [projectMemberRates.userId], references: [users.id] }),
   project: one(projects, { fields: [projectMemberRates.projectId], references: [projects.id] }),
 }));
+
+/* ------------------------------------------------------------------ *
+ * Rows 153-155: automations — "when X then Y", with an owner who hears
+ * when a run fails, and a trail on every record a rule touched.
+ * ------------------------------------------------------------------ */
+export type AutomationTriggerType = "task_created" | "task_status_changed" | "task_completed" | "expense_approved" | "invoice_overdue" | "invoice_paid" | "stage_completed" | "milestone_reached" | "deal_stage_changed";
+export interface AutomationTrigger {
+  type: AutomationTriggerType;
+  /** task_status_changed / deal_stage_changed / stage_completed: match by name (case-insensitive). */
+  toName?: string | null;
+}
+export type AutomationAction =
+  | { type: "notify"; to: "admins" | "project_lead" | "assignees" | "rule_owner" | "user"; userId?: string | null; message: string }
+  | { type: "assign"; userId: string }
+  | { type: "move"; statusName: string }
+  | { type: "create_task"; title: string; assigneeId?: string | null; dueInDays?: number | null; listId?: string | null };
+
+export const automationRules = pgTable(
+  "automation_rules",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 160 }).notNull(),
+    enabled: boolean("enabled").notNull().default(true),
+    /** Alerted when a run fails; also the actor the rule acts as. */
+    ownerId: uuid("owner_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** Limit to one project (null = whole workspace). */
+    projectId: uuid("project_id").references(() => projects.id, { onDelete: "cascade" }),
+    trigger: jsonb("trigger").$type<AutomationTrigger>().notNull(),
+    actions: jsonb("actions").$type<AutomationAction[]>().notNull(),
+    runs: integer("runs").notNull().default(0),
+    failures: integer("failures").notNull().default(0),
+    lastRunAt: timestamp("last_run_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    ...timestamps,
+  },
+  (t) => [index("automation_rules_org_idx").on(t.organizationId, t.enabled)],
+);
+
+export const automationRuns = pgTable(
+  "automation_runs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    ruleId: uuid("rule_id")
+      .notNull()
+      .references(() => automationRules.id, { onDelete: "cascade" }),
+    entityType: varchar("entity_type", { length: 32 }).notNull(),
+    entityId: uuid("entity_id").notNull(),
+    entityLabel: varchar("entity_label", { length: 255 }),
+    /** ok | failed */
+    status: varchar("status", { length: 12 }).notNull(),
+    /** What each action did, in words. */
+    summary: jsonb("summary").$type<string[]>().notNull().default([]),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("automation_runs_rule_idx").on(t.ruleId, t.createdAt), index("automation_runs_entity_idx").on(t.entityType, t.entityId)],
+);
+
+export const automationRulesRelations = relations(automationRules, ({ one, many }) => ({
+  owner: one(users, { fields: [automationRules.ownerId], references: [users.id] }),
+  project: one(projects, { fields: [automationRules.projectId], references: [projects.id] }),
+  runsLog: many(automationRuns),
+}));
+export const automationRunsRelations = relations(automationRuns, ({ one }) => ({
+  rule: one(automationRules, { fields: [automationRuns.ruleId], references: [automationRules.id] }),
+}));
+
+
+/** Row 154: one row per reminder email that went to the client, so the sequence never repeats a step. */
+export const invoiceReminders = pgTable(
+  "invoice_reminders",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    invoiceId: uuid("invoice_id")
+      .notNull()
+      .references(() => invoices.id, { onDelete: "cascade" }),
+    /** Days overdue this step fires at (3, 14, 30 …); 0 = a manual send. */
+    step: integer("step").notNull(),
+    sentTo: varchar("sent_to", { length: 320 }).notNull(),
+    subject: varchar("subject", { length: 255 }).notNull(),
+    /** true when the mail provider accepted it; false = logged only (no provider configured). */
+    delivered: boolean("delivered").notNull().default(false),
+    sentById: uuid("sent_by_id").references(() => users.id, { onDelete: "set null" }),
+    sentAt: timestamp("sent_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex("invoice_reminders_step_uq").on(t.invoiceId, t.step, t.sentAt), index("invoice_reminders_invoice_idx").on(t.invoiceId)],
+);

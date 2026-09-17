@@ -5,6 +5,7 @@ import { ZodValidationPipe } from "../../common/zod-validation.pipe.js";
 import { Auth, Roles } from "../auth/auth.decorators.js";
 import type { AuthContext } from "../auth/auth.types.js";
 import { InvoicesService } from "./invoices.service.js";
+import { DunningService } from "./dunning.service.js";
 
 const itemSchema = z.object({
   description: z.string().min(1).max(2000),
@@ -55,12 +56,19 @@ const settingsSchema = z.object({
   defaultCurrency: z.string().length(3).optional(),
   defaultNotes: z.string().max(5000).optional(),
   requireReview: z.boolean().optional(),
+  reminderDays: z.array(z.number().int().min(1).max(365)).max(10).optional(),
+  remindersEnabled: z.boolean().optional(),
+  reminderNote: z.string().max(1000).optional(),
 });
+const pausedSchema = z.object({ paused: z.boolean() });
 
 /** Row 156. Members can draft; issuing, money and voiding are owner/admin work. */
 @Controller("finance/invoices")
 export class InvoicesController {
-  constructor(private readonly invoices: InvoicesService) {}
+  constructor(
+    private readonly invoices: InvoicesService,
+    private readonly dunning: DunningService,
+  ) {}
 
   @Get()
   list(@Auth() auth: AuthContext, @Query("status") status?: string, @Query("companyId") companyId?: string, @Query("projectId") projectId?: string) {
@@ -83,6 +91,31 @@ export class InvoicesController {
   @UsePipes(new ZodValidationPipe(settingsSchema))
   updateSettings(@Auth() auth: AuthContext, @Body() dto: z.infer<typeof settingsSchema>) {
     return this.invoices.updateSettings(auth.orgId, auth.userId, dto);
+  }
+
+  /* row 154 */
+  @Get(":id/reminders")
+  reminders(@Auth() auth: AuthContext, @Param("id") id: string) {
+    return this.dunning.forInvoice(auth.orgId, id);
+  }
+
+  @Post(":id/reminders/send")
+  @Roles("owner", "admin")
+  sendReminder(@Auth() auth: AuthContext, @Param("id") id: string) {
+    return this.dunning.sendNow(auth.orgId, auth.userId, id);
+  }
+
+  @Patch(":id/reminders")
+  @Roles("owner", "admin")
+  @UsePipes(new ZodValidationPipe(pausedSchema))
+  pauseReminders(@Auth() auth: AuthContext, @Param("id") id: string, @Body() dto: z.infer<typeof pausedSchema>) {
+    return this.dunning.setPaused(auth.orgId, auth.userId, id, dto.paused);
+  }
+
+  @Post("reminders/sweep")
+  @Roles("owner", "admin")
+  sweepReminders() {
+    return this.dunning.sweep().then(() => ({ ok: true }));
   }
 
   @Get(":id/versions")

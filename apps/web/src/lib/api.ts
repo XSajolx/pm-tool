@@ -403,6 +403,63 @@ export interface ActivityEntry {
   changes: { field: string; from: unknown; to: unknown }[];
   createdAt: string;
   actor: { id: string; name: string; avatarUrl: string | null } | null;
+  /** Row 155: the automation rule that made this change, if any. */
+  rule?: { id: string; name: string } | null;
+}
+
+// ---- Rows 153-155: automations ----
+export interface AutomationTrigger {
+  type: "task_created" | "task_status_changed" | "task_completed" | "expense_approved" | "invoice_overdue" | "invoice_paid" | "stage_completed" | "milestone_reached" | "deal_stage_changed";
+  toName?: string | null;
+}
+export type AutomationAction =
+  | { type: "notify"; to: "admins" | "project_lead" | "assignees" | "rule_owner" | "user"; userId?: string | null; message: string }
+  | { type: "assign"; userId: string }
+  | { type: "move"; statusName: string }
+  | { type: "create_task"; title: string; assigneeId?: string | null; dueInDays?: number | null; listId?: string | null };
+export interface AutomationRule {
+  id: string;
+  name: string;
+  enabled: boolean;
+  owner: { id: string; name: string };
+  project: { id: string; name: string } | null;
+  trigger: AutomationTrigger;
+  actions: AutomationAction[];
+  runs: number;
+  failures: number;
+  lastRunAt: string | null;
+  lastError: string | null;
+  createdAt: string;
+}
+export interface AutomationRun {
+  id: string;
+  entityType: string;
+  entityId: string;
+  entityLabel: string | null;
+  status: "ok" | "failed";
+  summary: string[];
+  error: string | null;
+  createdAt: string;
+}
+export interface AutomationTrail {
+  id: string;
+  rule: { id: string; name: string } | null;
+  status: "ok" | "failed";
+  summary: string[];
+  error: string | null;
+  createdAt: string;
+}
+/** Row 154 */
+export interface InvoiceReminders {
+  enabled: boolean;
+  days: number[];
+  paused: boolean;
+  to: string | null;
+  daysOverdue: number;
+  nextStep: number | null;
+  nextAt: string | null;
+  mailConfigured: boolean;
+  sent: { id: string; step: number; sentTo: string; subject: string; delivered: boolean; sentAt: string; manual: boolean }[];
 }
 
 /** Row 67 + 108: workspace brand. */
@@ -1550,6 +1607,10 @@ export interface InvoicingSettings {
   defaultCurrency: string;
   defaultNotes: string;
   requireReview: boolean;
+  /** Row 154 */
+  reminderDays?: number[];
+  remindersEnabled?: boolean;
+  reminderNote?: string;
 }
 export interface InvoiceVersion {
   id: string;
@@ -3167,6 +3228,18 @@ export const api = {
   voidInvoice: (id: string, reason?: string) => request<Invoice>(`/finance/invoices/${id}/void`, { method: "POST", body: JSON.stringify({ reason: reason ?? null }) }),
   recordInvoicePayment: (id: string, body: { amount: number; method?: PaymentMethod; paidAt?: string | null; reference?: string | null; note?: string | null }) =>
     request<Invoice>(`/finance/invoices/${id}/payments`, { method: "POST", body: JSON.stringify(body) }),
+  /** Rows 153-155 */
+  getAutomationTriggers: () => request<{ type: AutomationTrigger["type"]; label: string; hasName?: string }[]>(`/automations/triggers`),
+  getAutomations: () => request<AutomationRule[]>(`/automations`),
+  getAutomation: (id: string) => request<AutomationRule & { runLog: AutomationRun[] }>(`/automations/${id}`),
+  createAutomation: (body: { name: string; enabled?: boolean; ownerId?: string; projectId?: string | null; trigger: AutomationTrigger; actions: AutomationAction[] }) => request<AutomationRule>(`/automations`, { method: "POST", body: JSON.stringify(body) }),
+  updateAutomation: (id: string, body: Partial<{ name: string; enabled: boolean; ownerId: string; projectId: string | null; trigger: AutomationTrigger; actions: AutomationAction[] }>) => request<AutomationRule>(`/automations/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  deleteAutomation: (id: string) => request<{ id: string }>(`/automations/${id}`, { method: "DELETE" }),
+  getAutomationTrail: (entityType: string, entityId: string) => request<AutomationTrail[]>(`/automations/trail?entityType=${entityType}&entityId=${entityId}`),
+  /** Row 154 */
+  getInvoiceReminders: (id: string) => request<InvoiceReminders>(`/finance/invoices/${id}/reminders`),
+  sendInvoiceReminder: (id: string) => request<InvoiceReminders>(`/finance/invoices/${id}/reminders/send`, { method: "POST" }),
+  pauseInvoiceReminders: (id: string, paused: boolean) => request<InvoiceReminders>(`/finance/invoices/${id}/reminders`, { method: "PATCH", body: JSON.stringify({ paused }) }),
   /** Row 139 */
   getInvoicingSettings: () => request<InvoicingSettings>(`/finance/invoices/settings`),
   updateInvoicingSettings: (body: Partial<InvoicingSettings>) => request<InvoicingSettings>(`/finance/invoices/settings`, { method: "PATCH", body: JSON.stringify(body) }),
