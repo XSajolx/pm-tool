@@ -112,6 +112,8 @@ export const organizations = pgTable(
     profitFirst: jsonb("profit_first").$type<ProfitFirstConfig>(),
     /** Row 163: tax rates, basis, filing dates, reminder lead time. */
     taxSettings: jsonb("tax_settings").$type<TaxSettings>(),
+    /** Row 131 */
+    accounting: jsonb("accounting").$type<AccountingSettings>(),
     ...timestamps,
   },
   (t) => [uniqueIndex("organizations_slug_uq").on(t.slug)],
@@ -1270,6 +1272,8 @@ export const integrations = pgTable(
     status: varchar("status", { length: 24 }).notNull().default("connected"),
     accountEmail: varchar("account_email", { length: 255 }),
     accountName: varchar("account_name", { length: 255 }),
+    /** Row 131: QuickBooks realmId / Xero tenantId. */
+    externalId: varchar("external_id", { length: 128 }),
     accessToken: text("access_token"),
     refreshToken: text("refresh_token"),
     expiresAt: timestamp("expires_at", { withTimezone: true }),
@@ -3178,4 +3182,109 @@ export const taxPayments = pgTable(
 
 export const taxPaymentsRelations = relations(taxPayments, ({ one }) => ({
   createdBy: one(users, { fields: [taxPayments.createdById], references: [users.id] }),
+}));
+
+/* ------------------------------------------------------------------ *
+ * Row 131: accounting sync (QuickBooks Online / Xero)
+ * ------------------------------------------------------------------ */
+export type AccountingProviderKey = "quickbooks" | "xero" | "demo";
+export interface AccountingSettings {
+  /** Which ledger receives invoices and payments; null = off. */
+  provider: AccountingProviderKey | null;
+  /** Push automatically every hour (manual "Sync now" always works). */
+  autoSync: boolean;
+  /** Push recorded payments as well as invoices. */
+  syncPayments: boolean;
+  /** Xero: revenue account code for invoice lines and the bank account payments land in. */
+  xeroSalesAccountCode: string;
+  xeroPaymentAccountCode: string;
+  /** QuickBooks: the service Item used for every invoice line (created if missing). */
+  quickbooksItemName: string;
+}
+
+export const accountingLinkStatus = pgEnum("accounting_link_status", ["synced", "drifted", "conflict", "error"]);
+
+/**
+ * One row per local record that exists in the ledger. `remoteVersion` is the
+ * ledger's own change marker (QuickBooks SyncToken, Xero UpdatedDateUTC) as of
+ * our last push; `localHash` is what we pushed. Comparing both on the next run
+ * is how a conflict is detected instead of overwritten.
+ */
+export const accountingLinks = pgTable(
+  "accounting_links",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    provider: varchar("provider", { length: 32 }).notNull(),
+    /** company | invoice | payment */
+    entityType: varchar("entity_type", { length: 24 }).notNull(),
+    entityId: uuid("entity_id").notNull(),
+    remoteId: varchar("remote_id", { length: 128 }).notNull(),
+    /** Human reference in the ledger (invoice number, contact name). */
+    remoteLabel: varchar("remote_label", { length: 255 }),
+    remoteVersion: varchar("remote_version", { length: 128 }),
+    localHash: varchar("local_hash", { length: 64 }),
+    status: accountingLinkStatus("status").notNull().default("synced"),
+    error: text("error"),
+    /** What differs, for the human: { ours, theirs, detectedAt }. */
+    conflict: jsonb("conflict").$type<{ ours: Record<string, unknown>; theirs: Record<string, unknown>; detectedAt: string; reason: string }>(),
+    syncedAt: timestamp("synced_at", { withTimezone: true }),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    resolvedById: uuid("resolved_by_id").references(() => users.id, { onDelete: "set null" }),
+    ...timestamps,
+  },
+  (t) => [
+    uniqueIndex("accounting_links_entity_uq").on(t.organizationId, t.provider, t.entityType, t.entityId),
+    index("accounting_links_org_status_idx").on(t.organizationId, t.status),
+  ],
+);
+
+export const accountingRuns = pgTable(
+  "accounting_runs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    provider: varchar("provider", { length: 32 }).notNull(),
+    /** manual | auto */
+    trigger: varchar("trigger", { length: 16 }).notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }).defaultNow().notNull(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    created: integer("created").notNull().default(0),
+    updated: integer("updated").notNull().default(0),
+    unchanged: integer("unchanged").notNull().default(0),
+    conflicts: integer("conflicts").notNull().default(0),
+    errors: integer("errors").notNull().default(0),
+    message: text("message"),
+    startedById: uuid("started_by_id").references(() => users.id, { onDelete: "set null" }),
+  },
+  (t) => [index("accounting_runs_org_idx").on(t.organizationId, t.startedAt)],
+);
+
+/** The "demo ledger": a stand-in provider so the sync flow can be tried without QuickBooks / Xero credentials. */
+export const accountingDemoRecords = pgTable(
+  "accounting_demo_records",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    /** customer | invoice | payment */
+    kind: varchar("kind", { length: 16 }).notNull(),
+    remoteId: varchar("remote_id", { length: 64 }).notNull(),
+    data: jsonb("data").$type<Record<string, unknown>>().notNull(),
+    version: integer("version").notNull().default(1),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex("accounting_demo_records_uq").on(t.organizationId, t.remoteId)],
+);
+
+export const accountingLinksRelations = relations(accountingLinks, ({ one }) => ({
+  resolvedBy: one(users, { fields: [accountingLinks.resolvedById], references: [users.id] }),
+}));
+export const accountingRunsRelations = relations(accountingRuns, ({ one }) => ({
+  startedBy: one(users, { fields: [accountingRuns.startedById], references: [users.id] }),
 }));

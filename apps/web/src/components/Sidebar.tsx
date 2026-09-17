@@ -219,6 +219,7 @@ export function Sidebar() {
         <NavLink to="/finance/pnl" label="Profit & Loss" icon={chartIcon} />
         <NavLink to="/finance/profit-first" label="Profit First" icon={bucketIcon} />
         <NavLink to="/finance/tax" label="Taxes" icon={taxIcon} />
+        <NavLink to="/finance/accounting" label="Accounting" icon={ledgerIcon} />
       </nav>
 
       {/* Productivity */}
@@ -442,6 +443,9 @@ const bucketIcon = (
 );
 const taxIcon = (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 21h18" /><path d="M5 21V7l7-4 7 4v14" /><path d="M9 9h.01M15 9h.01M9 13h.01M15 13h.01M9 17h.01M15 17h.01" /></svg>
+);
+const ledgerIcon = (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h12a2 2 0 0 1 2 2v14H6a2 2 0 0 1-2-2z" /><path d="M8 4v16" /><path d="M11 9h4M11 13h4" /><path d="M20 8l-2 2" /></svg>
 );
 const repeatIcon = (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M17 2l4 4-4 4" /><path d="M3 11V9a4 4 0 0 1 4-4h14" /><path d="M7 22l-4-4 4-4" /><path d="M21 13v2a4 4 0 0 1-4 4H3" /></svg>

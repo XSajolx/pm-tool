@@ -9,14 +9,29 @@ import { NotificationsService } from "../notifications/notifications.service.js"
 import { ActivityService } from "../activity/activity.service.js";
 import { stripeHealth } from "../finance/stripe.config.js";
 
-export type Provider = "google_drive" | "dropbox";
-export const PROVIDERS: Provider[] = ["google_drive", "dropbox"];
+export type Provider = "google_drive" | "dropbox" | "quickbooks" | "xero";
+export const PROVIDERS: Provider[] = ["google_drive", "dropbox", "quickbooks", "xero"];
+/** Row 131: the accounting providers share the OAuth plumbing but are driven from Finance › Accounting. */
+export const ACCOUNTING_PROVIDERS: Provider[] = ["quickbooks", "xero"];
 
 /** What each provider needs in the API .env before "Connect" works. */
-const ENV: Record<Provider, { id: string; secret: string; label: string }> = {
-  google_drive: { id: "GOOGLE_CLIENT_ID", secret: "GOOGLE_CLIENT_SECRET", label: "Google Drive" },
-  dropbox: { id: "DROPBOX_APP_KEY", secret: "DROPBOX_APP_SECRET", label: "Dropbox" },
+export const ENV: Record<Provider, { id: string; secret: string; label: string; kind: "files" | "accounting" }> = {
+  google_drive: { id: "GOOGLE_CLIENT_ID", secret: "GOOGLE_CLIENT_SECRET", label: "Google Drive", kind: "files" },
+  dropbox: { id: "DROPBOX_APP_KEY", secret: "DROPBOX_APP_SECRET", label: "Dropbox", kind: "files" },
+  quickbooks: { id: "QUICKBOOKS_CLIENT_ID", secret: "QUICKBOOKS_CLIENT_SECRET", label: "QuickBooks Online", kind: "accounting" },
+  xero: { id: "XERO_CLIENT_ID", secret: "XERO_CLIENT_SECRET", label: "Xero", kind: "accounting" },
 };
+
+/** OAuth endpoints per provider. QuickBooks and Xero authenticate the token call with HTTP Basic (client id:secret). */
+const OAUTH: Record<Provider, { authorize: string; token: string; basic: boolean; revoke?: string }> = {
+  google_drive: { authorize: "https://accounts.google.com/o/oauth2/v2/auth", token: "https://oauth2.googleapis.com/token", basic: false, revoke: "https://oauth2.googleapis.com/revoke" },
+  dropbox: { authorize: "https://www.dropbox.com/oauth2/authorize", token: "https://api.dropboxapi.com/oauth2/token", basic: false, revoke: "https://api.dropboxapi.com/2/auth/token/revoke" },
+  quickbooks: { authorize: "https://appcenter.intuit.com/connect/oauth2", token: "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer", basic: true, revoke: "https://developer.api.intuit.com/v2/oauth2/tokens/revoke" },
+  xero: { authorize: "https://login.xero.com/identity/connect/authorize", token: "https://identity.xero.com/connect/token", basic: true, revoke: "https://identity.xero.com/connect/revocation" },
+};
+export function quickbooksApiBase() {
+  return process.env.QUICKBOOKS_SANDBOX === "1" || process.env.QUICKBOOKS_SANDBOX === "true" ? "https://sandbox-quickbooks.api.intuit.com" : "https://quickbooks.api.intuit.com";
+}
 
 /* ---- token encryption at rest (AES-256-GCM, key from INTEGRATIONS_SECRET or the DB url) ---- */
 const key = () => createHash("sha256").update(process.env.INTEGRATIONS_SECRET ?? process.env.DATABASE_URL ?? "pm-tool").digest();
@@ -155,6 +170,8 @@ export class IntegrationsService implements OnModuleInit, OnModuleDestroy {
         accountEmail: row?.accountEmail ?? null,
         accountName: row?.accountName ?? null,
         connectedBy: row?.connectedBy ?? null,
+        externalId: row?.externalId ?? null,
+        kind: e.kind,
         connectedAt: row?.connectedAt?.toISOString() ?? null,
         lastCheckedAt: row?.lastCheckedAt?.toISOString() ?? null,
         lastError: row?.lastError ?? null,
@@ -183,20 +200,30 @@ export class IntegrationsService implements OnModuleInit, OnModuleDestroy {
       });
       return { url: `https://accounts.google.com/o/oauth2/v2/auth?${q}` };
     }
+    if (provider === "quickbooks") {
+      const q = new URLSearchParams({ client_id: process.env[e.id]!, redirect_uri: redirect, response_type: "code", scope: "com.intuit.quickbooks.accounting", state });
+      return { url: `${OAUTH.quickbooks.authorize}?${q}` };
+    }
+    if (provider === "xero") {
+      const q = new URLSearchParams({ client_id: process.env[e.id]!, redirect_uri: redirect, response_type: "code", scope: "openid profile email accounting.transactions accounting.contacts accounting.settings offline_access", state });
+      return { url: `${OAUTH.xero.authorize}?${q}` };
+    }
     const q = new URLSearchParams({ client_id: process.env[e.id]!, redirect_uri: redirect, response_type: "code", token_access_type: "offline", state });
-    return { url: `https://www.dropbox.com/oauth2/authorize?${q}` };
+    return { url: `${OAUTH.dropbox.authorize}?${q}` };
   }
 
   /** Step 2: the provider sends the browser back here with a code. Returns where to send the browser next. */
-  async callback(provider: Provider, code: string | undefined, state: string | undefined, error?: string) {
-    const back = (q: string) => `${webBase()}/settings?section=connections&${q}`;
+  async callback(provider: Provider, code: string | undefined, state: string | undefined, error?: string, extra: { realmId?: string } = {}) {
+    const back = (q: string) => (ENV[provider].kind === "accounting" ? `${webBase()}/finance/accounting?${q}` : `${webBase()}/settings?section=connections&${q}`);
     const pend = state ? this.pending.get(state) : undefined;
     if (!pend || pend.provider !== provider || pend.expires < Date.now()) return back(`error=${encodeURIComponent("Sign-in expired, try again")}`);
     this.pending.delete(state!);
     if (error || !code) return back(`error=${encodeURIComponent(error || "No code returned")}`);
     try {
       const tokens = await this.exchange(provider, code);
-      const account = await this.account(provider, tokens.accessToken);
+      const account = await this.account(provider, tokens.accessToken, extra.realmId ?? null);
+      if (provider === "quickbooks" && !extra.realmId) throw new Error("QuickBooks did not return a company (realmId)");
+      const externalId = provider === "quickbooks" ? extra.realmId! : account.externalId ?? null;
       await this.db
         .insert(integrations)
         .values({
@@ -205,6 +232,7 @@ export class IntegrationsService implements OnModuleInit, OnModuleDestroy {
           status: "connected",
           accountEmail: account.email,
           accountName: account.name,
+          externalId,
           accessToken: seal(tokens.accessToken),
           refreshToken: seal(tokens.refreshToken),
           expiresAt: tokens.expiresAt,
@@ -220,6 +248,7 @@ export class IntegrationsService implements OnModuleInit, OnModuleDestroy {
             status: "connected",
             accountEmail: account.email,
             accountName: account.name,
+            externalId,
             accessToken: seal(tokens.accessToken),
             refreshToken: seal(tokens.refreshToken) ?? undefined,
             expiresAt: tokens.expiresAt,
@@ -247,6 +276,10 @@ export class IntegrationsService implements OnModuleInit, OnModuleDestroy {
     try {
       if (provider === "google_drive" && token) await fetch(`https://oauth2.googleapis.com/revoke?token=${encodeURIComponent(token)}`, { method: "POST" });
       if (provider === "dropbox" && token) await fetch("https://api.dropboxapi.com/2/auth/token/revoke", { method: "POST", headers: { authorization: `Bearer ${token}` } });
+      const refresh = open(row.refreshToken);
+      if ((provider === "quickbooks" || provider === "xero") && refresh) {
+        await fetch(OAUTH[provider].revoke!, { method: "POST", headers: { authorization: `Basic ${this.basic(provider)}`, "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ token: refresh }) });
+      }
     } catch { /* offline is fine */ }
     await this.db
       .update(integrations)
@@ -261,7 +294,7 @@ export class IntegrationsService implements OnModuleInit, OnModuleDestroy {
     if (!row || row.status === "disconnected") throw new NotFoundException("Not connected");
     try {
       const token = await this.freshToken(orgId, provider);
-      await this.account(provider, token);
+      await this.account(provider, token, row.externalId);
       await this.db.update(integrations).set({ status: "connected", lastCheckedAt: new Date(), lastError: null, updatedAt: new Date() }).where(eq(integrations.id, row.id));
     } catch (err) {
       const msg = (err as Error).message;
@@ -287,6 +320,13 @@ export class IntegrationsService implements OnModuleInit, OnModuleDestroy {
     return this.list(orgId);
   }
 
+  /** Row 131: the connected row (tenant / realm id lives in externalId). */
+  async connection(orgId: string, provider: Provider) {
+    const row = await this.db.query.integrations.findFirst({ where: and(eq(integrations.organizationId, orgId), eq(integrations.provider, provider)) });
+    if (!row || row.status === "disconnected") return null;
+    return row;
+  }
+
   /** A usable access token, refreshed when it is about to expire. Throws when the grant is gone. */
   async freshToken(orgId: string, provider: Provider) {
     const row = await this.db.query.integrations.findFirst({ where: and(eq(integrations.organizationId, orgId), eq(integrations.provider, provider)) });
@@ -305,22 +345,35 @@ export class IntegrationsService implements OnModuleInit, OnModuleDestroy {
 
   /* ---------------- provider plumbing ---------------- */
 
+  private basic(provider: Provider) {
+    const e = ENV[provider];
+    return Buffer.from(`${process.env[e.id]}:${process.env[e.secret]}`).toString("base64");
+  }
+
   private async exchange(provider: Provider, code: string) {
     const e = ENV[provider];
-    const body = new URLSearchParams({ code, client_id: process.env[e.id]!, client_secret: process.env[e.secret]!, redirect_uri: this.redirectUri(provider), grant_type: "authorization_code" });
-    const url = provider === "google_drive" ? "https://oauth2.googleapis.com/token" : "https://api.dropboxapi.com/oauth2/token";
-    return this.tokenCall(url, body);
+    const o = OAUTH[provider];
+    const body = new URLSearchParams({ code, redirect_uri: this.redirectUri(provider), grant_type: "authorization_code" });
+    if (!o.basic) {
+      body.set("client_id", process.env[e.id]!);
+      body.set("client_secret", process.env[e.secret]!);
+    }
+    return this.tokenCall(o.token, body, o.basic ? this.basic(provider) : null);
   }
 
   private async refresh(provider: Provider, refreshToken: string) {
     const e = ENV[provider];
-    const body = new URLSearchParams({ refresh_token: refreshToken, client_id: process.env[e.id]!, client_secret: process.env[e.secret]!, grant_type: "refresh_token" });
-    const url = provider === "google_drive" ? "https://oauth2.googleapis.com/token" : "https://api.dropboxapi.com/oauth2/token";
-    return this.tokenCall(url, body);
+    const o = OAUTH[provider];
+    const body = new URLSearchParams({ refresh_token: refreshToken, grant_type: "refresh_token" });
+    if (!o.basic) {
+      body.set("client_id", process.env[e.id]!);
+      body.set("client_secret", process.env[e.secret]!);
+    }
+    return this.tokenCall(o.token, body, o.basic ? this.basic(provider) : null);
   }
 
-  private async tokenCall(url: string, body: URLSearchParams) {
-    const res = await fetch(url, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body });
+  private async tokenCall(url: string, body: URLSearchParams, basic: string | null) {
+    const res = await fetch(url, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json", ...(basic ? { authorization: `Basic ${basic}` } : {}) }, body });
     const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
     if (!res.ok) throw new Error(String(json.error_description ?? json.error_summary ?? json.error ?? `token call failed (${res.status})`));
     const expiresIn = Number(json.expires_in ?? 3600);
@@ -332,7 +385,22 @@ export class IntegrationsService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  private async account(provider: Provider, accessToken: string): Promise<{ email: string | null; name: string | null }> {
+  private async account(provider: Provider, accessToken: string, externalId: string | null = null): Promise<{ email: string | null; name: string | null; externalId?: string | null }> {
+    if (provider === "quickbooks") {
+      if (!externalId) return { email: null, name: null };
+      const res = await fetch(`${quickbooksApiBase()}/v3/company/${externalId}/companyinfo/${externalId}?minorversion=70`, { headers: { authorization: `Bearer ${accessToken}`, accept: "application/json" } });
+      if (!res.ok) throw new Error(`QuickBooks ${res.status}`);
+      const j = (await res.json()) as { CompanyInfo?: { CompanyName?: string; Email?: { Address?: string } } };
+      return { email: j.CompanyInfo?.Email?.Address ?? null, name: j.CompanyInfo?.CompanyName ?? null, externalId };
+    }
+    if (provider === "xero") {
+      const res = await fetch("https://api.xero.com/connections", { headers: { authorization: `Bearer ${accessToken}`, accept: "application/json" } });
+      if (!res.ok) throw new Error(`Xero ${res.status}`);
+      const tenants = (await res.json()) as { tenantId: string; tenantName: string; tenantType: string }[];
+      const t = (externalId && tenants.find((x) => x.tenantId === externalId)) || tenants.find((x) => x.tenantType === "ORGANISATION") || tenants[0];
+      if (!t) throw new Error("No Xero organisation was authorised");
+      return { email: null, name: t.tenantName, externalId: t.tenantId };
+    }
     if (provider === "google_drive") {
       const res = await fetch("https://www.googleapis.com/drive/v3/about?fields=user", { headers: { authorization: `Bearer ${accessToken}` } });
       if (!res.ok) throw new Error(`Google Drive ${res.status}`);

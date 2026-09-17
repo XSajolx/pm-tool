@@ -14,7 +14,7 @@ const STATUS: Record<IntegrationStatus["status"], { label: string; cls: string }
   failing: { label: "Failing", cls: "bg-red-50 text-red-700 border-red-200" },
   disconnected: { label: "Not connected", cls: "bg-slate-100 text-slate-600 border-slate-200" },
 };
-const ICON: Record<IntegrationProvider, string> = { google_drive: "🟢", dropbox: "🔷" };
+const ICON: Partial<Record<IntegrationProvider, string>> = { google_drive: "🟢", dropbox: "🔷" };
 
 const SERVICE_STATUS: Record<ServiceHealth["status"], { label: string; cls: string }> = {
   connected: STATUS.connected,
@@ -58,7 +58,9 @@ function ServiceHealthList({ canEdit }: { canEdit: boolean }) {
 
 export function ConnectionsSettings({ canEdit }: { canEdit: boolean }) {
   const qc = useQueryClient();
-  const { data: rows = [], isLoading } = useQuery({ queryKey: ["integrations"], queryFn: api.getIntegrations });
+  const { data: all = [], isLoading } = useQuery({ queryKey: ["integrations"], queryFn: api.getIntegrations });
+  // Row 131: QuickBooks / Xero are connected from Finance › Accounting.
+  const rows = all.filter((r) => r.kind !== "accounting");
   const [notice, setNotice] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
   useEffect(() => {
     const q = new URLSearchParams(window.location.search);

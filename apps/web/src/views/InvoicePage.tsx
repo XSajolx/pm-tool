@@ -9,6 +9,7 @@ import { NotFound } from "../components/NotFound.js";
 import { CrmField, input } from "./CompaniesPage.js";
 import { InvoiceChip } from "./InvoicesPage.js";
 import { NewScheduleDialog } from "./SchedulesPage.js";
+import { AccountingChip } from "./AccountingPage.js";
 import { cn } from "../lib/utils.js";
 
 /** The client-facing link for an issued invoice (row 156). */
@@ -310,6 +311,8 @@ export function InvoicePage() {
                 {inv.project && <div className="flex justify-between"><dt>Project</dt><dd><Link to="/projects/$projectId" params={{ projectId: inv.project.id }} className="text-indigo-600 hover:underline">{inv.project.name}</Link></dd></div>}
               </dl>
             </section>
+
+            {admin && inv.status !== "draft" && <AccountingCard inv={inv} />}
           </aside>
         </div>
       </div>
@@ -437,6 +440,40 @@ function ShareDialog({ inv, onClose }: { inv: Invoice; onClose: () => void }) {
         </div>
       </div>
     </>
+  );
+}
+
+/** Row 131: where this invoice stands in the accounting ledger. */
+function AccountingCard({ inv }: { inv: Invoice }) {
+  const qc = useQueryClient();
+  const { data } = useQuery({ queryKey: ["invoice-accounting", inv.id], queryFn: () => api.getInvoiceAccounting(inv.id) });
+  const sync = useMutation({
+    mutationFn: () => api.syncAccounting(inv.id),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["invoice-accounting", inv.id] });
+      void qc.invalidateQueries({ queryKey: ["accounting"] });
+    },
+  });
+  if (!data) return null;
+  const label = data.provider === "quickbooks" ? "QuickBooks" : data.provider === "xero" ? "Xero" : "Demo ledger";
+  return (
+    <section className="rounded-lg border border-border bg-white p-4 text-xs" data-testid="invoice-accounting">
+      <div className="flex items-center gap-2">
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{label}</h2>
+        <span className="ml-auto"><AccountingChip status={data.status} /></span>
+      </div>
+      <p className="mt-2 text-muted-foreground">
+        {data.status === "pending" && "Will be pushed on the next sync."}
+        {data.status === "synced" && <>In the ledger as {data.remoteUrl ? <a href={data.remoteUrl} target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline">{data.remoteLabel ?? data.remoteId} ↗</a> : <b className="text-slate-700">{data.remoteLabel ?? data.remoteId}</b>}{data.syncedAt ? ` · ${fmtShortDate(data.syncedAt)}` : ""}</>}
+        {(data.status === "drifted" || data.status === "conflict") && <>This invoice differs from {label}. <Link to="/finance/accounting" className="text-indigo-600 hover:underline">Decide which to keep</Link>.</>}
+        {data.status === "error" && <span className="text-red-700">{data.error}</span>}
+      </p>
+      {(data.status === "pending" || data.status === "synced" || data.status === "error") && (
+        <button type="button" disabled={sync.isPending} onClick={() => sync.mutate()} className="mt-2 rounded-md border border-border px-2.5 py-1 font-medium text-slate-700 hover:bg-muted disabled:opacity-50">
+          {sync.isPending ? "Syncing…" : "Sync this invoice"}
+        </button>
+      )}
+    </section>
   );
 }
 

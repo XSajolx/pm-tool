@@ -45,6 +45,7 @@ import { ExpensesPage } from "./views/ExpensesPage.js";
 import { PnlPage } from "./views/PnlPage.js";
 import { ProfitFirstPage } from "./views/ProfitFirstPage.js";
 import { TaxPage } from "./views/TaxPage.js";
+import { AccountingPage } from "./views/AccountingPage.js";
 import { ContractPage } from "./views/ContractPage.js";
 import { PublicContractPage } from "./views/PublicContractPage.js";
 import { SchedulePage } from "./views/SchedulePage.js";
@@ -292,6 +293,7 @@ const invoiceRoute = createRoute({ getParentRoute: () => rootRoute, path: "/fina
 const schedulesRoute = createRoute({ getParentRoute: () => rootRoute, path: "/finance/recurring", component: SchedulesPage });
 const scheduleRoute = createRoute({ getParentRoute: () => rootRoute, path: "/finance/recurring/$scheduleId", component: SchedulePage });
 const taxRoute = createRoute({ getParentRoute: () => rootRoute, path: "/finance/tax", component: TaxPage });
+const accountingRoute = createRoute({ getParentRoute: () => rootRoute, path: "/finance/accounting", component: AccountingPage });
 const profitFirstRoute = createRoute({ getParentRoute: () => rootRoute, path: "/finance/profit-first", component: ProfitFirstPage });
 const pnlRoute = createRoute({ getParentRoute: () => rootRoute, path: "/finance/pnl", component: PnlPage });
 const expensesRoute = createRoute({ getParentRoute: () => rootRoute, path: "/finance/expenses", component: ExpensesPage });
@@ -336,6 +338,7 @@ const routeTree = rootRoute.addChildren([
   pnlRoute,
   profitFirstRoute,
   taxRoute,
+  accountingRoute,
   contractRoute,
   publicContractRoute,
   schedulesRoute,

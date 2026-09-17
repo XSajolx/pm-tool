@@ -42,8 +42,8 @@ export class IntegrationsController {
   /** The provider redirects the browser here - no bearer token, so the state nonce carries org + user. */
   @Public()
   @Get(":provider/callback")
-  async callback(@Param("provider") provider: string, @Query("code") code: string | undefined, @Query("state") state: string | undefined, @Query("error") error: string | undefined, @Res() res: Response) {
-    const to = await this.integrations.callback(asProvider(provider), code, state, error);
+  async callback(@Param("provider") provider: string, @Query("code") code: string | undefined, @Query("state") state: string | undefined, @Query("error") error: string | undefined, @Query("realmId") realmId: string | undefined, @Res() res: Response) {
+    const to = await this.integrations.callback(asProvider(provider), code, state, error, { realmId });
     res.redirect(302, to);
   }
 

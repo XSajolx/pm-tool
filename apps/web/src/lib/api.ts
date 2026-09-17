@@ -1128,7 +1128,7 @@ export interface CustomFieldValues {
 }
 
 /** Row 112 */
-export type IntegrationProvider = "google_drive" | "dropbox";
+export type IntegrationProvider = "google_drive" | "dropbox" | "quickbooks" | "xero";
 export interface IntegrationStatus {
   provider: IntegrationProvider;
   label: string;
@@ -1138,9 +1138,89 @@ export interface IntegrationStatus {
   accountEmail: string | null;
   accountName: string | null;
   connectedBy: { id: string; name: string } | null;
+  /** Row 131: QuickBooks realmId / Xero tenantId. */
+  externalId?: string | null;
+  kind?: "files" | "accounting";
   connectedAt: string | null;
   lastCheckedAt: string | null;
   lastError: string | null;
+}
+
+// ---- Row 131: accounting sync ----
+export type AccountingProviderKey = "quickbooks" | "xero" | "demo";
+export interface AccountingSettings {
+  provider: AccountingProviderKey | null;
+  autoSync: boolean;
+  syncPayments: boolean;
+  xeroSalesAccountCode: string;
+  xeroPaymentAccountCode: string;
+  quickbooksItemName: string;
+}
+export type AccountingLinkStatus = "synced" | "drifted" | "conflict" | "error";
+export interface AccountingLink {
+  id: string;
+  provider: string;
+  entityType: "company" | "invoice" | "payment";
+  entityId: string;
+  remoteId: string;
+  remoteLabel: string | null;
+  remoteUrl: string | null;
+  status: AccountingLinkStatus;
+  error: string | null;
+  conflict: { ours: Record<string, unknown>; theirs: Record<string, unknown>; detectedAt: string; reason: string } | null;
+  syncedAt: string | null;
+  resolvedAt: string | null;
+  resolvedBy: { id: string; name: string } | null;
+  invoice: { id: string; number: string; title: string; status: InvoiceStatus; total: number } | null;
+}
+export interface AccountingRun {
+  id: string;
+  provider: string;
+  trigger: "manual" | "auto";
+  startedAt: string;
+  finishedAt: string | null;
+  created: number;
+  updated: number;
+  unchanged: number;
+  conflicts: number;
+  errors: number;
+  message: string | null;
+  startedBy: { id: string; name: string } | null;
+}
+export interface AccountingOverview {
+  settings: AccountingSettings;
+  providers: IntegrationStatus[];
+  counts: { synced: number; drifted: number; conflicts: number; errors: number; pending: number };
+  attention: AccountingLink[];
+  links: AccountingLink[];
+  runs: AccountingRun[];
+  running: boolean;
+}
+export interface AccountingSyncResult {
+  runId: string;
+  created: number;
+  updated: number;
+  unchanged: number;
+  conflicts: number;
+  errors: number;
+  message: string | null;
+}
+export interface InvoiceAccounting {
+  provider: AccountingProviderKey;
+  status: AccountingLinkStatus | "pending";
+  remoteId: string | null;
+  remoteLabel: string | null;
+  remoteUrl: string | null;
+  syncedAt: string | null;
+  error: string | null;
+  linkId: string | null;
+}
+export interface AccountingDemoRecord {
+  remoteId: string;
+  kind: "customer" | "invoice" | "payment";
+  version: number;
+  updatedAt: string;
+  data: Record<string, unknown>;
 }
 
 /** Row 116 */
@@ -2625,6 +2705,14 @@ export const api = {
     request<CustomFieldValues>(`/custom-fields/values/${entityType}/${entityId}`, { method: "PUT", body: JSON.stringify({ values }) }),
   /** Row 112 */
   getIntegrations: () => request<IntegrationStatus[]>(`/integrations`),
+  /** Row 131 */
+  getAccounting: () => request<AccountingOverview>(`/finance/accounting`),
+  updateAccountingSettings: (body: Partial<AccountingSettings>) => request<AccountingSettings>(`/finance/accounting/settings`, { method: "PATCH", body: JSON.stringify(body) }),
+  syncAccounting: (invoiceId?: string) => request<AccountingSyncResult>(`/finance/accounting/sync`, { method: "POST", body: JSON.stringify(invoiceId ? { invoiceId } : {}) }),
+  resolveAccountingLink: (id: string, choice: "ours" | "theirs" | "retry") => request<AccountingOverview>(`/finance/accounting/links/${id}/resolve`, { method: "POST", body: JSON.stringify({ choice }) }),
+  getInvoiceAccounting: (invoiceId: string) => request<InvoiceAccounting | null>(`/finance/accounting/invoices/${invoiceId}`),
+  getAccountingDemo: () => request<AccountingDemoRecord[]>(`/finance/accounting/demo`),
+  editAccountingDemo: (remoteId: string, patch: Record<string, unknown>) => request<{ id: string }>(`/finance/accounting/demo/${remoteId}/edit`, { method: "POST", body: JSON.stringify({ patch }) }),
   startIntegration: (provider: IntegrationProvider) => request<{ url: string }>(`/integrations/${provider}/start`, { method: "POST" }),
   checkIntegration: (provider: IntegrationProvider) => request<IntegrationStatus[]>(`/integrations/${provider}/check`, { method: "POST" }),
   disconnectIntegration: (provider: IntegrationProvider) => request<IntegrationStatus[]>(`/integrations/${provider}`, { method: "DELETE" }),
