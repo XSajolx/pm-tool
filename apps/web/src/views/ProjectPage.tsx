@@ -11,6 +11,7 @@ import { ProjectTeam } from "../components/ProjectTeam.js";
 import { ProjectContractors } from "../components/ProjectContractors.js";
 import { UnbilledWorkDialog } from "../components/UnbilledWorkDialog.js";
 import { ProgressInvoiceDialog } from "../components/ProgressInvoiceDialog.js";
+import { ProjectRates } from "../components/ProjectRates.js";
 import { DocsTab } from "../components/DocsTab.js";
 import { MuteButton } from "../components/MuteButton.js";
 import { FollowButton } from "../components/FollowButton.js";
@@ -240,6 +241,8 @@ export function ProjectPage() {
         <ProjectTeam projectId={project.id} canManage={canManage} />
         {/* Row 135 */}
         <ProjectContractors projectId={project.id} canManage={canManage} />
+        {/* Row 141: rates are admin-only */}
+        {isAdmin && <ProjectRates projectId={project.id} />}
         {billing && <UnbilledWorkDialog projectId={project.id} onClose={() => setBilling(false)} />}
         {progressing && <ProgressInvoiceDialog projectId={project.id} onClose={() => setProgressing(false)} />}
         <ProjectStages projectId={project.id} canManage={canManage} />

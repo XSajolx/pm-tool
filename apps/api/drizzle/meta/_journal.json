@@ -610,6 +610,13 @@
       "when": 1789607285165,
       "tag": "0086_stale_metal_master",
       "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1789607846349,
+      "tag": "0087_freezing_paibok",
+      "breakpoints": true
     }
   ]
 }

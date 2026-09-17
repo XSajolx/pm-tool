@@ -3429,3 +3429,63 @@ export const projectContractorsRelations = relations(projectContractors, ({ one 
   project: one(projects, { fields: [projectContractors.projectId], references: [projects.id] }),
   contractor: one(contractors, { fields: [projectContractors.contractorId], references: [contractors.id] }),
 }));
+
+/* ------------------------------------------------------------------ *
+ * Rows 140-141: rate cards — effective-dated bill & cost rates per member,
+ * with per-project overrides. Past work keeps the rate that applied then.
+ * ------------------------------------------------------------------ */
+export const memberRates = pgTable(
+  "member_rates",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** The rate applies to work started on or after this day (UTC). */
+    effectiveFrom: timestamp("effective_from", { withTimezone: true }).notNull(),
+    /** What the client is charged per hour. */
+    billRate: doublePrecision("bill_rate").notNull().default(0),
+    /** What the hour costs the agency (salary + overheads). Hidden below PM. */
+    costRate: doublePrecision("cost_rate").notNull().default(0),
+    currency: varchar("currency", { length: 8 }).notNull().default("USD"),
+    note: text("note"),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex("member_rates_user_from_uq").on(t.userId, t.effectiveFrom), index("member_rates_org_idx").on(t.organizationId)],
+);
+
+/** Row 141: a member's bill rate on one project (discounted retainer, premium engagement). */
+export const projectMemberRates = pgTable(
+  "project_member_rates",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    effectiveFrom: timestamp("effective_from", { withTimezone: true }).notNull(),
+    billRate: doublePrecision("bill_rate").notNull().default(0),
+    note: text("note"),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex("project_member_rates_uq").on(t.projectId, t.userId, t.effectiveFrom), index("project_member_rates_org_idx").on(t.organizationId)],
+);
+
+export const memberRatesRelations = relations(memberRates, ({ one }) => ({
+  user: one(users, { fields: [memberRates.userId], references: [users.id] }),
+  createdBy: one(users, { fields: [memberRates.createdById], references: [users.id], relationName: "member_rate_author" }),
+}));
+export const projectMemberRatesRelations = relations(projectMemberRates, ({ one }) => ({
+  user: one(users, { fields: [projectMemberRates.userId], references: [users.id] }),
+  project: one(projects, { fields: [projectMemberRates.projectId], references: [projects.id] }),
+}));

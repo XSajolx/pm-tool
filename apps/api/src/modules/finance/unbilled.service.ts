@@ -7,6 +7,7 @@ import { ActivityService } from "../activity/activity.service.js";
 import { startOfWeek } from "../time/time.service.js";
 import { ExpensesService } from "./expenses.service.js";
 import { InvoicesService } from "./invoices.service.js";
+import { RatesService } from "./rates.service.js";
 
 export type GroupBy = "person" | "task" | "single";
 
@@ -39,12 +40,8 @@ export class UnbilledService {
     private readonly activity: ActivityService,
     private readonly invoicesService: InvoicesService,
     private readonly expensesService: ExpensesService,
+    private readonly rates: RatesService,
   ) {}
-
-  /** Row 140 will replace this with per-member, effective-dated rates; for now the project rate. */
-  private rateFor(project: { hourlyRate: number | null }, _userId: string) {
-    return project.hourlyRate ?? 0;
-  }
 
   async forProject(orgId: string, projectId: string, opts: { through?: string | null; onlyApprovedHours?: boolean } = {}) {
     const project = await this.db.query.projects.findFirst({ where: and(eq(projects.id, projectId), eq(projects.organizationId, orgId)) });
@@ -85,8 +82,10 @@ export class UnbilledService {
 
     const eligible = rows.filter((r) => !onlyApproved || approved(r));
     const waiting = rows.filter((r) => onlyApproved && !approved(r));
+    // Rows 140-141: the rate in force on the day of the work (project override → member card → project rate).
+    const resolve = await this.rates.resolver(orgId, [projectId]);
     const entries = eligible.map((r) => {
-      const rate = this.rateFor(project, r.userId);
+      const rate = resolve(r.userId, projectId, r.startedAt).billRate;
       return { id: r.id, userId: r.userId, userName: r.userName, taskId: r.taskId, taskTitle: r.taskTitle, description: r.description, date: r.startedAt, seconds: r.seconds, hours: hours(r.seconds), rate, amount: round2(hours(r.seconds) * rate), approved: approved(r) };
     });
     const byPerson = groupSum(entries, (e) => e.userId, (e) => ({ id: e.userId, name: e.userName, rate: e.rate }));
@@ -103,7 +102,7 @@ export class UnbilledService {
         seconds: entries.reduce((a, e) => a + e.seconds, 0),
         hours: hours(entries.reduce((a, e) => a + e.seconds, 0)),
         amount: hoursAmount,
-        rateMissing: entries.length > 0 && !project.hourlyRate,
+        rateMissing: entries.length > 0 && entries.some((e) => e.rate <= 0),
         entries,
         byPerson,
         byTask,
@@ -131,17 +130,19 @@ export class UnbilledService {
     const entries = dto.timeEntryIds ? u.hours.entries.filter((e) => dto.timeEntryIds!.includes(e.id)) : u.hours.entries;
     const exp = dto.includeExpenses === false ? [] : dto.expenseIds ? u.expenses.items.filter((e) => dto.expenseIds!.includes(e.id)) : u.expenses.items;
     if (!entries.length && !exp.length) throw new BadRequestException("Nothing unbilled to invoice");
-    if (entries.length && u.hours.rateMissing) throw new BadRequestException("Set an hourly rate on the project before billing hours");
+    if (entries.length && u.hours.rateMissing) throw new BadRequestException("Some hours have no rate — set a rate card for the person, or an hourly rate on the project");
 
     const groupBy: GroupBy = dto.groupBy ?? "person";
     const items: { description: string; quantity: number; unitPrice: number }[] = [];
     const period = entries.length ? `${entries[0]!.date.toISOString().slice(0, 10)} – ${entries[entries.length - 1]!.date.toISOString().slice(0, 10)}` : "";
     if (groupBy === "single" && entries.length) {
       const secs = entries.reduce((a, e) => a + e.seconds, 0);
-      items.push({ description: `Professional services — ${u.project.name} (${period})`, quantity: hours(secs), unitPrice: u.project.hourlyRate ?? 0 });
+      const amount = entries.reduce((a, e) => a + e.amount, 0);
+      items.push({ description: `Professional services — ${u.project.name} (${period})`, quantity: hours(secs), unitPrice: round2(amount / hours(secs)) });
     } else if (entries.length) {
       const groups = groupBy === "person" ? groupSum(entries, (e) => e.userId, (e) => ({ name: e.userName, rate: e.rate })) : groupSum(entries, (e) => e.taskId ?? "", (e) => ({ name: e.taskTitle ?? "General work", rate: e.rate }));
-      for (const g of groups) items.push({ description: `${g.name} — ${groupBy === "person" ? "hours" : "work"} on ${u.project.name} (${period})`, quantity: g.hours, unitPrice: g.rate ?? u.project.hourlyRate ?? 0 });
+      // A person's rate may have changed mid-period: bill at the blended rate so the amount is exact.
+      for (const g of groups) items.push({ description: `${g.name} — ${groupBy === "person" ? "hours" : "work"} on ${u.project.name} (${period})`, quantity: g.hours, unitPrice: g.hours ? round2(g.amount / g.hours) : 0 });
     }
     for (const e of exp) items.push({ description: `Expense — ${e.vendor}${e.description ? `: ${e.description}` : ""} (${new Date(e.date).toISOString().slice(0, 10)})`, quantity: 1, unitPrice: e.billAmount });
 

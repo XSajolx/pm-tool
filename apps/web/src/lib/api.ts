@@ -2044,6 +2044,32 @@ export interface ProjectContractors {
   engagements: (ContractorEngagement & { contractor: Omit<Contractor, "invoiced" | "unpaid" | "invoiceCount" | "projectCount">; invoiced: number; unpaid: number; billable: number; invoices: ContractorInvoice[] })[];
   totals: { invoiced: number; unpaid: number; billable: number; pendingApproval: number; currency: string; categoryMarkupPct: number };
 }
+// ---- Rows 140-141: rate cards ----
+export interface RateCard {
+  id: string;
+  userId: string;
+  effectiveFrom: string;
+  billRate: number;
+  costRate: number;
+  currency: string;
+  note: string | null;
+  createdBy: { id: string; name: string } | null;
+  createdAt: string;
+}
+export interface MemberRateCard {
+  userId: string;
+  name: string;
+  email: string | null;
+  role: string;
+  current: RateCard | null;
+  upcoming: RateCard[];
+  history: RateCard[];
+}
+export interface ProjectRates {
+  project: { id: string; hourlyRate: number | null; currency: string };
+  overrides: { id: string; userId: string; userName: string; effectiveFrom: string; billRate: number; note: string | null; active: boolean }[];
+  effective: { userId: string; name: string; billRate: number; costRate: number; source: "project_override" | "member" | "project_default" | "none"; currency: string }[];
+}
 // ---- Row 137: progress billing ----
 export interface ProgressBilling {
   project: { id: string; name: string; currency: string; budgetAmount: number | null };
@@ -3182,6 +3208,13 @@ export const api = {
   getScheduleReviewers: () => request<{ id: string; name: string; email: string | null; role: string }[]>(`/finance/schedules/reviewers`),
   getAwaitingReview: () => request<{ id: string; number: string; title: string; total: number; currency: string; createdAt: string; ageDays: number; scheduleId: string; scheduleName: string; reviewerId: string | null }[]>(`/finance/schedules/awaiting-review`),
   issueScheduledInvoice: (invoiceId: string) => request<Invoice>(`/finance/schedules/invoices/${invoiceId}/issue`, { method: "POST" }),
+  /** Rows 140-141 */
+  getRateCards: () => request<MemberRateCard[]>(`/finance/rates`),
+  addRateCard: (body: { userId: string; effectiveFrom: string; billRate: number; costRate: number; currency?: string; note?: string | null }) => request<RateCard>(`/finance/rates`, { method: "POST", body: JSON.stringify(body) }),
+  removeRateCard: (id: string) => request<{ id: string }>(`/finance/rates/${id}`, { method: "DELETE" }),
+  getProjectRates: (projectId: string) => request<ProjectRates>(`/finance/rates/project/${projectId}`),
+  addProjectRateOverride: (projectId: string, body: { userId: string; effectiveFrom: string; billRate: number; note?: string | null }) => request<{ id: string }>(`/finance/rates/project/${projectId}`, { method: "POST", body: JSON.stringify(body) }),
+  removeProjectRateOverride: (projectId: string, id: string) => request<{ id: string }>(`/finance/rates/project/${projectId}/${id}`, { method: "DELETE" }),
   /** Row 137 */
   getProgressBilling: (projectId: string) => request<ProgressBilling>(`/finance/progress/${projectId}`),
   draftProgressInvoice: (body: { projectId: string; stageIds?: string[] | null; title?: string | null }) => request<Invoice>(`/finance/progress/draft`, { method: "POST", body: JSON.stringify(body) }),
