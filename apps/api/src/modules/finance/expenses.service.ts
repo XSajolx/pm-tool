@@ -292,6 +292,11 @@ export class ExpensesService implements OnModuleInit {
     return ids;
   }
 
+  /** Also used by row 135 when a member logs a freelancer invoice. */
+  async askApproversFor(orgId: string, id: string) {
+    return this.askApprovers(orgId, id);
+  }
+
   private async askApprovers(orgId: string, id: string) {
     const e = await this.get(orgId, id);
     const [who] = await this.db.select({ name: users.name }).from(users).where(eq(users.id, e.createdBy?.id ?? ""));
@@ -696,6 +701,11 @@ function shape(r: typeof expenses.$inferSelect & { project: { id: string; name: 
     adjustsExpenseId: r.adjustsExpenseId,
     markupPct: r.markupPct,
     markupNote: r.markupNote,
+    contractorId: r.contractorId,
+    contractorInvoiceRef: r.contractorInvoiceRef,
+    dueDate: r.dueDate,
+    paidAt: r.paidAt,
+    paidReference: r.paidReference,
     date: r.date,
     vendor: r.vendor,
     description: r.description,

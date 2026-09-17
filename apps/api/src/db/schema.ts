@@ -3055,6 +3055,13 @@ export const expenses = pgTable(
     /** Row 134: null = use the category default. Set only by a manager, with a note. */
     markupPct: doublePrecision("markup_pct"),
     markupNote: text("markup_note"),
+    /** Row 135: a freelancer's invoice is an expense that knows who sent it and whether it has been paid. */
+    contractorId: uuid("contractor_id").references((): AnyPgColumn => contractors.id, { onDelete: "set null" }),
+    contractorInvoiceRef: varchar("contractor_invoice_ref", { length: 64 }),
+    dueDate: timestamp("due_date", { withTimezone: true }),
+    /** null = not paid yet (only meaningful for contractor invoices). */
+    paidAt: timestamp("paid_at", { withTimezone: true }),
+    paidReference: varchar("paid_reference", { length: 255 }),
     source: expenseSource("source").notNull().default("manual"),
     importId: uuid("import_id").references(() => expenseImports.id, { onDelete: "set null" }),
     account: varchar("account", { length: 120 }),
@@ -3071,6 +3078,7 @@ export const expenses = pgTable(
     index("expenses_org_vendor_idx").on(t.organizationId, t.vendor),
     index("expenses_org_approval_idx").on(t.organizationId, t.approvalStatus),
     index("expenses_adjusts_idx").on(t.adjustsExpenseId),
+    index("expenses_contractor_idx").on(t.contractorId),
   ],
 );
 
@@ -3102,6 +3110,7 @@ export const expensesRelations = relations(expenses, ({ one, many }) => ({
   import: one(expenseImports, { fields: [expenses.importId], references: [expenseImports.id] }),
   createdBy: one(users, { fields: [expenses.createdById], references: [users.id] }),
   decidedBy: one(users, { fields: [expenses.decidedById], references: [users.id] }),
+  contractor: one(contractors, { fields: [expenses.contractorId], references: [contractors.id] }),
   adjusts: one(expenses, { fields: [expenses.adjustsExpenseId], references: [expenses.id], relationName: "expense_adjustments" }),
   adjustments: many(expenses, { relationName: "expense_adjustments" }),
 }));
@@ -3316,4 +3325,68 @@ export const accountingLinksRelations = relations(accountingLinks, ({ one }) => 
 }));
 export const accountingRunsRelations = relations(accountingRuns, ({ one }) => ({
   startedBy: one(users, { fields: [accountingRuns.startedById], references: [users.id] }),
+}));
+
+/* ------------------------------------------------------------------ *
+ * Row 135: freelancers / subcontractors and their invoices
+ * ------------------------------------------------------------------ */
+export const contractors = pgTable(
+  "contractors",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 255 }).notNull(),
+    email: varchar("email", { length: 320 }),
+    phone: varchar("phone", { length: 64 }),
+    /** Their trading name, if any. */
+    company: varchar("company", { length: 255 }),
+    /** What they do: "Motion designer", "Copywriter". */
+    role: varchar("role", { length: 120 }),
+    /** Usual rate, as a hint when engaging them. */
+    defaultRate: doublePrecision("default_rate"),
+    currency: varchar("currency", { length: 8 }).notNull().default("USD"),
+    notes: text("notes"),
+    active: boolean("active").notNull().default(true),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    ...timestamps,
+  },
+  (t) => [index("contractors_org_name_idx").on(t.organizationId, t.name)],
+);
+
+/** A freelancer engaged on a project, with what was agreed. */
+export const projectContractors = pgTable(
+  "project_contractors",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    contractorId: uuid("contractor_id")
+      .notNull()
+      .references(() => contractors.id, { onDelete: "cascade" }),
+    role: varchar("role", { length: 120 }),
+    /** Fixed fee agreed for the engagement, or an hourly/daily rate — whichever applies. */
+    agreedAmount: doublePrecision("agreed_amount"),
+    agreedRate: doublePrecision("agreed_rate"),
+    /** Default markup when their invoices are re-billed (falls back to the category default). */
+    markupPct: doublePrecision("markup_pct"),
+    notes: text("notes"),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex("project_contractors_uq").on(t.projectId, t.contractorId), index("project_contractors_org_idx").on(t.organizationId)],
+);
+
+export const contractorsRelations = relations(contractors, ({ many }) => ({
+  engagements: many(projectContractors),
+  invoices: many(expenses),
+}));
+export const projectContractorsRelations = relations(projectContractors, ({ one }) => ({
+  project: one(projects, { fields: [projectContractors.projectId], references: [projects.id] }),
+  contractor: one(contractors, { fields: [projectContractors.contractorId], references: [contractors.id] }),
 }));

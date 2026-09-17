@@ -37,7 +37,8 @@ export interface RecordActivity {
     | "member"
     | "invitation"
     | "integration"
-    | "custom_field";
+    | "custom_field"
+    | "contractor";
   entityId: string;
   action: string;
   changes?: FieldChange[];

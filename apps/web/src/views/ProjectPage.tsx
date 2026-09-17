@@ -8,6 +8,7 @@ import { fmtDuration, fmtMoney, fmtShortDate } from "../lib/format.js";
 import { PROJECT_STATUS } from "./ProjectsPage.js";
 import { NotFound } from "../components/NotFound.js";
 import { ProjectTeam } from "../components/ProjectTeam.js";
+import { ProjectContractors } from "../components/ProjectContractors.js";
 import { DocsTab } from "../components/DocsTab.js";
 import { MuteButton } from "../components/MuteButton.js";
 import { FollowButton } from "../components/FollowButton.js";
@@ -223,6 +224,8 @@ export function ProjectPage() {
         {/* Row 114 */}
         <CustomFieldsPanel entityType="project" entityId={project.id} canEdit={canManage} layout="grid" className="mt-3 rounded-lg border border-border bg-white p-4" />
         <ProjectTeam projectId={project.id} canManage={canManage} />
+        {/* Row 135 */}
+        <ProjectContractors projectId={project.id} canManage={canManage} />
         <ProjectStages projectId={project.id} canManage={canManage} />
         <ProjectMilestones projectId={project.id} canManage={canManage} startDate={project.startDate} endDate={project.endDate} />
         {canManage && <ApplyTemplate projectId={project.id} />}

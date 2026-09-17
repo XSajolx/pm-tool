@@ -124,6 +124,7 @@ export function ExpensesPage() {
                           {e.approvalStatus === "rejected" && <span className="mr-1 rounded bg-red-50 px-1 text-[10px] font-medium text-red-700" title={e.decisionNote ?? undefined}>rejected{e.decisionNote ? `: ${e.decisionNote}` : ""}</span>}
                           {approved && <span className="mr-1 rounded bg-emerald-50 px-1 text-[10px] text-emerald-700" title={`Approved by ${e.decidedBy?.name ?? "—"}${e.decisionNote ? ` · ${e.decisionNote}` : ""}`}>approved · locked</span>}
                           {e.adjustsExpenseId && <span className="mr-1 rounded bg-slate-100 px-1 text-[10px] text-slate-600">adjustment</span>}
+                          {e.contractorId && <span className={cn("mr-1 rounded px-1 text-[10px]", e.paidAt ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-800")} title={e.paidAt ? `Paid ${fmtShortDate(e.paidAt)}${e.paidReference ? ` · ${e.paidReference}` : ""}` : e.dueDate ? `Due ${fmtShortDate(e.dueDate)}` : "Not paid yet"}>freelancer invoice{e.contractorInvoiceRef ? ` ${e.contractorInvoiceRef}` : ""} · {e.paidAt ? "paid" : "unpaid"}</span>}
                           {e.billable && !e.personal && (() => {
                             const cat = catSettings.find((c) => c.name === e.category);
                             const pct = e.markupPct ?? cat?.markupPct ?? 0;

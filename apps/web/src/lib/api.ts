@@ -1878,6 +1878,12 @@ export interface Expense {
   /** Row 134: per-expense override (null = category default). */
   markupPct: number | null;
   markupNote: string | null;
+  /** Row 135 */
+  contractorId: string | null;
+  contractorInvoiceRef: string | null;
+  dueDate: string | null;
+  paidAt: string | null;
+  paidReference: string | null;
   adjustments?: { id: string; amount: number; kind: "expense" | "refund"; description: string | null; createdAt: string }[];
   notes: string | null;
   source: "manual" | "import";
@@ -1921,6 +1927,78 @@ export interface ExpenseCategory {
   name: string;
   markupPct: number;
   active: boolean;
+}
+// ---- Row 135: freelancers ----
+export interface Contractor {
+  id: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  company: string | null;
+  role: string | null;
+  defaultRate: number | null;
+  currency: string;
+  notes: string | null;
+  active: boolean;
+  createdAt: string;
+  invoiced: number;
+  unpaid: number;
+  invoiceCount: number;
+  projectCount: number;
+}
+export interface ContractorInput {
+  name?: string;
+  email?: string | null;
+  phone?: string | null;
+  company?: string | null;
+  role?: string | null;
+  defaultRate?: number | null;
+  currency?: string;
+  notes?: string | null;
+  active?: boolean;
+}
+export interface ContractorEngagement {
+  id: string;
+  projectId: string;
+  contractorId: string;
+  role: string | null;
+  agreedAmount: number | null;
+  agreedRate: number | null;
+  markupPct: number | null;
+  notes: string | null;
+  createdAt: string;
+  project?: { id: string; name: string; color: string; status: string };
+}
+export interface ContractorInvoice {
+  id: string;
+  contractorId: string | null;
+  contractor: { id: string; name: string } | null;
+  project: { id: string; name: string } | null;
+  projectId: string | null;
+  ref: string | null;
+  description: string | null;
+  amount: number;
+  currency: string;
+  kind: "expense" | "refund";
+  date: string;
+  dueDate: string | null;
+  paidAt: string | null;
+  paidReference: string | null;
+  overdue: boolean;
+  billable: boolean;
+  personal: boolean;
+  markupPct: number | null;
+  approvalStatus: "pending" | "approved" | "rejected";
+  receiptUrl: string | null;
+  invoice: { id: string; number: string } | null;
+}
+export interface ContractorDetail extends Omit<Contractor, "invoiced" | "unpaid" | "invoiceCount" | "projectCount"> {
+  engagements: ContractorEngagement[];
+  invoices: ContractorInvoice[];
+}
+export interface ProjectContractors {
+  engagements: (ContractorEngagement & { contractor: Omit<Contractor, "invoiced" | "unpaid" | "invoiceCount" | "projectCount">; invoiced: number; unpaid: number; billable: number; invoices: ContractorInvoice[] })[];
+  totals: { invoiced: number; unpaid: number; billable: number; pendingApproval: number; currency: string; categoryMarkupPct: number };
 }
 export interface BillableExpense extends Expense {
   effectiveMarkupPct: number;
@@ -2986,6 +3064,19 @@ export const api = {
   },
   /** markupPercent null = each expense keeps its own (override or category default). */
   addExpensesToInvoice: (invoiceId: string, expenseIds: string[], markupPercent: number | null = null) => request<Invoice>(`/finance/expenses/invoice/${invoiceId}`, { method: "POST", body: JSON.stringify({ expenseIds, markupPercent }) }),
+  /** Row 135 */
+  getContractors: (all = false) => request<Contractor[]>(`/finance/contractors${all ? "?all=1" : ""}`),
+  getContractor: (id: string) => request<ContractorDetail>(`/finance/contractors/${id}`),
+  createContractor: (body: ContractorInput) => request<ContractorDetail>(`/finance/contractors`, { method: "POST", body: JSON.stringify(body) }),
+  updateContractor: (id: string, body: ContractorInput) => request<ContractorDetail>(`/finance/contractors/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  archiveContractor: (id: string) => request<{ id: string }>(`/finance/contractors/${id}`, { method: "DELETE" }),
+  getProjectContractors: (projectId: string) => request<ProjectContractors>(`/finance/contractors/project/${projectId}`),
+  engageContractor: (projectId: string, body: { contractorId?: string | null; name?: string | null; email?: string | null; role?: string | null; agreedAmount?: number | null; agreedRate?: number | null; markupPct?: number | null; notes?: string | null }) =>
+    request<{ id: string }>(`/finance/contractors/project/${projectId}`, { method: "POST", body: JSON.stringify(body) }),
+  disengageContractor: (projectId: string, engagementId: string) => request<{ id: string }>(`/finance/contractors/project/${projectId}/${engagementId}`, { method: "DELETE" }),
+  logContractorInvoice: (contractorId: string, body: { projectId: string; ref?: string | null; description?: string | null; amount: number; currency?: string; date?: string | null; dueDate?: string | null; markupPct?: number | null; billable?: boolean; receiptUrl?: string | null; paid?: boolean }) =>
+    request<Expense>(`/finance/contractors/${contractorId}/invoices`, { method: "POST", body: JSON.stringify(body) }),
+  markContractorInvoicePaid: (expenseId: string, body: { paid: boolean; paidAt?: string | null; reference?: string | null }) => request<Expense>(`/finance/contractors/invoices/${expenseId}/paid`, { method: "POST", body: JSON.stringify(body) }),
   /** Row 134 */
   getExpenseCategorySettings: () => request<ExpenseCategory[]>(`/finance/expenses/category-settings`),
   saveExpenseCategorySettings: (categories: ExpenseCategory[]) => request<ExpenseCategory[]>(`/finance/expenses/category-settings`, { method: "PUT", body: JSON.stringify({ categories }) }),
