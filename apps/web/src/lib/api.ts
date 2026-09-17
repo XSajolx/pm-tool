@@ -793,7 +793,7 @@ export interface MyTask extends Task {
 
 /** Row 75: approval request carried by a notification (`data.approval`). */
 export interface ApprovalMeta {
-  kind: "doc_review" | "milestone" | "timesheet" | "leave" | "expense";
+  kind: "doc_review" | "milestone" | "timesheet" | "leave" | "expense" | "invoice_review";
   status: "pending" | "approved" | "rejected";
   decidedAt?: string;
   decidedById?: string;
@@ -1666,6 +1666,10 @@ export interface InvoiceSchedule {
   notes: string | null;
   dueDays: number;
   autoSend: boolean;
+  /** Row 138 */
+  reviewerId: string | null;
+  reviewer: { id: string; name: string } | null;
+  reviewNudgeDays: number;
   every: number;
   unit: ScheduleUnit;
   frequency: ScheduleFrequency;
@@ -1708,6 +1712,8 @@ export interface InvoiceScheduleInput {
   notes?: string | null;
   dueDays?: number;
   autoSend?: boolean;
+  reviewerId?: string | null;
+  reviewNudgeDays?: number;
   every?: number;
   unit?: ScheduleUnit;
   startsAt?: string;
@@ -3132,6 +3138,10 @@ export const api = {
   },
   /** markupPercent null = each expense keeps its own (override or category default). */
   addExpensesToInvoice: (invoiceId: string, expenseIds: string[], markupPercent: number | null = null) => request<Invoice>(`/finance/expenses/invoice/${invoiceId}`, { method: "POST", body: JSON.stringify({ expenseIds, markupPercent }) }),
+  /** Row 138 */
+  getScheduleReviewers: () => request<{ id: string; name: string; email: string | null; role: string }[]>(`/finance/schedules/reviewers`),
+  getAwaitingReview: () => request<{ id: string; number: string; title: string; total: number; currency: string; createdAt: string; ageDays: number; scheduleId: string; scheduleName: string; reviewerId: string | null }[]>(`/finance/schedules/awaiting-review`),
+  issueScheduledInvoice: (invoiceId: string) => request<Invoice>(`/finance/schedules/invoices/${invoiceId}/issue`, { method: "POST" }),
   /** Row 137 */
   getProgressBilling: (projectId: string) => request<ProgressBilling>(`/finance/progress/${projectId}`),
   draftProgressInvoice: (body: { projectId: string; stageIds?: string[] | null; title?: string | null }) => request<Invoice>(`/finance/progress/draft`, { method: "POST", body: JSON.stringify(body) }),

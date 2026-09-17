@@ -2794,6 +2794,10 @@ export const invoiceSchedules = pgTable(
     dueDays: integer("due_days").notNull().default(14),
     /** Draft only, or send (mint the client link) the moment it's generated. */
     autoSend: boolean("auto_send").notNull().default(false),
+    /** Row 138: who reviews and sends each generated draft (null = whoever created the schedule). */
+    reviewerId: uuid("reviewer_id").references(() => users.id, { onDelete: "set null" }),
+    /** Row 138: nudge the reviewer when a draft is still unsent after this many days (0 = never). */
+    reviewNudgeDays: integer("review_nudge_days").notNull().default(2),
     /* --- cadence --- */
     every: integer("every").notNull().default(1),
     unit: scheduleUnit("unit").notNull().default("month"),
@@ -2824,6 +2828,7 @@ export const invoiceSchedulesRelations = relations(invoiceSchedules, ({ one, man
   contact: one(contacts, { fields: [invoiceSchedules.contactId], references: [contacts.id] }),
   project: one(projects, { fields: [invoiceSchedules.projectId], references: [projects.id] }),
   createdBy: one(users, { fields: [invoiceSchedules.createdById], references: [users.id] }),
+  reviewer: one(users, { fields: [invoiceSchedules.reviewerId], references: [users.id] }),
   invoices: many(invoices),
 }));
 

@@ -43,6 +43,9 @@ export function SchedulePage() {
   const [endsAt, setEndsAt] = useState("");
   const [maxOcc, setMaxOcc] = useState("");
   const [autoSend, setAutoSend] = useState(false);
+  const [reviewerId, setReviewerId] = useState("");
+  const [nudgeDays, setNudgeDays] = useState("2");
+  const { data: reviewers = [] } = useQuery({ queryKey: ["schedule-reviewers"], queryFn: api.getScheduleReviewers });
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmEnd, setConfirmEnd] = useState(false);
@@ -70,6 +73,8 @@ export function SchedulePage() {
     setEndsAt(s.endsAt?.slice(0, 10) ?? "");
     setMaxOcc(s.maxOccurrences ? String(s.maxOccurrences) : "");
     setAutoSend(s.autoSend);
+    setReviewerId(s.reviewerId ?? "");
+    setNudgeDays(String(s.reviewNudgeDays ?? 2));
     setDirty(false);
   }, [s]);
 
@@ -105,6 +110,8 @@ export function SchedulePage() {
         endsAt: endsAt ? new Date(endsAt).toISOString() : null,
         maxOccurrences: maxOcc ? Number(maxOcc) : null,
         autoSend,
+        reviewerId: reviewerId || null,
+        reviewNudgeDays: Number(nudgeDays) || 0,
       }),
     onSuccess: ok,
     onError: fail,
@@ -289,8 +296,19 @@ export function SchedulePage() {
                 <CrmField label="Stop after N invoices (optional)"><input type="number" min="1" value={maxOcc} onChange={(e) => touch(setMaxOcc)(e.target.value)} className={input} placeholder="unlimited" /></CrmField>
                 <label className="flex items-start gap-2 rounded-md border border-border px-3 py-2 text-xs">
                   <input type="checkbox" checked={autoSend} onChange={(e) => touch(setAutoSend)(e.target.checked)} className="mt-0.5" />
-                  <span><span className="font-medium text-slate-800">Send automatically</span><br /><span className="text-muted-foreground">Off = each invoice waits as a draft in your inbox.</span></span>
+                  <span><span className="font-medium text-slate-800">Send automatically</span><br /><span className="text-muted-foreground">Off = each invoice waits as a draft for the reviewer.</span></span>
                 </label>
+                {!autoSend && (
+                  <>
+                    <CrmField label="Reviewer who issues each draft">
+                      <select value={reviewerId} onChange={(e) => touch(setReviewerId)(e.target.value)} className={input}>
+                        <option value="">Whoever created the schedule</option>
+                        {reviewers.map((r) => <option key={r.id} value={r.id}>{r.name} · {r.role}</option>)}
+                      </select>
+                    </CrmField>
+                    <CrmField label="Nudge if still unsent after (days)"><input type="number" min="0" max="30" value={nudgeDays} onChange={(e) => touch(setNudgeDays)(e.target.value)} className={input} /></CrmField>
+                  </>
+                )}
               </div>
             </section>
             <section className="rounded-lg border border-border bg-white p-4 text-xs text-muted-foreground">

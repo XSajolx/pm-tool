@@ -1,10 +1,10 @@
-import { BadRequestException, Inject, Injectable, Logger, NotFoundException, type OnModuleDestroy, type OnModuleInit } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException, type OnModuleDestroy, type OnModuleInit } from "@nestjs/common";
 import { and, asc, desc, eq, isNull, lte, sql } from "drizzle-orm";
 import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
-import { companies, contacts, invoiceSchedules, invoices, projects, type ScheduleItem } from "../../db/schema.js";
+import { companies, contacts, invoiceSchedules, invoices, memberships, projects, reminders, type ScheduleItem } from "../../db/schema.js";
 import { ActivityService } from "../activity/activity.service.js";
-import { NotificationsService } from "../notifications/notifications.service.js";
+import { NotificationsService, pendingApproval } from "../notifications/notifications.service.js";
 import { InvoicesService, computeTotals } from "./invoices.service.js";
 
 export type ScheduleKind = "recurring" | "subscription";
@@ -27,6 +27,9 @@ export interface ScheduleDto {
   notes?: string | null;
   dueDays?: number;
   autoSend?: boolean;
+  /** Row 138 */
+  reviewerId?: string | null;
+  reviewNudgeDays?: number;
   every?: number;
   unit?: ScheduleUnit;
   startsAt?: string;
@@ -71,6 +74,8 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
   onModuleInit() {
     this.timer = setInterval(() => void this.sweep(), 5 * 60 * 1000);
     setTimeout(() => void this.sweep(), 8000);
+    // Row 138: the reviewer's inbox card — Approve = send it, Reject = leave the draft with a note.
+    this.notifications.registerApproval("invoice_review", (d) => this.review(d.orgId, { userId: d.userId, role: d.role }, d.entityId, d.approve, d.note));
   }
 
   onModuleDestroy() {
@@ -87,7 +92,7 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
         ...(opts.companyId ? [eq(invoiceSchedules.companyId, opts.companyId)] : []),
         ...(opts.status && opts.status !== "all" ? [eq(invoiceSchedules.status, opts.status as ScheduleStatus)] : []),
       ),
-      with: { company: { columns: { id: true, name: true } }, contact: { columns: { id: true, firstName: true, lastName: true } }, project: { columns: { id: true, name: true } } },
+      with: { company: { columns: { id: true, name: true } }, contact: { columns: { id: true, firstName: true, lastName: true } }, project: { columns: { id: true, name: true } }, reviewer: { columns: { id: true, name: true } } },
       orderBy: [asc(invoiceSchedules.status), asc(invoiceSchedules.nextRunAt), desc(invoiceSchedules.createdAt)],
     });
     return rows.map((r) => shape(r));
@@ -97,6 +102,7 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
     const row = await this.db.query.invoiceSchedules.findFirst({
       where: and(eq(invoiceSchedules.id, id), eq(invoiceSchedules.organizationId, orgId)),
       with: {
+        reviewer: { columns: { id: true, name: true } },
         company: { columns: { id: true, name: true } },
         contact: { columns: { id: true, firstName: true, lastName: true } },
         project: { columns: { id: true, name: true } },
@@ -156,6 +162,8 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
         notes: merged.notes ?? null,
         dueDays: Math.max(0, Math.round(merged.dueDays ?? 14)),
         autoSend: Boolean(merged.autoSend),
+        reviewerId: merged.reviewerId ?? null,
+        reviewNudgeDays: merged.reviewNudgeDays ?? 2,
         every,
         unit,
         anchorDay: unit === "week" ? null : startsAt.getUTCDate(),
@@ -183,6 +191,8 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
     if (dto.discountPercent !== undefined) patch.discountPercent = dto.discountPercent;
     if (dto.dueDays !== undefined) patch.dueDays = Math.max(0, Math.round(dto.dueDays));
     if (dto.autoSend !== undefined) patch.autoSend = dto.autoSend;
+    if (dto.reviewerId !== undefined) patch.reviewerId = dto.reviewerId;
+    if (dto.reviewNudgeDays !== undefined) patch.reviewNudgeDays = Math.max(0, Math.min(30, Math.round(dto.reviewNudgeDays)));
     if (dto.every !== undefined) patch.every = Math.max(1, Math.round(dto.every));
     if (dto.unit !== undefined) patch.unit = dto.unit;
     if (dto.maxOccurrences !== undefined) patch.maxOccurrences = dto.maxOccurrences;
@@ -291,6 +301,8 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
         }
       }
       if (n) this.logger.log(`generated ${n} scheduled invoice(s)`);
+      // Row 138: drafts nobody sent get one nudge each.
+      await this.nudgeUnsent().catch((err) => this.logger.warn(`nudge failed: ${(err as Error).message}`));
     } catch (err) {
       this.logger.warn(`schedule sweep failed: ${(err as Error).message}`);
     } finally {
@@ -345,20 +357,79 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
       .set({ occurrences, lastRunAt: new Date(), lastInvoiceId: inv.id, lastError: null, nextRunAt: next, status, endedAt: status === "ended" ? new Date() : null, updatedAt: new Date() })
       .where(eq(invoiceSchedules.id, s.id));
 
-    if (s.createdById) {
+    // Row 138: a draft goes to the named reviewer as an approval card (Approve = send). Auto-sent ones just inform.
+    const reviewer = s.reviewerId ?? s.createdById;
+    if (reviewer) {
       await this.notifications.notifyDirect({
         orgId: s.organizationId,
-        receiverId: s.createdById,
+        receiverId: reviewer,
         entityType: "invoice",
         entityId: inv.id,
-        verb: sent ? "invoice_auto_sent" : "invoice_generated",
-        title: sent ? `${inv.number} was sent to ${inv.company?.name ?? inv.contact?.name ?? "the client"} (${s.name})` : `${inv.number} is ready to review (${s.name})`,
-        body: sent ? "Sent automatically by the billing schedule — the client link is live." : "Generated as a draft by the billing schedule. Open it, check the lines, then send.",
-        data: { invoiceId: inv.id, scheduleId: s.id },
+        verb: sent ? "invoice_auto_sent" : "invoice_review",
+        title: sent ? `${inv.number} was sent to ${inv.company?.name ?? inv.contact?.name ?? "the client"} (${s.name})` : `Review & send ${inv.number} — ${s.name} (${inv.currency} ${inv.total.toFixed(2)})`,
+        body: sent ? "Sent automatically by the billing schedule — the client link is live." : `Generated as a draft for ${inv.company?.name ?? inv.contact?.name ?? "the client"}. Approve to send it, or open it to adjust the lines first.`,
+        data: sent ? { invoiceId: inv.id, scheduleId: s.id } : { invoiceId: inv.id, scheduleId: s.id, approval: pendingApproval("invoice_review") },
         category: sent ? "other" : "primary",
       });
     }
     return inv;
+  }
+
+  /* ---------------- row 138: review & nudge ---------------- */
+
+  /** Approve from the inbox = send the draft; reject = keep it as a draft and note why. */
+  async review(orgId: string, actor: { userId: string; role: string }, invoiceId: string, approve: boolean, note?: string | null) {
+    const inv = await this.invoices.get(orgId, invoiceId);
+    const admin = actor.role === "owner" || actor.role === "admin";
+    const sched = inv.schedule ? await this.db.query.invoiceSchedules.findFirst({ where: eq(invoiceSchedules.id, inv.schedule.id), columns: { reviewerId: true, createdById: true } }) : null;
+    const named = sched?.reviewerId ?? sched?.createdById;
+    if (!admin && named !== actor.userId) throw new ForbiddenException("Only the named reviewer or an admin can issue this invoice");
+    if (approve) {
+      if (inv.status !== "draft") return inv; // already dealt with
+      const sent = await this.invoices.send(orgId, actor.userId, invoiceId);
+      await this.notifications.resolveApproval("invoice", invoiceId, "approved", note, actor.userId);
+      return sent;
+    }
+    await this.notifications.resolveApproval("invoice", invoiceId, "rejected", note, actor.userId);
+    await this.activity.record({ orgId, actorId: actor.userId, entityType: "invoice", entityId: invoiceId, action: "review_held", changes: note?.trim() ? [{ field: "note", from: null, to: note.trim() }] : [] });
+    return inv;
+  }
+
+  /** Drafts a schedule generated that are still unsent after the nudge window: one reminder each, to the reviewer. */
+  async nudgeUnsent() {
+    const rows = await this.db
+      .select({ invId: invoices.id, number: invoices.number, orgId: invoices.organizationId, createdAt: invoices.createdAt, total: invoices.total, currency: invoices.currency, schedId: invoiceSchedules.id, name: invoiceSchedules.name, reviewerId: invoiceSchedules.reviewerId, createdById: invoiceSchedules.createdById, days: invoiceSchedules.reviewNudgeDays })
+      .from(invoices)
+      .innerJoin(invoiceSchedules, eq(invoiceSchedules.id, invoices.scheduleId))
+      .where(and(eq(invoices.status, "draft"), isNull(invoices.archivedAt), sql`${invoiceSchedules.reviewNudgeDays} > 0`, sql`${invoices.createdAt} < now() - (${invoiceSchedules.reviewNudgeDays} || ' days')::interval`));
+    let n = 0;
+    for (const r of rows) {
+      const receiver = r.reviewerId ?? r.createdById;
+      if (!receiver) continue;
+      const claimed = await this.db.insert(reminders).values({ organizationId: r.orgId, receiverId: receiver, entityType: "invoice", entityId: r.invId, kind: "unsent_draft", dueAt: r.createdAt }).onConflictDoNothing().returning({ id: reminders.id });
+      if (!claimed.length) continue;
+      const age = Math.floor((Date.now() - r.createdAt.getTime()) / 86_400_000);
+      await this.notifications.notifyDirect({ orgId: r.orgId, receiverId: receiver, entityType: "invoice", entityId: r.invId, verb: "invoice_unsent", title: `${r.number} (${r.name}) is still a draft after ${age} day${age === 1 ? "" : "s"}`, body: `${r.currency} ${r.total.toFixed(2)} has not gone out. Open it and send, or it stays unbilled.`, data: { invoiceId: r.invId, scheduleId: r.schedId }, category: "primary" });
+      n++;
+    }
+    return n;
+  }
+
+  /** Row 138: drafts generated by schedules that nobody has sent yet. */
+  async awaitingReview(orgId: string) {
+    const rows = await this.db
+      .select({ id: invoices.id, number: invoices.number, title: invoices.title, total: invoices.total, currency: invoices.currency, createdAt: invoices.createdAt, scheduleId: invoiceSchedules.id, scheduleName: invoiceSchedules.name, reviewerId: invoiceSchedules.reviewerId })
+      .from(invoices)
+      .innerJoin(invoiceSchedules, eq(invoiceSchedules.id, invoices.scheduleId))
+      .where(and(eq(invoices.organizationId, orgId), eq(invoices.status, "draft"), isNull(invoices.archivedAt)))
+      .orderBy(asc(invoices.createdAt));
+    return rows.map((r) => ({ ...r, createdAt: r.createdAt.toISOString(), ageDays: Math.floor((Date.now() - r.createdAt.getTime()) / 86_400_000) }));
+  }
+
+  /** Members who can be named as reviewer (owners/admins — they are the ones allowed to send). */
+  async reviewers(orgId: string) {
+    const rows = await this.db.query.memberships.findMany({ where: and(eq(memberships.organizationId, orgId), sql`${memberships.role} in ('owner','admin')`), with: { user: { columns: { id: true, name: true, email: true } } } });
+    return rows.map((m) => ({ id: m.user.id, name: m.user.name, email: m.user.email, role: m.role }));
   }
 
   /* ---------------- helpers ---------------- */
@@ -402,6 +473,7 @@ function shape(
     company: { id: string; name: string } | null;
     contact: { id: string; firstName: string | null; lastName: string | null } | null;
     project: { id: string; name: string } | null;
+    reviewer?: { id: string; name: string } | null;
   },
 ) {
   const totals = computeTotals(r.items, r.discountPercent, r.taxRate);
@@ -420,6 +492,9 @@ function shape(
     notes: r.notes,
     dueDays: r.dueDays,
     autoSend: r.autoSend,
+    reviewerId: r.reviewerId,
+    reviewer: r.reviewer ? { id: r.reviewer.id, name: r.reviewer.name } : null,
+    reviewNudgeDays: r.reviewNudgeDays,
     every: r.every,
     unit: r.unit,
     frequency,

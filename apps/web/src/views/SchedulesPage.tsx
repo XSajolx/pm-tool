@@ -56,6 +56,7 @@ export function SchedulesPage() {
       </div>
 
       <div className="flex-1 overflow-auto p-6">
+        <AwaitingReview />
         <div className="mb-3 flex flex-wrap gap-1">
           {(["all", "active", "paused", "ended"] as const).map((k) => (
             <button key={k} onClick={() => setFilter(k)} className={cn("rounded-full border px-3 py-1 text-xs font-medium capitalize transition", filter === k ? "border-indigo-200 bg-indigo-50 text-indigo-700" : "border-border bg-white text-slate-600 hover:bg-muted")}>
@@ -89,7 +90,7 @@ export function SchedulesPage() {
                     </td>
                     <td className="px-4 py-2.5 text-slate-600">{s.company?.name ?? s.contact?.name ?? "—"}</td>
                     <td className="px-4 py-2.5 text-slate-600">{s.kind === "subscription" ? "Subscription" : "Recurring"}</td>
-                    <td className="px-4 py-2.5 text-slate-600">{cadenceLabel(s)}{s.autoSend && <span className="ml-1.5 rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700">auto-send</span>}</td>
+                    <td className="px-4 py-2.5 text-slate-600">{cadenceLabel(s)}{s.autoSend ? <span className="ml-1.5 rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700">auto-send</span> : s.reviewer ? <span className="ml-1.5 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-700" title="Reviews and sends each draft">→ {s.reviewer.name}</span> : null}</td>
                     <td className="px-4 py-2.5"><span className={cn("rounded-full border px-2 py-0.5 text-[11px] font-medium", SCHEDULE_STATUS[s.status].cls)}>{SCHEDULE_STATUS[s.status].label}</span></td>
                     <td className="px-4 py-2.5 text-right tabular-nums text-slate-800">{fmtMoney(s.amount, s.currency)}</td>
                     <td className="px-4 py-2.5 text-right text-xs text-muted-foreground">{s.status === "active" && s.nextRunAt ? fmtShortDate(s.nextRunAt) : "—"}</td>
@@ -117,6 +118,36 @@ function perMonth(s: InvoiceSchedule) {
 }
 
 /** New schedule: from an existing invoice (copies lines + client) or blank. Details are edited on the next page. */
+/** Row 138: drafts a schedule generated that nobody has sent yet — issue right here. */
+function AwaitingReview() {
+  const qc = useQueryClient();
+  const { data = [] } = useQuery({ queryKey: ["awaiting-review"], queryFn: api.getAwaitingReview });
+  const issue = useMutation({
+    mutationFn: (id: string) => api.issueScheduledInvoice(id),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["awaiting-review"] });
+      void qc.invalidateQueries({ queryKey: ["invoices"] });
+      void qc.invalidateQueries({ queryKey: ["schedules"] });
+    },
+  });
+  if (!data.length) return null;
+  return (
+    <section className="mb-4 rounded-lg border border-amber-200 bg-amber-50/50 p-3" data-testid="awaiting-review">
+      <p className="text-xs font-semibold text-slate-800">{data.length} generated draft{data.length === 1 ? "" : "s"} waiting to be sent</p>
+      <ul className="mt-2 space-y-1">
+        {data.map((d) => (
+          <li key={d.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+            <Link to="/finance/invoices/$invoiceId" params={{ invoiceId: d.id }} className="font-medium text-slate-900 hover:underline">{d.number}</Link>
+            <span className="text-muted-foreground">{d.scheduleName} · {fmtMoney(d.total, d.currency)}</span>
+            <span className={cn("rounded px-1.5 py-0.5 text-[10px]", d.ageDays >= 2 ? "bg-red-50 text-red-700" : "bg-slate-100 text-slate-600")}>{d.ageDays === 0 ? "today" : `${d.ageDays} day${d.ageDays === 1 ? "" : "s"} old`}</span>
+            <button type="button" disabled={issue.isPending} onClick={() => issue.mutate(d.id)} className="ml-auto rounded-md bg-indigo-600 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-indigo-700 disabled:opacity-50">Send now</button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 export function NewScheduleDialog({ onClose, fromInvoiceId, companyId: presetCompany }: { onClose: () => void; fromInvoiceId?: string; companyId?: string }) {
   const qc = useQueryClient();
   const navigate = useNavigate();
@@ -132,6 +163,8 @@ export function NewScheduleDialog({ onClose, fromInvoiceId, companyId: presetCom
   const [unit, setUnit] = useState<"week" | "month" | "year">("week");
   const [startsAt, setStartsAt] = useState(isoDay(new Date()));
   const [autoSend, setAutoSend] = useState(false);
+  const [reviewerId, setReviewerId] = useState("");
+  const { data: reviewers = [] } = useQuery({ queryKey: ["schedule-reviewers"], queryFn: api.getScheduleReviewers });
   const [error, setError] = useState<string | null>(null);
 
   const create = useMutation({
@@ -144,6 +177,7 @@ export function NewScheduleDialog({ onClose, fromInvoiceId, companyId: presetCom
         ...(frequency === "custom" ? { every: Number(every) || 1, unit } : PRESET[frequency]),
         startsAt: new Date(startsAt).toISOString(),
         autoSend,
+        reviewerId: reviewerId || null,
       }),
     onSuccess: (s) => {
       qc.invalidateQueries({ queryKey: ["schedules"] });
@@ -208,8 +242,16 @@ export function NewScheduleDialog({ onClose, fromInvoiceId, companyId: presetCom
           </div>
           <label className="flex items-start gap-2 rounded-md border border-border px-3 py-2 text-xs">
             <input type="checkbox" checked={autoSend} onChange={(e) => setAutoSend(e.target.checked)} className="mt-0.5" />
-            <span><span className="font-medium text-slate-800">Send automatically</span><br /><span className="text-muted-foreground">Each invoice goes out (client link live) the moment it is generated. Off = a draft lands in your inbox to review first.</span></span>
+            <span><span className="font-medium text-slate-800">Send automatically</span><br /><span className="text-muted-foreground">Each invoice goes out (client link live) the moment it is generated. Off = a draft lands in the reviewer&apos;s inbox to check and send.</span></span>
           </label>
+          {!autoSend && (
+            <CrmField label="Reviewer who issues each draft">
+              <select value={reviewerId} onChange={(e) => setReviewerId(e.target.value)} className={input} data-testid="reviewer-select">
+                <option value="">Whoever creates the schedule</option>
+                {reviewers.map((r) => <option key={r.id} value={r.id}>{r.name} · {r.role}</option>)}
+              </select>
+            </CrmField>
+          )}
         </div>
         {error && <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
         <div className="mt-5 flex justify-end gap-2">

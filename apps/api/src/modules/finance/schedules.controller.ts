@@ -21,6 +21,8 @@ const writeSchema = z.object({
   notes: z.string().max(10_000).nullable().optional(),
   dueDays: z.number().int().min(0).max(365).optional(),
   autoSend: z.boolean().optional(),
+  reviewerId: z.string().uuid().nullable().optional(),
+  reviewNudgeDays: z.number().int().min(0).max(30).optional(),
   every: z.number().int().min(1).max(52).optional(),
   unit: z.enum(["week", "month", "year"]).optional(),
   startsAt: z.string().datetime().optional(),
@@ -43,6 +45,29 @@ export class SchedulesController {
   @Get("summary")
   summary(@Auth() auth: AuthContext) {
     return this.schedules.summary(auth.orgId);
+  }
+
+  /* row 138 */
+  @Get("awaiting-review")
+  awaiting(@Auth() auth: AuthContext) {
+    return this.schedules.awaitingReview(auth.orgId);
+  }
+
+  @Get("reviewers")
+  reviewers(@Auth() auth: AuthContext) {
+    return this.schedules.reviewers(auth.orgId);
+  }
+
+  @Post("invoices/:invoiceId/issue")
+  @Roles("owner", "admin")
+  issue(@Auth() auth: AuthContext, @Param("invoiceId") invoiceId: string) {
+    return this.schedules.review(auth.orgId, auth, invoiceId, true);
+  }
+
+  @Post("nudge")
+  @Roles("owner", "admin")
+  nudge() {
+    return this.schedules.nudgeUnsent().then((n) => ({ nudged: n }));
   }
 
   @Get(":id")

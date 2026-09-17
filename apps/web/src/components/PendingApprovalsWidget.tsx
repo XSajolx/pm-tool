@@ -11,7 +11,7 @@ import { cn } from "../lib/utils.js";
  * then doc reviews, milestone sign-offs and time-off requests from the inbox -
  * each with one-click Approve / Reject so nothing piles up.
  */
-const KIND_LABEL: Record<ApprovalMeta["kind"], string> = { timesheet: "Timesheet", doc_review: "Doc review", milestone: "Milestone sign-off", leave: "Time off", expense: "Expense" };
+const KIND_LABEL: Record<ApprovalMeta["kind"], string> = { timesheet: "Timesheet", doc_review: "Doc review", milestone: "Milestone sign-off", leave: "Time off", expense: "Expense", invoice_review: "Invoice to send" };
 
 function weekLabel(iso: string) {
   const d = new Date(iso);
