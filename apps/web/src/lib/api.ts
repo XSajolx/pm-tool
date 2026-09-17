@@ -2000,6 +2000,49 @@ export interface ProjectContractors {
   engagements: (ContractorEngagement & { contractor: Omit<Contractor, "invoiced" | "unpaid" | "invoiceCount" | "projectCount">; invoiced: number; unpaid: number; billable: number; invoices: ContractorInvoice[] })[];
   totals: { invoiced: number; unpaid: number; billable: number; pendingApproval: number; currency: string; categoryMarkupPct: number };
 }
+// ---- Row 136: unbilled work ----
+export type UnbilledGroupBy = "person" | "task" | "single";
+export interface UnbilledEntry {
+  id: string;
+  userId: string;
+  userName: string;
+  taskId: string | null;
+  taskTitle: string | null;
+  description: string | null;
+  date: string;
+  seconds: number;
+  hours: number;
+  rate: number;
+  amount: number;
+  approved: boolean;
+}
+export interface UnbilledWork {
+  project: { id: string; name: string; currency: string; hourlyRate: number | null; companyId: string | null };
+  onlyApprovedHours: boolean;
+  through: string | null;
+  hours: {
+    seconds: number;
+    hours: number;
+    amount: number;
+    rateMissing: boolean;
+    entries: UnbilledEntry[];
+    byPerson: { id: string; name: string; rate: number; seconds: number; hours: number; amount: number; count: number }[];
+    byTask: { id: string | null; name: string; seconds: number; hours: number; amount: number; count: number }[];
+    awaitingApproval: { count: number; seconds: number; hours: number };
+  };
+  expenses: { count: number; amount: number; items: BillableExpense[] };
+  total: number;
+}
+export interface UnbilledSummaryRow {
+  project: UnbilledWork["project"];
+  hours: number;
+  hoursAmount: number;
+  awaitingHours: number;
+  expensesAmount: number;
+  expensesCount: number;
+  total: number;
+  rateMissing: boolean;
+}
 export interface BillableExpense extends Expense {
   effectiveMarkupPct: number;
   markupSource: "override" | "category" | "none";
@@ -3064,6 +3107,17 @@ export const api = {
   },
   /** markupPercent null = each expense keeps its own (override or category default). */
   addExpensesToInvoice: (invoiceId: string, expenseIds: string[], markupPercent: number | null = null) => request<Invoice>(`/finance/expenses/invoice/${invoiceId}`, { method: "POST", body: JSON.stringify({ expenseIds, markupPercent }) }),
+  /** Row 136 */
+  getUnbilled: (projectId: string, opts: { through?: string; onlyApproved?: boolean } = {}) => {
+    const q = new URLSearchParams();
+    if (opts.through) q.set("through", opts.through);
+    if (opts.onlyApproved === false) q.set("onlyApproved", "0");
+    const qs = q.toString();
+    return request<UnbilledWork>(`/finance/unbilled/${projectId}${qs ? "?" + qs : ""}`);
+  },
+  getUnbilledSummary: (onlyApproved = true) => request<UnbilledSummaryRow[]>(`/finance/unbilled${onlyApproved ? "" : "?onlyApproved=0"}`),
+  draftFromUnbilled: (body: { projectId: string; through?: string | null; onlyApprovedHours?: boolean; groupBy?: UnbilledGroupBy; includeExpenses?: boolean; timeEntryIds?: string[] | null; expenseIds?: string[] | null; title?: string | null }) =>
+    request<Invoice>(`/finance/unbilled/draft`, { method: "POST", body: JSON.stringify(body) }),
   /** Row 135 */
   getContractors: (all = false) => request<Contractor[]>(`/finance/contractors${all ? "?all=1" : ""}`),
   getContractor: (id: string) => request<ContractorDetail>(`/finance/contractors/${id}`),

@@ -6,6 +6,7 @@ import { fmtMoney, fmtShortDate } from "../lib/format.js";
 import { CrmField, input } from "./CompaniesPage.js";
 import { useEscape } from "../lib/useEscape.js";
 import { cn } from "../lib/utils.js";
+import { UnbilledWorkDialog } from "../components/UnbilledWorkDialog.js";
 
 export const INVOICE_STATUS: Record<InvoiceStatus, { label: string; cls: string }> = {
   draft: { label: "Draft", cls: "bg-slate-100 text-slate-600 border-slate-200" },
@@ -34,6 +35,7 @@ const FILTERS: { key: string; label: string }[] = [
 /** Row 156: every invoice, with the money at a glance. Creating one opens the editor as a draft. */
 export function InvoicesPage() {
   const [creating, setCreating] = useState(false);
+  const [billing, setBilling] = useState(false);
   const [filter, setFilter] = useState("all");
   const { data: invoices = [], isLoading } = useQuery({ queryKey: ["invoices", filter], queryFn: () => api.getInvoices({ status: filter }) });
   const { data: totals } = useQuery({ queryKey: ["invoice-totals"], queryFn: api.getInvoiceTotals });
@@ -46,7 +48,10 @@ export function InvoicesPage() {
         <Link to="/finance/recurring" className="text-xs text-muted-foreground hover:text-indigo-700">
           ↻ {scheduleTotals?.active ?? 0} recurring active{scheduleTotals?.nextRunAt ? ` · next ${fmtShortDate(scheduleTotals.nextRunAt)}` : ""}
         </Link>
-        <button onClick={() => setCreating(true)} className="ml-auto rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-indigo-700">
+        <button onClick={() => setBilling(true)} className="ml-auto rounded-md border border-border px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-muted" title="Draft an invoice from approved, unbilled hours and expenses">
+          Bill unbilled work
+        </button>
+        <button onClick={() => setCreating(true)} className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-indigo-700">
           New invoice
         </button>
       </div>
@@ -125,6 +130,7 @@ export function InvoicesPage() {
       </div>
 
       {creating && <NewInvoiceDialog onClose={() => setCreating(false)} />}
+      {billing && <UnbilledWorkDialog onClose={() => setBilling(false)} />}
     </div>
   );
 }

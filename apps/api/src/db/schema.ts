@@ -1143,11 +1143,14 @@ export const timeEntries = pgTable(
     billable: boolean("billable").notNull().default(true),
     /** "timer" | "manual" | "timesheet" */
     source: varchar("source", { length: 16 }).notNull().default("timer"),
+    /** Row 136: set once the hours were pulled onto an invoice. */
+    invoiceId: uuid("invoice_id").references((): AnyPgColumn => invoices.id, { onDelete: "set null" }),
     ...timestamps,
   },
   (t) => [
     index("time_entries_user_started_idx").on(t.userId, t.startedAt),
     index("time_entries_project_started_idx").on(t.projectId, t.startedAt),
+    index("time_entries_invoice_idx").on(t.invoiceId),
     index("time_entries_org_started_idx").on(t.organizationId, t.startedAt),
   ],
 );

@@ -9,6 +9,7 @@ import { PROJECT_STATUS } from "./ProjectsPage.js";
 import { NotFound } from "../components/NotFound.js";
 import { ProjectTeam } from "../components/ProjectTeam.js";
 import { ProjectContractors } from "../components/ProjectContractors.js";
+import { UnbilledWorkDialog } from "../components/UnbilledWorkDialog.js";
 import { DocsTab } from "../components/DocsTab.js";
 import { MuteButton } from "../components/MuteButton.js";
 import { FollowButton } from "../components/FollowButton.js";
@@ -28,6 +29,7 @@ export function ProjectPage() {
   const trash = useMutation({ mutationFn: () => api.trashProject(projectId), onSuccess: () => { qc.invalidateQueries({ queryKey: ["projects"] }); navigate({ to: "/trash" }); } });
   const { role, user } = useAuth();
   const isAdmin = role === "owner" || role === "admin";
+  const [billing, setBilling] = useState(false); // row 136
 
   const { data: project, isError } = useQuery({
     queryKey: ["project", projectId],
@@ -152,6 +154,11 @@ export function ProjectPage() {
             📄 Docs
           </a>
           {canManage && (
+            <button type="button" onClick={() => setBilling(true)} className="rounded-full border border-border bg-white px-2.5 py-1 text-slate-700 hover:border-indigo-300 hover:text-indigo-700" title="Draft an invoice from approved, unbilled hours and expenses (row 136)">
+              🧾 Bill unbilled work
+            </button>
+          )}
+          {canManage && (
             <Link to="/portal/preview/$projectId" params={{ projectId: project.id }} className="rounded-full border border-border bg-white px-2.5 py-1 text-slate-700 hover:border-indigo-300 hover:text-indigo-700" title="See exactly what a client guest sees (row 118)">
               👁 Preview as client
             </Link>
@@ -226,6 +233,7 @@ export function ProjectPage() {
         <ProjectTeam projectId={project.id} canManage={canManage} />
         {/* Row 135 */}
         <ProjectContractors projectId={project.id} canManage={canManage} />
+        {billing && <UnbilledWorkDialog projectId={project.id} onClose={() => setBilling(false)} />}
         <ProjectStages projectId={project.id} canManage={canManage} />
         <ProjectMilestones projectId={project.id} canManage={canManage} startDate={project.startDate} endDate={project.endDate} />
         {canManage && <ApplyTemplate projectId={project.id} />}
