@@ -100,8 +100,9 @@ export class ExpensesService {
 
   /* ---------------- read ---------------- */
 
-  async list(orgId: string, opts: { filter?: string; projectId?: string; companyId?: string; from?: string; to?: string; importId?: string; q?: string } = {}) {
+  async list(orgId: string, opts: { filter?: string; projectId?: string; companyId?: string; from?: string; to?: string; importId?: string; q?: string; createdById?: string } = {}) {
     const f = [eq(expenses.organizationId, orgId), isNull(expenses.archivedAt)];
+    if (opts.createdById) f.push(eq(expenses.createdById, opts.createdById));
     if (opts.projectId) f.push(eq(expenses.projectId, opts.projectId));
     if (opts.companyId) f.push(eq(expenses.companyId, opts.companyId));
     if (opts.importId) f.push(eq(expenses.importId, opts.importId));
@@ -130,7 +131,7 @@ export class ExpensesService {
     }
     const rows = await this.db.query.expenses.findMany({
       where: and(...f),
-      with: { project: { columns: { id: true, name: true } }, company: { columns: { id: true, name: true } }, invoice: { columns: { id: true, number: true } } },
+      with: { project: { columns: { id: true, name: true } }, company: { columns: { id: true, name: true } }, invoice: { columns: { id: true, number: true } }, createdBy: { columns: { id: true, name: true } } },
       orderBy: [desc(expenses.date), desc(expenses.createdAt)],
       limit: 1000,
     });
@@ -154,12 +155,12 @@ export class ExpensesService {
     return { thisMonth: round2(month?.n ?? 0), uncategorised: uncat?.n ?? 0, unbilledBillable: round2(bill?.n ?? 0), unbilledCount: bill?.c ?? 0, personalThisMonth: round2(personal?.n ?? 0) };
   }
 
-  async get(orgId: string, id: string) {
+  async get(orgId: string, id: string, ownerId?: string) {
     const row = await this.db.query.expenses.findFirst({
       where: and(eq(expenses.id, id), eq(expenses.organizationId, orgId)),
-      with: { project: { columns: { id: true, name: true } }, company: { columns: { id: true, name: true } }, invoice: { columns: { id: true, number: true } } },
+      with: { project: { columns: { id: true, name: true } }, company: { columns: { id: true, name: true } }, invoice: { columns: { id: true, number: true } }, createdBy: { columns: { id: true, name: true } } },
     });
-    if (!row) throw new NotFoundException("Expense not found");
+    if (!row || (ownerId && row.createdById !== ownerId)) throw new NotFoundException("Expense not found");
     return shape(row);
   }
 
@@ -197,8 +198,8 @@ export class ExpensesService {
     return this.get(orgId, row!.id);
   }
 
-  async update(orgId: string, userId: string, id: string, dto: ExpenseDto & { rememberVendor?: boolean; applyToSimilar?: boolean }) {
-    const before = await this.get(orgId, id);
+  async update(orgId: string, userId: string, id: string, dto: ExpenseDto & { rememberVendor?: boolean; applyToSimilar?: boolean }, ownerId?: string) {
+    const before = await this.get(orgId, id, ownerId);
     if (before.invoiceId && (dto.amount !== undefined || dto.billable === false)) throw new BadRequestException("This expense is on an invoice — remove it from the invoice first");
     await this.assertLinks(orgId, dto);
     const patch: Record<string, unknown> = { updatedAt: new Date() };
@@ -453,9 +454,10 @@ function keyOf(vendor: string) {
   return vendor.replace(/[^A-Za-z0-9 &.-]/g, " ").replace(/\s+/g, " ").trim().slice(0, 24).trim();
 }
 
-function shape(r: typeof expenses.$inferSelect & { project: { id: string; name: string } | null; company: { id: string; name: string } | null; invoice: { id: string; number: string } | null }) {
+function shape(r: typeof expenses.$inferSelect & { project: { id: string; name: string } | null; company: { id: string; name: string } | null; invoice: { id: string; number: string } | null; createdBy?: { id: string; name: string } | null }) {
   return {
     id: r.id,
+    createdBy: r.createdBy ? { id: r.createdBy.id, name: r.createdBy.name } : null,
     date: r.date,
     vendor: r.vendor,
     description: r.description,

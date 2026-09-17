@@ -384,6 +384,8 @@ export const attachments = pgTable(
     /** Row 13: images and files dropped into a doc. */
     documentId: uuid("document_id").references((): AnyPgColumn => documents.id, { onDelete: "cascade" }),
     channelId: uuid("channel_id").references((): AnyPgColumn => channels.id, { onDelete: "cascade" }),
+    /** Row 132: a receipt photo on an expense. */
+    expenseId: uuid("expense_id").references((): AnyPgColumn => expenses.id, { onDelete: "cascade" }),
     messageId: uuid("message_id").references((): AnyPgColumn => messages.id, { onDelete: "cascade" }),
     uploadedById: uuid("uploaded_by_id")
       .notNull()
@@ -395,7 +397,7 @@ export const attachments = pgTable(
     storageKey: text("storage_key").notNull(),
     ...timestamps,
   },
-  (t) => [index("attachments_task_idx").on(t.taskId), index("attachments_channel_idx").on(t.channelId), index("attachments_message_idx").on(t.messageId)],
+  (t) => [index("attachments_task_idx").on(t.taskId), index("attachments_channel_idx").on(t.channelId), index("attachments_message_idx").on(t.messageId), index("attachments_expense_idx").on(t.expenseId)],
 );
 
 export const attachmentsRelations = relations(attachments, ({ one }) => ({

@@ -22,6 +22,7 @@ import { ProjectsPage } from "./views/ProjectsPage.js";
 import { ProjectPage } from "./views/ProjectPage.js";
 import { TimeTrackingPage } from "./views/TimeTrackingPage.js";
 import { QuickLogPage } from "./views/QuickLogPage.js";
+import { QuickExpensePage } from "./views/QuickExpensePage.js";
 import { useState } from "react";
 import { TimesheetPage } from "./views/TimesheetPage.js";
 import { ResourcingPage } from "./views/ResourcingPage.js";
@@ -143,6 +144,9 @@ function MobileBar({ onMenu }: { onMenu: () => void }) {
       <button type="button" onClick={() => setSearch(true)} aria-label="Search" className="rounded-md px-2 py-1.5 text-sm text-slate-700 hover:bg-muted">⌕</button>
       <button type="button" onClick={() => setQuickAdd(true)} className="rounded-md border border-indigo-300 px-2 py-1.5 text-xs font-medium text-indigo-700 hover:bg-indigo-50" data-testid="mobile-new-task">＋ Task</button>
       <Link to="/inbox" className="rounded-md px-2 py-1.5 text-xs font-medium text-slate-700 hover:bg-muted">Inbox</Link>
+      <Link to="/expense" className={pathname === "/expense" ? "rounded-md bg-indigo-100 px-2 py-1.5 text-xs font-semibold text-indigo-800" : "rounded-md px-2 py-1.5 text-xs font-medium text-slate-700 hover:bg-muted"} aria-label="Log an expense" data-testid="mobile-expense">
+        🧾
+      </Link>
       <Link to="/log" className={pathname === "/log" ? "rounded-md bg-indigo-100 px-3 py-1.5 text-xs font-semibold text-indigo-800" : "rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white"}>
         ⚡ Log time
       </Link>
@@ -257,6 +261,7 @@ const projectRoute = createRoute({
   component: ProjectPage,
 });
 const quickLogRoute = createRoute({ getParentRoute: () => rootRoute, path: "/log", component: QuickLogPage });
+const quickExpenseRoute = createRoute({ getParentRoute: () => rootRoute, path: "/expense", component: QuickExpensePage });
 const timeRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/time",
@@ -317,6 +322,7 @@ const routeTree = rootRoute.addChildren([
   projectRoute,
   timeRoute,
   quickLogRoute,
+  quickExpenseRoute,
   timesheetRoute,
   resourcingRoute,
   companiesRoute,

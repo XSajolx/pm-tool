@@ -71,8 +71,11 @@ export class ExpensesController {
     @Query("to") to?: string,
     @Query("importId") importId?: string,
     @Query("q") q?: string,
+    @Query("mine") mine?: string,
   ) {
-    return this.expenses.list(auth.orgId, { filter, projectId, companyId, from, to, importId, q });
+    // Row 132: members see what they logged; the books are owner/admin.
+    const own = mine === "1" || auth.role === "member";
+    return this.expenses.list(auth.orgId, { filter, projectId, companyId, from, to, importId, q, createdById: own ? auth.userId : undefined });
   }
 
   @Get("summary")
@@ -148,7 +151,7 @@ export class ExpensesController {
 
   @Get(":id")
   get(@Auth() auth: AuthContext, @Param("id") id: string) {
-    return this.expenses.get(auth.orgId, id);
+    return this.expenses.get(auth.orgId, id, auth.role === "member" ? auth.userId : undefined);
   }
 
   @Post()
@@ -162,7 +165,7 @@ export class ExpensesController {
   @Roles("owner", "admin", "member")
   @UsePipes(new ZodValidationPipe(updateSchema))
   update(@Auth() auth: AuthContext, @Param("id") id: string, @Body() dto: z.infer<typeof updateSchema>) {
-    return this.expenses.update(auth.orgId, auth.userId, id, dto);
+    return this.expenses.update(auth.orgId, auth.userId, id, dto, auth.role === "member" ? auth.userId : undefined);
   }
 
   @Delete(":id")

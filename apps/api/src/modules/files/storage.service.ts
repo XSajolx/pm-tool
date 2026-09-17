@@ -90,6 +90,11 @@ export class StorageService {
         { expiresIn: 3600 },
       );
     }
+    return this.rawUrl(id);
+  }
+
+  /** The stable, storage-independent URL of a file (row 132 stores this on the expense). */
+  rawUrl(id: string) {
     const base = (process.env.PUBLIC_API_URL ?? process.env.API_URL ?? `http://localhost:${process.env.API_PORT ?? 3333}`).replace(/\/$/, "");
     return `${base}/api/files/${id}/raw`;
   }

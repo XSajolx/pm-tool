@@ -3,7 +3,7 @@ import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
-import { attachments, channelMembers, documents, tasks } from "../../db/schema.js";
+import { attachments, channelMembers, documents, tasks, expenses } from "../../db/schema.js";
 import { StorageService } from "./storage.service.js";
 
 export interface UploadedFileLike {
@@ -23,8 +23,15 @@ export class FilesService {
     private readonly storage: StorageService,
   ) {}
 
-  async upload(orgId: string, userId: string, file: UploadedFileLike, target: { channelId?: string; taskId?: string; documentId?: string }) {
-    if (!target.channelId && !target.taskId && !target.documentId) throw new BadRequestException("channelId, taskId or documentId is required");
+  async upload(orgId: string, userId: string, file: UploadedFileLike, target: { channelId?: string; taskId?: string; documentId?: string; expenseId?: string }, role = "member") {
+    if (!target.channelId && !target.taskId && !target.documentId && !target.expenseId) throw new BadRequestException("channelId, taskId, documentId or expenseId is required");
+    if (target.expenseId) {
+      // Row 132: a receipt photo. Members attach to their own expenses; admins to any.
+      const e = await this.db.query.expenses.findFirst({ where: and(eq(expenses.id, target.expenseId), eq(expenses.organizationId, orgId)), columns: { id: true, createdById: true } });
+      if (!e) throw new NotFoundException("Expense not found");
+      if (e.createdById !== userId && role !== "owner" && role !== "admin") throw new ForbiddenException("Not your expense");
+      if (!/^(image\/|application\/pdf)/.test(file.mimetype || "")) throw new BadRequestException("A receipt must be a photo or a PDF");
+    }
     if (target.documentId) {
       // Row 13: the doc must be one of ours.
       const d = await this.db.query.documents.findFirst({ where: and(eq(documents.id, target.documentId), eq(documents.organizationId, orgId)), columns: { id: true } });
@@ -43,7 +50,7 @@ export class FilesService {
     const id = randomUUID();
     const filename = file.originalname.replace(/[^\w.\-() ]+/g, "_").slice(0, 200) || "file";
     const mimeType = file.mimetype || "application/octet-stream";
-    const key = `${orgId}/${target.channelId ? `chat/${target.channelId}` : target.taskId ? `tasks/${target.taskId}` : `docs/${target.documentId}`}/${id}-${filename}`;
+    const key = `${orgId}/${target.channelId ? `chat/${target.channelId}` : target.taskId ? `tasks/${target.taskId}` : target.expenseId ? `expenses/${target.expenseId}` : `docs/${target.documentId}`}/${id}-${filename}`;
     await this.storage.put(key, file.buffer, mimeType);
     const [row] = await this.db
       .insert(attachments)
@@ -53,6 +60,7 @@ export class FilesService {
         taskId: target.taskId ?? null,
         documentId: target.documentId ?? null,
         channelId: target.channelId ?? null,
+        expenseId: target.expenseId ?? null,
         uploadedById: userId,
         filename,
         mimeType,
@@ -60,6 +68,10 @@ export class FilesService {
         storageKey: key,
       })
       .returning();
+    if (target.expenseId) {
+      // Row 132: the expense points at a stable URL (/files/:id/raw redirects to a fresh signed URL on S3).
+      await this.db.update(expenses).set({ receiptUrl: this.storage.rawUrl(id), updatedAt: new Date() }).where(eq(expenses.id, target.expenseId));
+    }
     return this.shape(row!);
   }
 
@@ -115,11 +127,12 @@ export class FilesService {
       .where(and(inArray(attachments.id, attachmentIds), eq(attachments.organizationId, orgId), eq(attachments.channelId, channelId), isNull(attachments.messageId)));
   }
 
-  /** Local-storage bytes for /files/:id/raw. */
+  /** Bytes for /files/:id/raw — a local stream, or a signed S3 URL to redirect to. */
   async raw(id: string) {
     const row = await this.db.query.attachments.findFirst({ where: eq(attachments.id, id) });
     if (!row || row.archivedAt) throw new NotFoundException("File not found");
-    return { row, stream: this.storage.localStream(row.storageKey) };
+    if (this.storage.mode === "s3") return { row, stream: null, redirect: await this.storage.url(row.storageKey, row.id, row.filename) };
+    return { row, stream: this.storage.localStream(row.storageKey), redirect: null };
   }
 
   async remove(orgId: string, userId: string, role: string, id: string) {

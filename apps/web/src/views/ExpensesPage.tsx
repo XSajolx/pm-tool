@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState, type FormEvent } from "react";
 import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, type Expense, type ExpenseImportPreview, type ExpenseRule } from "../lib/api.js";
+import { api, errorMessage, type Expense, type ExpenseImportPreview, type ExpenseRule } from "../lib/api.js";
 import { fmtMoney, fmtShortDate, isoDay } from "../lib/format.js";
 import { useAuth } from "../lib/auth.js";
 import { useEscape } from "../lib/useEscape.js";
@@ -49,11 +49,12 @@ export function ExpensesPage() {
   return (
     <div className="flex h-screen flex-1 flex-col overflow-hidden">
       <div className="flex flex-wrap items-center gap-3 border-b border-border px-6 py-3">
-        <h1 className="text-sm font-semibold text-slate-800">Expenses</h1>
+        <h1 className="text-sm font-semibold text-slate-800">{admin ? "Expenses" : "My expenses"}</h1>
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search vendor or note…" className="w-56 rounded-md border border-border px-2.5 py-1 text-xs outline-none focus:border-indigo-500" />
         <div className="ml-auto flex items-center gap-2">
-          <button onClick={() => setPanel(panel === "rules" ? null : "rules")} className={cn("rounded-md border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted", panel === "rules" ? "bg-indigo-50 text-indigo-700" : "text-slate-700")}>Rules</button>
-          <button onClick={() => setPanel(panel === "imports" ? null : "imports")} className={cn("rounded-md border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted", panel === "imports" ? "bg-indigo-50 text-indigo-700" : "text-slate-700")}>Imports</button>
+          <Link to="/expense" className="rounded-md border border-border px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-muted md:hidden">📷 Quick entry</Link>
+          {admin && <button onClick={() => setPanel(panel === "rules" ? null : "rules")} className={cn("rounded-md border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted", panel === "rules" ? "bg-indigo-50 text-indigo-700" : "text-slate-700")}>Rules</button>}
+          {admin && <button onClick={() => setPanel(panel === "imports" ? null : "imports")} className={cn("rounded-md border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted", panel === "imports" ? "bg-indigo-50 text-indigo-700" : "text-slate-700")}>Imports</button>}
           {admin && <button onClick={() => setImporting(true)} className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-muted">Import statement</button>}
           <button onClick={() => setAdding(true)} className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-indigo-700">Add expense</button>
         </div>
@@ -103,6 +104,8 @@ export function ExpensesPage() {
                       <td className="px-3 py-1.5">
                         <p className="font-medium text-slate-800">{e.vendor}</p>
                         <p className="max-w-md truncate text-[11px] text-muted-foreground">
+                          {e.receiptUrl && <a href={e.receiptUrl} target="_blank" rel="noreferrer" className="mr-1 rounded bg-slate-100 px-1 text-[10px] text-slate-700 hover:bg-slate-200" title="Open receipt">🧾 receipt</a>}
+                          {admin && e.createdBy && <span className="mr-1 text-[10px]">by {e.createdBy.name} ·</span>}
                           {e.description}
                           {e.source === "import" && <span className="ml-1 rounded bg-slate-100 px-1 text-[10px]">imported{e.account ? ` · ${e.account}` : ""}</span>}
                           {e.invoice && <Link to="/finance/invoices/$invoiceId" params={{ invoiceId: e.invoice.id }} className="ml-1 rounded bg-emerald-50 px-1 text-[10px] text-emerald-700">on {e.invoice.number}</Link>}
@@ -183,11 +186,17 @@ function AddExpenseDialog({ categories, onClose, onDone }: { categories: readonl
   const [billable, setBillable] = useState(false);
   const [personal, setPersonal] = useState(false);
   const [receiptUrl, setReceiptUrl] = useState("");
+  const [photo, setPhoto] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
   const create = useMutation({
-    mutationFn: () => api.createExpense({ date: new Date(date).toISOString(), vendor: vendor.trim(), description: description || null, amount: Number(amount), ...(category ? { category } : {}), projectId: projectId || null, billable, personal, receiptUrl: receiptUrl || null }),
+    mutationFn: async () => {
+      const e = await api.createExpense({ date: new Date(date).toISOString(), vendor: vendor.trim(), description: description || null, amount: Number(amount), ...(category ? { category } : {}), projectId: projectId || null, billable, personal, receiptUrl: receiptUrl || null });
+      // Row 132: the receipt photo rides along; the expense then points at the stored file.
+      if (photo) await api.uploadFile(photo, { expenseId: e.id });
+      return e;
+    },
     onSuccess: onDone,
-    onError: (e) => setError((e as Error).message.replace(/^API \d+: /, "")),
+    onError: (e) => setError(errorMessage(e)),
   });
   function submit(e: FormEvent) {
     e.preventDefault();
@@ -216,7 +225,15 @@ function AddExpenseDialog({ categories, onClose, onDone }: { categories: readonl
               {projects.filter((p) => p.kind !== "internal").map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
           </CrmField>
-          <CrmField label="Receipt link (optional)"><input value={receiptUrl} onChange={(e) => setReceiptUrl(e.target.value)} className={input} placeholder="https://…" /></CrmField>
+          <CrmField label="Receipt">
+            <div className="flex items-center gap-2">
+              <label className="cursor-pointer rounded-md border border-border px-2 py-1 text-xs text-slate-700 hover:bg-muted">
+                {photo ? "Change" : "📷 Photo / PDF"}
+                <input type="file" accept="image/*,application/pdf" capture="environment" className="hidden" onChange={(e) => setPhoto(e.target.files?.[0] ?? null)} data-testid="receipt-input" />
+              </label>
+              {photo ? <span className="min-w-0 truncate text-xs text-slate-700" title={photo.name}>{photo.name}</span> : <input value={receiptUrl} onChange={(e) => setReceiptUrl(e.target.value)} className={cn(input, "min-w-0 flex-1")} placeholder="or paste a link" />}
+            </div>
+          </CrmField>
           <label className="flex items-center gap-2 text-xs text-slate-700"><input type="checkbox" checked={billable} onChange={(e) => setBillable(e.target.checked)} /> Billable to the client</label>
           <label className="flex items-center gap-2 text-xs text-slate-700"><input type="checkbox" checked={personal} onChange={(e) => setPersonal(e.target.checked)} /> Personal (exclude from P&L)</label>
         </div>

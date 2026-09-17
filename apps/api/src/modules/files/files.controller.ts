@@ -32,9 +32,9 @@ export class FilesController {
   @Post()
   @Roles("owner", "admin", "member")
   @UseInterceptors(FileInterceptor("file", { limits: { fileSize: MAX_BYTES } }))
-  upload(@Auth() auth: AuthContext, @UploadedFile() file: UploadedFileLike | undefined, @Body() body: { channelId?: string; taskId?: string; documentId?: string }) {
+  upload(@Auth() auth: AuthContext, @UploadedFile() file: UploadedFileLike | undefined, @Body() body: { channelId?: string; taskId?: string; documentId?: string; expenseId?: string }) {
     if (!file) throw new BadRequestException("No file in the request");
-    return this.files.upload(auth.orgId, auth.userId, file, body);
+    return this.files.upload(auth.orgId, auth.userId, file, body, auth.role);
   }
 
   @Get()
@@ -55,7 +55,8 @@ export class FilesController {
   @Public()
   @Get(":id/raw")
   async raw(@Param("id") id: string, @Res() res: Response) {
-    const { row, stream } = await this.files.raw(id);
+    const { row, stream, redirect } = await this.files.raw(id);
+    if (redirect) return res.redirect(302, redirect);
     if (!stream) throw new NotFoundException("File bytes are not on this server");
     res.setHeader("content-type", row.mimeType);
     res.setHeader("content-length", String(row.sizeBytes));

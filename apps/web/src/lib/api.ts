@@ -1866,6 +1866,8 @@ export interface Expense {
   invoiceId: string | null;
   personal: boolean;
   receiptUrl: string | null;
+  /** Row 132 */
+  createdBy?: { id: string; name: string } | null;
   notes: string | null;
   source: "manual" | "import";
   importId: string | null;
@@ -2223,12 +2225,13 @@ export const api = {
       body: JSON.stringify({ body, parentMessageId, mentionedUserIds, attachmentIds }),
     }),
   // ---- Files (row 43) ----
-  uploadFile: (file: File, target: { channelId?: string; taskId?: string; documentId?: string }) => {
+  uploadFile: (file: File, target: { channelId?: string; taskId?: string; documentId?: string; expenseId?: string }) => {
     const form = new FormData();
     form.append("file", file, file.name);
     if (target.channelId) form.append("channelId", target.channelId);
     if (target.taskId) form.append("taskId", target.taskId);
     if (target.documentId) form.append("documentId", target.documentId);
+    if (target.expenseId) form.append("expenseId", target.expenseId);
     return upload<Attachment>(`/files`, form);
   },
   getChannelFiles: (channelId: string) => request<Attachment[]>(`/files?channelId=${channelId}`),
@@ -2925,7 +2928,7 @@ export const api = {
   declinePublicContract: (token: string, reason?: string) => publicRequest<PublicContract>(`/public/contracts/${token}/decline`, { method: "POST", body: JSON.stringify({ reason }) }),
 
   // ---- Finance: expenses (row 160) ----
-  getExpenses: (opts: { filter?: string; projectId?: string; companyId?: string; from?: string; to?: string; importId?: string; q?: string } = {}) => {
+  getExpenses: (opts: { filter?: string; projectId?: string; companyId?: string; from?: string; to?: string; importId?: string; q?: string; mine?: string } = {}) => {
     const q = new URLSearchParams();
     for (const [k, v] of Object.entries(opts)) if (v) q.set(k, v);
     const qs = q.toString();
