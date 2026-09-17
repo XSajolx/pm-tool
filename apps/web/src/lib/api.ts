@@ -2044,6 +2044,39 @@ export interface ProjectContractors {
   engagements: (ContractorEngagement & { contractor: Omit<Contractor, "invoiced" | "unpaid" | "invoiceCount" | "projectCount">; invoiced: number; unpaid: number; billable: number; invoices: ContractorInvoice[] })[];
   totals: { invoiced: number; unpaid: number; billable: number; pendingApproval: number; currency: string; categoryMarkupPct: number };
 }
+// ---- Rows 142-146: agency reports ----
+export interface Utilization {
+  from: string;
+  to: string;
+  people: { userId: string; name: string; role: string; capacity: number; holidayHours: number; leaveHours: number; available: number; loggedHours: number; billableHours: number; internalHours: number; billableUtilizationPct: number | null; loggedUtilizationPct: number | null; projects: { id: string; name: string; hours: number; billableHours: number }[] }[];
+  team: { available: number; logged: number; billable: number; capacity: number; billableUtilizationPct: number | null; loggedUtilizationPct: number | null };
+}
+export interface Profitability {
+  from: string | null;
+  to: string | null;
+  projects: { id: string; name: string; status: string; client: string | null; currency: string; budgetAmount: number | null; revenue: number; invoiceCount: number; collected: number; hours: number; labourCost: number; billableValue: number; expenses: number; contractorCost: number; cost: number; margin: number; marginPct: number | null; effectiveRate: number | null; missingCostRates: boolean }[];
+  totals: { revenue: number; collected: number; hours: number; labourCost: number; expenses: number; cost: number; margin: number; marginPct: number | null };
+}
+export interface WipReport {
+  onlyApproved: boolean;
+  projects: UnbilledSummaryRow[];
+  totals: { hours: number; hoursAmount: number; awaitingHours: number; expensesAmount: number; total: number };
+}
+export interface AgedReceivables {
+  asOf: string;
+  clients: { id: string | null; name: string; email: string | null; buckets: { current: number; d1_30: number; d31_60: number; d61_90: number; d90plus: number; total: number }; invoices: { id: string; number: string; title: string; dueDate: string | null; daysOverdue: number; balance: number; currency: string; bucket: string }[] }[];
+  totals: { current: number; d1_30: number; d31_60: number; d61_90: number; d90plus: number; total: number };
+  overdue: number;
+}
+export interface KpiSnapshot {
+  asOf: string;
+  backlog: { activeProjects: number; contractedValue: number; invoicedSoFar: number; remainingValue: number; openTasks: number; overdueTasks: number };
+  wip: { total: number; hours: number; awaitingHours: number; projects: number };
+  receivables: { outstanding: number; overdue: number; over90: number; clients: number };
+  utilization: { billablePct: number | null; loggedPct: number | null; billableHours: number; available: number; from: string };
+  pipeline: { openDeals: number; value: number; weighted: number };
+  profitability: { revenueYtd: number; marginYtd: number; marginPct: number | null };
+}
 // ---- Rows 140-141: rate cards ----
 export interface RateCard {
   id: string;
@@ -3208,6 +3241,26 @@ export const api = {
   getScheduleReviewers: () => request<{ id: string; name: string; email: string | null; role: string }[]>(`/finance/schedules/reviewers`),
   getAwaitingReview: () => request<{ id: string; number: string; title: string; total: number; currency: string; createdAt: string; ageDays: number; scheduleId: string; scheduleName: string; reviewerId: string | null }[]>(`/finance/schedules/awaiting-review`),
   issueScheduledInvoice: (invoiceId: string) => request<Invoice>(`/finance/schedules/invoices/${invoiceId}/issue`, { method: "POST" }),
+  /** Rows 142-146 */
+  getUtilization: (from: string, to: string) => request<Utilization>(`/finance/reports/utilization?from=${from}&to=${to}`),
+  getProfitability: (range?: { from: string; to: string }) => request<Profitability>(range ? `/finance/reports/profitability?from=${range.from}&to=${range.to}` : `/finance/reports/profitability?all=1`),
+  getWip: (onlyApproved = true) => request<WipReport>(`/finance/reports/wip${onlyApproved ? "" : "?onlyApproved=0"}`),
+  getAgedReceivables: (asOf?: string) => request<AgedReceivables>(`/finance/reports/receivables${asOf ? `?asOf=${asOf}` : ""}`),
+  getKpis: () => request<KpiSnapshot>(`/finance/reports/kpis`),
+  downloadReportCsv: async (report: "utilization" | "profitability" | "wip" | "receivables", opts: { from?: string; to?: string } = {}) => {
+    const q = new URLSearchParams();
+    for (const [k, v] of Object.entries(opts)) if (v) q.set(k, v);
+    const token = await accessToken();
+    const res = await fetch(`${API_URL}/api/finance/reports/${report}.csv?${q.toString()}`, { headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), ...(activeOrgId ? { "x-org-id": activeOrgId } : {}) } });
+    if (!res.ok) throw new ApiError(res.status, `API ${res.status}: ${await res.text()}`);
+    const name = /filename="([^"]+)"/.exec(res.headers.get("content-disposition") ?? "")?.[1] ?? `${report}.csv`;
+    const url = URL.createObjectURL(await res.blob());
+    const a = Object.assign(document.createElement("a"), { href: url, download: name });
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  },
   /** Rows 140-141 */
   getRateCards: () => request<MemberRateCard[]>(`/finance/rates`),
   addRateCard: (body: { userId: string; effectiveFrom: string; billRate: number; costRate: number; currency?: string; note?: string | null }) => request<RateCard>(`/finance/rates`, { method: "POST", body: JSON.stringify(body) }),

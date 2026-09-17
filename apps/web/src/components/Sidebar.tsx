@@ -221,6 +221,7 @@ export function Sidebar() {
         <NavLink to="/finance/profit-first" label="Profit First" icon={bucketIcon} />
         <NavLink to="/finance/tax" label="Taxes" icon={taxIcon} />
         <NavLink to="/finance/accounting" label="Accounting" icon={ledgerIcon} />
+        <NavLink to="/finance/reports" label="Reports" icon={chartIcon} />
       </nav>
 
       {/* Productivity */}
