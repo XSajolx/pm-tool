@@ -1,8 +1,8 @@
 name: Deploy web to GitHub Pages
 
 # The front end is static and can live on Pages. It talks to Supabase Auth
-# directly and to the API at VITE_API_URL — set that repository variable once
-# the API has a host; until then the app shows an "API not connected" banner.
+# directly and to the API on Vercel (pm-tool-api). The repository variable
+# VITE_API_URL overrides the default host if the API ever moves.
 
 on:
   push:
@@ -38,7 +38,9 @@ jobs:
           VITE_BASE_PATH: /pm-tool/
           VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
-          VITE_API_URL: ${{ vars.VITE_API_URL }}
+          VITE_API_URL: ${{ vars.VITE_API_URL || 'https://pm-tool-api-beta.vercel.app' }}
+          # Vercel functions can't hold a websocket; the app polls instead.
+          VITE_REALTIME: off
       # Pages serves 404.html for unknown paths; the SPA router takes it from there,
       # so deep links like /pm-tool/crm/deals survive a refresh.
       - run: cp apps/web/dist/index.html apps/web/dist/404.html
