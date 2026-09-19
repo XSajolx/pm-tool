@@ -10,9 +10,9 @@ process.env.NODE_ENV ??= "production";
 process.env.UPLOAD_DIR ??= "/tmp/uploads";
 // One function instance = one small pool; DATABASE_URL should be the transaction pooler (6543).
 process.env.DB_POOL_MAX ??= "2";
-// Web app on GitHub Pages.
-process.env.CORS_ORIGIN ??= "https://xsajolx.github.io";
-process.env.WEB_URL ??= "https://xsajolx.github.io/pm-tool";
+// Web app on Vercel (pm-tool-web); the old GitHub Pages origin stays allowed.
+process.env.CORS_ORIGIN ??= "https://pm-tool-web-beta.vercel.app,https://xsajolx.github.io";
+process.env.WEB_URL ??= "https://pm-tool-web-beta.vercel.app";
 // Supabase is the identity provider; the URL is public (tokens are verified against its JWKS).
 process.env.SUPABASE_URL ??= "https://iuybckgroeolqftdsmqt.supabase.co";
 // Vercel injects the production host (no scheme); file links and OAuth callbacks are built from it.
