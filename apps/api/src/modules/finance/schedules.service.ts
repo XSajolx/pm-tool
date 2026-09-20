@@ -6,6 +6,7 @@ import { companies, contacts, invoiceSchedules, invoices, memberships, projects,
 import { ActivityService } from "../activity/activity.service.js";
 import { NotificationsService, pendingApproval } from "../notifications/notifications.service.js";
 import { InvoicesService, computeTotals } from "./invoices.service.js";
+import { backgroundJobsEnabled, registerJob } from "../../common/jobs.js";
 
 export type ScheduleKind = "recurring" | "subscription";
 export type ScheduleUnit = "week" | "month" | "year";
@@ -72,6 +73,8 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit() {
+    registerJob("finance.schedules", () => this.sweep());
+    if (!backgroundJobsEnabled()) return; // serverless: an external scheduler calls the job instead
     this.timer = setInterval(() => void this.sweep(), 5 * 60 * 1000);
     setTimeout(() => void this.sweep(), 8000);
     // Row 138: the reviewer's inbox card — Approve = send it, Reject = leave the draft with a note.

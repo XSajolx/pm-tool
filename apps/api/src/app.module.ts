@@ -6,6 +6,7 @@ import { AccessModule } from "./modules/access/access.module.js";
 import { ActivityModule } from "./modules/activity/activity.module.js";
 import { NotificationsModule } from "./modules/notifications/notifications.module.js";
 import { HealthController } from "./health.controller.js";
+import { JobsController } from "./jobs.controller.js";
 import { TasksModule } from "./modules/tasks/tasks.module.js";
 import { WorkspaceModule } from "./modules/workspace/workspace.module.js";
 import { ChatModule } from "./modules/chat/chat.module.js";
@@ -68,6 +69,6 @@ import { AutomationsModule } from "./modules/automations/automations.module.js";
     AccountingModule,
     AutomationsModule,
   ],
-  controllers: [HealthController],
+  controllers: [HealthController, JobsController],
 })
 export class AppModule {}

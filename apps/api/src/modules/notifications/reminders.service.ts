@@ -4,6 +4,7 @@ import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
 import { milestones, organizations, projects, reminders, taskAssignees, tasks } from "../../db/schema.js";
 import { NotificationsService } from "./notifications.service.js";
+import { backgroundJobsEnabled, registerJob } from "../../common/jobs.js";
 
 /** How far ahead "due soon" looks. */
 const DUE_SOON_MS = 24 * 60 * 60 * 1000;
@@ -32,6 +33,8 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit() {
+    registerJob("notifications.reminders", () => this.sweep());
+    if (!backgroundJobsEnabled()) return; // serverless: an external scheduler calls the job instead
     this.timer = setInterval(() => void this.sweep(), 5 * 60 * 1000);
     setTimeout(() => void this.sweep(), 8000);
   }

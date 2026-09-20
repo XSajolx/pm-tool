@@ -7,6 +7,7 @@ import { ActivityService } from "../activity/activity.service.js";
 import { NotificationsService } from "../notifications/notifications.service.js";
 import { ProfitFirstService } from "./profit-first.service.js";
 import { ReportsService } from "./reports.service.js";
+import { backgroundJobsEnabled, registerJob } from "../../common/jobs.js";
 
 /**
  * Calendar quarters, each due on the 15th of the following month (Q4 → 15 Jan
@@ -64,6 +65,8 @@ export class TaxService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit() {
+    registerJob("finance.tax", () => this.sweep());
+    if (!backgroundJobsEnabled()) return; // serverless: an external scheduler calls the job instead
     this.timer = setInterval(() => void this.sweep(), 60 * 60 * 1000);
     setTimeout(() => void this.sweep(), 12_000);
   }

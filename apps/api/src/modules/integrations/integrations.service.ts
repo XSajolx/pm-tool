@@ -8,6 +8,7 @@ import { MailerService } from "../notifications/mailer.service.js";
 import { NotificationsService } from "../notifications/notifications.service.js";
 import { ActivityService } from "../activity/activity.service.js";
 import { stripeHealth } from "../finance/stripe.config.js";
+import { backgroundJobsEnabled, registerJob } from "../../common/jobs.js";
 
 export type Provider = "google_drive" | "dropbox" | "quickbooks" | "xero";
 export const PROVIDERS: Provider[] = ["google_drive", "dropbox", "quickbooks", "xero"];
@@ -87,6 +88,8 @@ export class IntegrationsService implements OnModuleInit, OnModuleDestroy {
 
   /** Row 116: re-check every connected account hourly so a broken link is never silent. */
   onModuleInit() {
+    registerJob("integrations", () => this.sweep());
+    if (!backgroundJobsEnabled()) return; // serverless: an external scheduler calls the job instead
     this.timer = setInterval(() => void this.sweep(), 60 * 60 * 1000);
     setTimeout(() => void this.sweep(), 20_000);
   }

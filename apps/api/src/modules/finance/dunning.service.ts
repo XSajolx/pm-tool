@@ -8,6 +8,7 @@ import { webBase } from "../integrations/integrations.service.js";
 import { MailerService } from "../notifications/mailer.service.js";
 import { NotificationsService } from "../notifications/notifications.service.js";
 import { InvoicesService } from "./invoices.service.js";
+import { backgroundJobsEnabled, registerJob } from "../../common/jobs.js";
 
 const DAY = 86_400_000;
 export const DEFAULT_REMINDER_DAYS = [3, 14, 30];
@@ -33,6 +34,8 @@ export class DunningService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit() {
+    registerJob("finance.dunning", () => this.sweep());
+    if (!backgroundJobsEnabled()) return; // serverless: an external scheduler calls the job instead
     this.timer = setInterval(() => void this.sweep(), 60 * 60 * 1000);
     setTimeout(() => void this.sweep(), 35_000);
   }

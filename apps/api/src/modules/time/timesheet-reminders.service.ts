@@ -7,6 +7,7 @@ import { NotificationsService } from "../notifications/notifications.service.js"
 import { accessEnded } from "../auth/auth.service.js";
 import { startOfWeek } from "./time.service.js";
 import { WorkCalendarService } from "./work-calendar.service.js";
+import { backgroundJobsEnabled, registerJob } from "../../common/jobs.js";
 
 export interface ReminderSlot {
   weekday: number;
@@ -39,6 +40,8 @@ export class TimesheetRemindersService implements OnModuleInit, OnModuleDestroy 
   ) {}
 
   onModuleInit() {
+    registerJob("time.timesheet-reminders", () => this.sweep());
+    if (!backgroundJobsEnabled()) return; // serverless: an external scheduler calls the job instead
     this.timer = setInterval(() => void this.sweep(), 10 * 60 * 1000);
     setTimeout(() => void this.sweep(), 15_000);
   }

@@ -5,6 +5,7 @@ import type { DB } from "../../db/index.js";
 import { allocations, holidays, leaveRequests, memberships, organizations, projectStages, projects, reminders, timeEntries, users } from "../../db/schema.js";
 import { NotificationsService } from "../notifications/notifications.service.js";
 import { startOfWeek } from "../time/time.service.js";
+import { backgroundJobsEnabled, registerJob } from "../../common/jobs.js";
 
 const WEEK_MS = 7 * 86_400_000;
 const DAY_MS = 86_400_000;
@@ -33,6 +34,8 @@ export class ResourcingService implements OnModuleInit, OnModuleDestroy {
 
   onModuleInit() {
     // Capacity and leave change without anyone touching the plan: re-check daily.
+    registerJob("resourcing.over-allocation", () => this.sweepOverAllocation());
+    if (!backgroundJobsEnabled()) return; // serverless: an external scheduler calls the job instead
     this.timer = setInterval(() => void this.sweepOverAllocation(), 24 * 60 * 60 * 1000);
     setTimeout(() => void this.sweepOverAllocation(), 40_000);
   }

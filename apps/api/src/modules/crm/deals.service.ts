@@ -7,6 +7,7 @@ import { ActivityService } from "../activity/activity.service.js";
 import { ProjectsService } from "../projects/projects.service.js";
 import { MilestonesService } from "../projects/milestones.service.js";
 import { NotificationsService } from "../notifications/notifications.service.js";
+import { backgroundJobsEnabled, registerJob } from "../../common/jobs.js";
 
 /** Row 55: an open deal nobody has touched for this long is flagged stale. */
 export const DEFAULT_STALE_DAYS = 14;
@@ -65,6 +66,8 @@ export class DealsService implements OnModuleInit, OnModuleDestroy {
 
   onModuleInit() {
     // Cheap enough to run often; the query only touches deals whose date has passed.
+    registerJob("crm.follow-ups", () => this.sweepFollowUps());
+    if (!backgroundJobsEnabled()) return; // serverless: an external scheduler calls the job instead
     this.sweepTimer = setInterval(() => void this.sweepFollowUps(), 5 * 60 * 1000);
     setTimeout(() => void this.sweepFollowUps(), 5000);
   }

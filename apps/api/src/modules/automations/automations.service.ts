@@ -6,6 +6,7 @@ import { activityLog, automationRules, automationRuns, companies, dealStages, de
 import { ActivityService, type ActivityRow } from "../activity/activity.service.js";
 import { NotificationsService } from "../notifications/notifications.service.js";
 import { TasksService } from "../tasks/tasks.service.js";
+import { backgroundJobsEnabled, registerJob } from "../../common/jobs.js";
 
 export const TRIGGERS: { type: AutomationTriggerType; label: string; hasName?: string }[] = [
   { type: "task_created", label: "A task is created" },
@@ -69,6 +70,8 @@ export class AutomationsService implements OnModuleInit, OnModuleDestroy {
   onModuleInit() {
     this.activity.onRecord((row) => this.onActivity(row));
     // Invoices do not write activity when they become overdue; a sweep records it once per invoice.
+    registerJob("automations.overdue", () => this.sweepOverdue());
+    if (!backgroundJobsEnabled()) return; // serverless: an external scheduler calls the job instead
     this.timer = setInterval(() => void this.sweepOverdue(), 30 * 60 * 1000);
     setTimeout(() => void this.sweepOverdue(), 30_000);
   }

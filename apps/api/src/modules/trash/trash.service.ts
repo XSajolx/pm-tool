@@ -4,6 +4,7 @@ import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
 import { activityLog, documents, lists, projects, tasks, users } from "../../db/schema.js";
 import { ActivityService } from "../activity/activity.service.js";
+import { backgroundJobsEnabled, registerJob } from "../../common/jobs.js";
 
 export type TrashType = "task" | "document" | "project";
 const RETENTION_DAYS = 30;
@@ -25,6 +26,8 @@ export class TrashService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit() {
+    registerJob("trash.purge", () => this.purge());
+    if (!backgroundJobsEnabled()) return; // serverless: an external scheduler calls the job instead
     this.timer = setInterval(() => void this.purge(), 6 * 60 * 60 * 1000);
     setTimeout(() => void this.purge(), 30_000);
   }

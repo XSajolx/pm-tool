@@ -7,6 +7,7 @@ import { MailerService } from "./mailer.service.js";
 import { NotificationsService } from "./notifications.service.js";
 
 import { DEFAULT_DIGEST, resolveDigest, type DigestPrefs } from "./digest.prefs.js";
+import { backgroundJobsEnabled, registerJob } from "../../common/jobs.js";
 export { DEFAULT_DIGEST, resolveDigest, type DigestPrefs };
 
 export interface DigestItem {
@@ -43,6 +44,8 @@ export class DigestService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit() {
+    registerJob("notifications.digest", () => this.sweep());
+    if (!backgroundJobsEnabled()) return; // serverless: an external scheduler calls the job instead
     this.timer = setInterval(() => void this.sweep(), 10 * 60 * 1000);
     setTimeout(() => void this.sweep(), 12_000);
   }

@@ -5,6 +5,7 @@ import type { DB } from "../../db/index.js";
 import { memberships, projectStages, projects, reminders, timeEntries } from "../../db/schema.js";
 import { RatesService } from "../finance/rates.service.js";
 import { NotificationsService } from "../notifications/notifications.service.js";
+import { backgroundJobsEnabled, registerJob } from "../../common/jobs.js";
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 const THRESHOLDS = [75, 90, 100] as const;
@@ -28,6 +29,8 @@ export class StageBudgetsService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit() {
+    registerJob("projects.stage-budgets", () => this.sweep());
+    if (!backgroundJobsEnabled()) return; // serverless: an external scheduler calls the job instead
     this.timer = setInterval(() => void this.sweep(), 60 * 60 * 1000);
     setTimeout(() => void this.sweep(), 50_000);
   }

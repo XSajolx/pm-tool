@@ -11,6 +11,7 @@ import { DemoProvider } from "./demo.provider.js";
 import { isoDay, ProviderError, round2, type AccountingProvider, type InvoicePayload } from "./provider.js";
 import { QuickBooksProvider } from "./quickbooks.provider.js";
 import { XeroProvider } from "./xero.provider.js";
+import { backgroundJobsEnabled, registerJob } from "../../common/jobs.js";
 
 export const DEFAULT_ACCOUNTING: AccountingSettings = {
   provider: null,
@@ -53,6 +54,8 @@ export class AccountingService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit() {
+    registerJob("accounting", () => this.sweep());
+    if (!backgroundJobsEnabled()) return; // serverless: an external scheduler calls the job instead
     this.timer = setInterval(() => void this.sweep(), 60 * 60 * 1000);
     setTimeout(() => void this.sweep(), 45_000);
   }

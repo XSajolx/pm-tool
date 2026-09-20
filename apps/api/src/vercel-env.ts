@@ -10,6 +10,8 @@ process.env.NODE_ENV ??= "production";
 process.env.UPLOAD_DIR ??= "/tmp/uploads";
 // One function instance = one small pool; DATABASE_URL should be the transaction pooler (6543).
 process.env.DB_POOL_MAX ??= "2";
+// Timers would run in every warm instance and starve the pool; Vercel Cron calls GET /jobs/run instead.
+process.env.BACKGROUND_JOBS ??= "off";
 // Web app on Vercel (pm-tool-web); the old GitHub Pages origin stays allowed.
 process.env.CORS_ORIGIN ??= "https://pm-tool-web-beta.vercel.app,https://xsajolx.github.io";
 process.env.WEB_URL ??= "https://pm-tool-web-beta.vercel.app";
