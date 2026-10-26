@@ -279,7 +279,7 @@ export class TasksService {
     const crm = await this.assertCrmLinks(orgId, dto);
     // Row 47: the message must be one of ours; the link is informational only.
     if (dto.sourceMessageId) {
-      const msg = await this.db.query.messages.findFirst({ where: and(eq(messages.id, dto.sourceMessageId), eq(messages.organizationId, orgId)), columns: { id: true } });
+      const msg = await this.db.query.messages.findFirst({ where: and(eq(messages.id, dto.sourceMessageId), eq(messages.organizationId, orgId), isNull(messages.deletedAt)), columns: { id: true } });
       if (!msg) throw new BadRequestException("Unknown chat message");
     }
     let statusId = dto.statusId;

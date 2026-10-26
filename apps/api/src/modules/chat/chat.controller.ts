@@ -13,7 +13,7 @@ export class ChatController {
 
   @Get("channels")
   channels(@Auth() auth: AuthContext) {
-    return this.chat.listChannels(auth.orgId, auth.userId);
+    return this.chat.listChannels(auth.orgId, auth.userId, auth.role);
   }
 
   @Get("channels/:id/messages")
@@ -53,6 +53,14 @@ export class ChatController {
   async react(@Auth() auth: AuthContext, @Param("id") id: string, @Param("messageId") messageId: string, @Body() body: { emoji: string }) {
     const res = await this.chat.react(auth.orgId, id, messageId, auth.userId, body.emoji);
     this.gateway.emitToChannel(id, "message:reaction", res);
+    return res;
+  }
+
+  /** Delete a message: the author within 24h, or a channel moderator any time (see message-delete.policy). */
+  @Delete("channels/:id/messages/:messageId")
+  async remove(@Auth() auth: AuthContext, @Param("id") id: string, @Param("messageId") messageId: string) {
+    const res = await this.chat.deleteMessage(auth.orgId, id, messageId, { userId: auth.userId, role: auth.role });
+    this.gateway.emitToChannel(id, "message:deleted", res);
     return res;
   }
 

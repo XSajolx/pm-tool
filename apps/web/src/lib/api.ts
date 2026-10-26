@@ -2636,6 +2636,8 @@ export const api = {
   togglePin: (channelId: string, messageId: string) =>
     request<{ messageId: string; pinnedAt: string | null }>(`/chat/channels/${channelId}/messages/${messageId}/pin`, { method: "POST" }),
   getPinnedMessages: (channelId: string) => request<ChatMessage[]>(`/chat/channels/${channelId}/pins`),
+  deleteChatMessage: (channelId: string, messageId: string) =>
+    request<ChatMessageDeleted>(`/chat/channels/${channelId}/messages/${messageId}`, { method: "DELETE" }),
   addChannelBookmark: (channelId: string, body: { label: string; url: string }) =>
     request<ChannelBookmark>(`/chat/channels/${channelId}/bookmarks`, { method: "POST", body: JSON.stringify(body) }),
   removeChannelBookmark: (channelId: string, bookmarkId: string) =>
@@ -3693,6 +3695,8 @@ export interface ChatChannel {
   isPrivate: boolean;
   projectId: string | null;
   project: { id: string; name: string; color: string; archived: boolean } | null;
+  /** I may delete anyone's message here: workspace owner/admin, channel creator or project lead. */
+  canModerate: boolean;
   members: ChatMember[];
 }
 
@@ -3729,4 +3733,12 @@ export interface ChatMessage {
   meta?: { type: string; link?: string; entityId?: string } | null;
   /** Row 47: the task created from this message. */
   task?: { id: string; title: string; reference: string | null; status: { name: string; color: string; category: string } | null } | null;
+  /** Deleted, kept only as the root of a thread that still has replies. */
+  deleted?: boolean;
+}
+/** The `message:deleted` socket event and the DELETE response. */
+export interface ChatMessageDeleted {
+  messageId: string;
+  parentMessageId: string | null;
+  deletedAt: string;
 }

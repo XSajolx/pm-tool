@@ -84,7 +84,7 @@ export class SearchService {
         .innerJoin(channelMembers, and(eq(channelMembers.channelId, messages.channelId), eq(channelMembers.userId, viewer.userId)))
         .leftJoin(projects, eq(projects.id, channels.projectId))
         .leftJoin(users, eq(users.id, messages.authorId))
-        .where(and(eq(messages.organizationId, orgId), eq(messages.kind, "user"), ilike(messages.body, like)))
+        .where(and(eq(messages.organizationId, orgId), eq(messages.kind, "user"), isNull(messages.deletedAt), ilike(messages.body, like)))
         .orderBy(desc(messages.createdAt))
         .limit(perGroup),
       this.searchDocs(orgId, viewer, q, like, perGroup),

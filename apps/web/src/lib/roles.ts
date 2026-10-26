@@ -35,4 +35,5 @@ export const PERMISSION_MATRIX: { area: string; owner: string; admin: string; me
   { area: "CRM (companies, deals, proposals)", owner: "✓", admin: "✓", member: "✓", guest: "–" },
   { area: "Client-visible docs & milestones", owner: "✓", admin: "✓", member: "✓", guest: "✓ (shared only)" },
   { area: "Delete tasks, projects", owner: "✓", admin: "✓", member: "–", guest: "–" },
+  { area: "Delete chat messages", owner: "✓ any", admin: "✓ any", member: "Own within 24h; any in channels they created or projects they lead", guest: "Own within 24h" },
 ];

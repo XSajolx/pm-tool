@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, type Attachment, type ChannelBookmark, type ChannelNotify, type ChatChannel, type ChatMember, type ChatMessage, type ReactionGroup } from "../lib/api.js";
+import { api, type Attachment, type ChannelBookmark, type ChannelNotify, type ChatChannel, type ChatMember, type ChatMessage, type ChatMessageDeleted, type ReactionGroup } from "../lib/api.js";
 import { useAuth } from "../lib/auth.js";
 import { getSocket } from "../lib/socket.js";
 import { ChatActions, PeoplePicker } from "../components/ChatActions.js";
@@ -245,6 +245,8 @@ function MessagePane({ channelId, channel }: { channelId: string; channel?: Chat
     const onBookmarks = () => qc.invalidateQueries({ queryKey: ["channels"] });
     socket.on("message:pin", onPin);
     socket.on("channel:bookmarks", onBookmarks);
+    const onDeleted = (p: ChatMessageDeleted) => applyDeleted(qc, channelId, p);
+    socket.on("message:deleted", onDeleted);
     // After a reconnect (API restart, flaky network) the server has forgotten
     // our room, so join again or live messages silently stop.
     const rejoin = () => socket.emit("join", channelId);
@@ -255,6 +257,7 @@ function MessagePane({ channelId, channel }: { channelId: string; channel?: Chat
       socket.off("message:reaction", onReaction);
       socket.off("message:pin", onPin);
       socket.off("channel:bookmarks", onBookmarks);
+      socket.off("message:deleted", onDeleted);
       socket.off("connect", rejoin);
     };
   }, [channelId, qc, meId]);
@@ -266,6 +269,10 @@ function MessagePane({ channelId, channel }: { channelId: string; channel?: Chat
   const pin = useMutation({
     mutationFn: (messageId: string) => api.togglePin(channelId, messageId),
     onSuccess: (p) => applyPin(qc, channelId, p),
+  });
+  const del = useMutation({
+    mutationFn: (messageId: string) => api.deleteChatMessage(channelId, messageId),
+    onSuccess: (p) => applyDeleted(qc, channelId, p),
   });
 
   useEffect(() => {
@@ -329,6 +336,7 @@ function MessagePane({ channelId, channel }: { channelId: string; channel?: Chat
                   onReact={(emoji) => react.mutate({ messageId: m.id, emoji })}
                   onPin={() => pin.mutate(m.id)}
                   onMakeTask={() => setTaskFrom(m)}
+                  onDelete={canDelete(m, meId, channel) ? () => del.mutate(m.id) : undefined}
                   threadOpen={threadId === m.id}
                 />
               </div>
@@ -347,7 +355,7 @@ function MessagePane({ channelId, channel }: { channelId: string; channel?: Chat
         />
       </div>
 
-      {threadId && <ThreadPane channelId={channelId} messageId={threadId} meId={meId} members={members} onClose={() => setThreadId(null)} />}
+      {threadId && <ThreadPane channelId={channelId} channel={channel} messageId={threadId} meId={meId} members={members} onClose={() => setThreadId(null)} />}
       {panel === "files" && !threadId && <FilesPanel channelId={channelId} onClose={() => setPanel(null)} />}
       {taskFrom && (
         <QuickAdd
@@ -391,6 +399,7 @@ function MessageRow({
   onReact,
   onPin,
   onMakeTask,
+  onDelete,
   threadOpen,
   compact,
 }: {
@@ -402,11 +411,28 @@ function MessageRow({
   onReact?: (emoji: string) => void;
   onPin?: () => void;
   onMakeTask?: () => void;
+  onDelete?: () => void;
   threadOpen?: boolean;
   compact?: boolean;
 }) {
   const mine = m.author.id === meId;
   const [picker, setPicker] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  if (m.deleted) {
+    return (
+      <div className={cn("-mx-2 flex gap-3 px-2 py-0.5", threadOpen && "bg-indigo-50/60")}>
+        <div className={cn("shrink-0", compact ? "w-7" : "w-9")} />
+        <div className="min-w-0 flex-1">
+          <p className="text-sm italic text-muted-foreground">This message was deleted.</p>
+          {onReply && (m.replyCount ?? 0) > 0 && (
+            <button type="button" onClick={onReply} className="mt-1 flex items-center gap-1.5 text-xs font-medium text-indigo-600 hover:underline">
+              💬 {m.replyCount} {m.replyCount === 1 ? "reply" : "replies"}
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
   const initials = m.author.name
     .split(" ")
     .map((p) => p[0])
@@ -506,7 +532,7 @@ function MessageRow({
           </button>
         )}
       </div>
-      {(onReply || onReact || onPin || onMakeTask) && (
+      {(onReply || onReact || onPin || onMakeTask || onDelete) && (
         <div className="absolute right-2 top-0 hidden items-center gap-0.5 rounded-md border border-border bg-white p-0.5 text-[11px] text-slate-600 shadow-sm group-hover:flex">
           {onReact &&
             QUICK_EMOJI.slice(0, 3).map((e) => (
@@ -534,6 +560,21 @@ function MessageRow({
               ✓ Task
             </button>
           )}
+          {onDelete &&
+            (confirmDelete ? (
+              <>
+                <button type="button" onClick={onDelete} className="rounded bg-red-50 px-1.5 font-medium text-red-700 hover:bg-red-100" title="Delete this message for everyone">
+                  Delete?
+                </button>
+                <button type="button" onClick={() => setConfirmDelete(false)} className="rounded px-1 hover:bg-muted" title="Keep it">
+                  ✕
+                </button>
+              </>
+            ) : (
+              <button type="button" onClick={() => setConfirmDelete(true)} className="rounded px-1 hover:bg-muted hover:text-red-700" title="Delete message">
+                🗑
+              </button>
+            ))}
         </div>
       )}
     </div>
@@ -543,7 +584,7 @@ function MessageRow({
 type ThreadData = { root: ChatMessage; replies: ChatMessage[] };
 
 /** Row 40: side panel with the original message and its replies. */
-function ThreadPane({ channelId, messageId, meId, members, onClose }: { channelId: string; messageId: string; meId: string; members: ChatMember[]; onClose: () => void }) {
+function ThreadPane({ channelId, channel, messageId, meId, members, onClose }: { channelId: string; channel?: ChatChannel; messageId: string; meId: string; members: ChatMember[]; onClose: () => void }) {
   const qc = useQueryClient();
   const endRef = useRef<HTMLDivElement>(null);
   const { data } = useQuery({ queryKey: ["thread", channelId, messageId], queryFn: () => api.getThread(channelId, messageId) });
@@ -555,6 +596,10 @@ function ThreadPane({ channelId, messageId, meId, members, onClose }: { channelI
   const react = useMutation({
     mutationFn: ({ id, emoji }: { id: string; emoji: string }) => api.reactToMessage(channelId, id, emoji),
     onSuccess: (p) => applyReactions(qc, channelId, meId, p),
+  });
+  const del = useMutation({
+    mutationFn: (id: string) => api.deleteChatMessage(channelId, id),
+    onSuccess: (p) => applyDeleted(qc, channelId, p),
   });
   const reply = useMutation({
     mutationFn: ({ body, ids, files }: { body: string; ids: string[]; files: string[] }) => api.sendMessage(channelId, body, messageId, ids, files),
@@ -575,7 +620,7 @@ function ThreadPane({ channelId, messageId, meId, members, onClose }: { channelI
       <div className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
         {data ? (
           <>
-            <MessageRow m={data.root} meId={meId} members={members} compact onReact={(emoji) => react.mutate({ id: data.root.id, emoji })} />
+            <MessageRow m={data.root} meId={meId} members={members} compact onReact={(emoji) => react.mutate({ id: data.root.id, emoji })} onDelete={canDelete(data.root, meId, channel) ? () => del.mutate(data.root.id) : undefined} />
             <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
               <span className="h-px flex-1 bg-border" />
               {data.replies.length} {data.replies.length === 1 ? "reply" : "replies"}
@@ -583,7 +628,7 @@ function ThreadPane({ channelId, messageId, meId, members, onClose }: { channelI
             </div>
             {data.replies.map((r, i) => {
               const prev = data.replies[i - 1];
-              return <MessageRow key={r.id} m={r} meId={meId} members={members} compact grouped={Boolean(prev && prev.author.id === r.author.id)} onReact={(emoji) => react.mutate({ id: r.id, emoji })} />;
+              return <MessageRow key={r.id} m={r} meId={meId} members={members} compact grouped={Boolean(prev && prev.author.id === r.author.id)} onReact={(emoji) => react.mutate({ id: r.id, emoji })} onDelete={canDelete(r, meId, channel) ? () => del.mutate(r.id) : undefined} />;
             })}
           </>
         ) : (
@@ -1164,6 +1209,35 @@ function applyPin(qc: ReturnType<typeof useQueryClient>, channelId: string, p: {
   qc.setQueryData<ChatMessage[]>(["messages", channelId], (old = []) => old.map(patch));
   qc.setQueriesData<ThreadData>({ queryKey: ["thread", channelId] }, (old) => (old ? { root: patch(old.root), replies: old.replies.map(patch) } : old));
   qc.invalidateQueries({ queryKey: ["pins", channelId] });
+}
+
+/** Mirrors message-delete.policy on the API: my own message within 24h, or anything if I moderate the channel. */
+const OWN_DELETE_WINDOW_MS = 24 * 60 * 60 * 1000;
+function canDelete(m: ChatMessage, meId: string, channel?: ChatChannel) {
+  if (m.deleted) return false;
+  if (channel?.canModerate) return true;
+  return m.kind !== "system" && m.author.id === meId && Date.now() - new Date(m.createdAt).getTime() <= OWN_DELETE_WINDOW_MS;
+}
+
+/**
+ * A message was deleted. A reply leaves its thread (and the parent's count);
+ * a channel message disappears, or becomes a placeholder if its thread has replies.
+ */
+function applyDeleted(qc: ReturnType<typeof useQueryClient>, channelId: string, p: ChatMessageDeleted) {
+  const tombstone = (m: ChatMessage): ChatMessage => ({ ...m, deleted: true, body: "", attachments: [], reactions: [], pinnedAt: null, task: null });
+  qc.setQueryData<ChatMessage[]>(["messages", channelId], (old = []) => {
+    if (p.parentMessageId) {
+      return old
+        .map((m) => (m.id === p.parentMessageId ? { ...m, replyCount: Math.max((m.replyCount ?? 1) - 1, 0) } : m))
+        .filter((m) => !(m.deleted && !m.replyCount));
+    }
+    return old.flatMap((m) => (m.id !== p.messageId ? [m] : m.replyCount ? [tombstone(m)] : []));
+  });
+  qc.setQueriesData<ThreadData>({ queryKey: ["thread", channelId] }, (old) =>
+    old ? { root: old.root.id === p.messageId ? tombstone(old.root) : old.root, replies: old.replies.filter((r) => r.id !== p.messageId) } : old,
+  );
+  qc.invalidateQueries({ queryKey: ["pins", channelId] });
+  qc.invalidateQueries({ queryKey: ["channel-files", channelId] });
 }
 
 /** Row 46: the links under the channel name — brief, Figma, staging — plus an inline "add" form. */
