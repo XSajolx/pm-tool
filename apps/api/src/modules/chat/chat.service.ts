@@ -2,9 +2,12 @@ import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundEx
 import { and, asc, count, desc, eq, exists, gt, gte, ilike, inArray, isNull, lt, max, ne, or, sql } from "drizzle-orm";
 import { DRIZZLE } from "../../db/drizzle.module.js";
 import type { DB } from "../../db/index.js";
-import { attachments, channelBookmarks, channels, channelMembers, memberships, messages, notificationPreferences, notifications, tasks } from "../../db/schema.js";
+import { attachments, channelBookmarks, channels, channelMembers, memberships, messages, notificationPreferences, notifications, projects, tasks } from "../../db/schema.js";
+import type { Role } from "../auth/auth.types.js";
+import { ActivityService } from "../activity/activity.service.js";
 import { FilesService } from "../files/files.service.js";
 import { ReactionsService } from "../reactions/reactions.service.js";
+import { canDeleteMessage, canModerateChannel } from "./message-delete.policy.js";
 
 /** "Website Redesign" → "website-redesign" (channel names are slugs). */
 function slug(name: string) {
@@ -24,13 +27,14 @@ export class ChatService {
     @Inject(DRIZZLE) private readonly db: DB,
     private readonly files: FilesService,
     private readonly reactions: ReactionsService,
+    private readonly activity: ActivityService,
   ) {}
 
   /**
    * Channels the user belongs to, with members (client derives DM names).
    * Row 39: project channels carry their project so the list can group them.
    */
-  async listChannels(orgId: string, userId: string) {
+  async listChannels(orgId: string, userId: string, role: Role) {
     const mine = await this.db.query.channelMembers.findMany({
       where: eq(channelMembers.userId, userId),
     });
@@ -41,7 +45,7 @@ export class ChatService {
       where: and(eq(channels.organizationId, orgId), inArray(channels.id, ids)),
       with: {
         members: { with: { user: true } },
-        project: { columns: { id: true, name: true, color: true, archivedAt: true } },
+        project: { columns: { id: true, name: true, color: true, archivedAt: true, leadId: true } },
         bookmarks: { orderBy: (b, { asc: a }) => [a(b.position), a(b.createdAt)] },
       },
       orderBy: (c) => [asc(c.createdAt)],
@@ -52,7 +56,7 @@ export class ChatService {
       .select({ channelId: messages.channelId, n: count() })
       .from(messages)
       .innerJoin(channelMembers, and(eq(channelMembers.channelId, messages.channelId), eq(channelMembers.userId, userId)))
-      .where(and(inArray(messages.channelId, ids), ne(messages.authorId, userId), ne(messages.kind, "system"), or(isNull(channelMembers.lastReadAt), gt(messages.createdAt, channelMembers.lastReadAt))))
+      .where(and(inArray(messages.channelId, ids), ne(messages.authorId, userId), ne(messages.kind, "system"), isNull(messages.deletedAt), or(isNull(channelMembers.lastReadAt), gt(messages.createdAt, channelMembers.lastReadAt))))
       .groupBy(messages.channelId);
     const unreadBy = new Map(unread.map((u) => [u.channelId, Number(u.n)]));
     const lastReadBy = new Map(mine.map((m) => [m.channelId, m.lastReadAt]));
@@ -71,6 +75,8 @@ export class ChatService {
       isPrivate: c.isPrivate,
       projectId: c.projectId,
       project: c.project ? { id: c.project.id, name: c.project.name, color: c.project.color, archived: Boolean(c.project.archivedAt) } : null,
+      /** May delete anyone's message here (authors can always delete their own for 24h). */
+      canModerate: canModerateChannel({ userId, role }, { type: c.type, createdById: c.createdById, projectLeadId: c.project?.leadId ?? null }),
       members: c.members.map((m) => ({
         id: m.user.id,
         name: m.user.name,
@@ -154,7 +160,7 @@ export class ChatService {
     const q = (f.q ?? "").trim();
     if (!q && !f.from && !f.in && !f.hasFile && !f.after && !f.before) return [];
 
-    const where = [eq(messages.organizationId, orgId), inArray(messages.channelId, f.in && ids.includes(f.in) ? [f.in] : ids)];
+    const where = [eq(messages.organizationId, orgId), isNull(messages.deletedAt), inArray(messages.channelId, f.in && ids.includes(f.in) ? [f.in] : ids)];
     if (q) where.push(ilike(messages.body, `%${q.replace(/[%_]/g, (c) => `\\${c}`)}%`));
     if (f.from) where.push(eq(messages.authorId, f.from));
     if (f.after) where.push(gte(messages.createdAt, new Date(f.after)));
@@ -212,7 +218,7 @@ export class ChatService {
   async togglePin(orgId: string, channelId: string, messageId: string, userId: string) {
     await this.assertMember(channelId, userId);
     const msg = await this.db.query.messages.findFirst({
-      where: and(eq(messages.id, messageId), eq(messages.channelId, channelId), eq(messages.organizationId, orgId)),
+      where: and(eq(messages.id, messageId), eq(messages.channelId, channelId), eq(messages.organizationId, orgId), isNull(messages.deletedAt)),
       columns: { id: true, pinnedAt: true },
     });
     if (!msg) throw new NotFoundException("Message not found");
@@ -221,11 +227,40 @@ export class ChatService {
     return { messageId, pinnedAt };
   }
 
+  /**
+   * Soft-delete a message. Authors can take back their own for 24 hours;
+   * channel moderators (workspace admins, the channel's creator, the project
+   * lead) can remove anyone's at any time. Files, pin and mention
+   * notifications go with it; replies in its thread stay.
+   */
+  async deleteMessage(orgId: string, channelId: string, messageId: string, actor: { userId: string; role: Role }) {
+    const ch = await this.channel(orgId, channelId);
+    const isWorkspaceAdmin = actor.role === "owner" || actor.role === "admin";
+    if (!isWorkspaceAdmin) await this.assertMember(channelId, actor.userId);
+    const msg = await this.db.query.messages.findFirst({
+      where: and(eq(messages.id, messageId), eq(messages.channelId, channelId), eq(messages.organizationId, orgId), isNull(messages.deletedAt)),
+      columns: { id: true, authorId: true, kind: true, createdAt: true, parentMessageId: true },
+    });
+    if (!msg) throw new NotFoundException("Message not found");
+    const project = ch.projectId ? await this.db.query.projects.findFirst({ where: eq(projects.id, ch.projectId), columns: { leadId: true } }) : null;
+    const verdict = canDeleteMessage(actor, { type: ch.type, createdById: ch.createdById, projectLeadId: project?.leadId ?? null }, msg);
+    if (!verdict.ok) throw new ForbiddenException(verdict.reason);
+
+    const now = new Date();
+    await this.db.transaction(async (tx) => {
+      await tx.update(messages).set({ deletedAt: now, deletedById: actor.userId, pinnedAt: null, pinnedById: null }).where(eq(messages.id, messageId));
+      await tx.update(attachments).set({ archivedAt: now, updatedAt: now }).where(and(eq(attachments.messageId, messageId), isNull(attachments.archivedAt)));
+      await tx.update(notifications).set({ archivedAt: now }).where(and(eq(notifications.entityType, "message"), eq(notifications.entityId, messageId), isNull(notifications.archivedAt)));
+    });
+    await this.activity.record({ orgId, actorId: actor.userId, entityType: "message", entityId: messageId, action: "deleted", changes: verdict.as === "moderator" && msg.authorId !== actor.userId ? [{ field: "authorId", from: msg.authorId, to: null }] : undefined });
+    return { messageId, parentMessageId: msg.parentMessageId, deletedAt: now };
+  }
+
   /** Pinned messages, newest pin first. */
   async pins(orgId: string, channelId: string, userId: string) {
     await this.assertMember(channelId, userId);
     const rows = await this.db.query.messages.findMany({
-      where: and(eq(messages.organizationId, orgId), eq(messages.channelId, channelId)),
+      where: and(eq(messages.organizationId, orgId), eq(messages.channelId, channelId), isNull(messages.deletedAt)),
       with: { author: true },
       orderBy: (m, { desc: d }) => [d(m.pinnedAt)],
     });
@@ -297,12 +332,13 @@ export class ChatService {
       ? await this.db
           .select({ parentMessageId: messages.parentMessageId, n: count(), last: max(messages.createdAt) })
           .from(messages)
-          .where(and(eq(messages.channelId, channelId), inArray(messages.parentMessageId, ids)))
+          .where(and(eq(messages.channelId, channelId), inArray(messages.parentMessageId, ids), isNull(messages.deletedAt)))
           .groupBy(messages.parentMessageId)
       : [];
     const byParent = new Map(counts.map((c) => [c.parentMessageId!, c]));
     const [files, reacts, linked] = await Promise.all([this.files.forMessages(ids), this.reactions.forEntities(orgId, userId, "message", ids), this.tasksFor(orgId, ids)]);
-    return rows.map((m) => {
+    // A deleted message stays only as the placeholder root of a thread that still has replies.
+    return rows.filter((m) => !m.deletedAt || byParent.has(m.id)).map((m) => {
       const c = byParent.get(m.id);
       return { ...this.shape(m), replyCount: Number(c?.n ?? 0), lastReplyAt: c?.last ?? null, attachments: files.get(m.id) ?? [], reactions: reacts[m.id] ?? [], task: linked.get(m.id) ?? null };
     });
@@ -317,7 +353,7 @@ export class ChatService {
     });
     if (!root) throw new NotFoundException("Message not found");
     const replies = await this.db.query.messages.findMany({
-      where: and(eq(messages.channelId, channelId), eq(messages.parentMessageId, messageId)),
+      where: and(eq(messages.channelId, channelId), eq(messages.parentMessageId, messageId), isNull(messages.deletedAt)),
       with: { author: true },
       orderBy: (m) => [asc(m.createdAt)],
     });
@@ -336,7 +372,7 @@ export class ChatService {
    */
   async react(orgId: string, channelId: string, messageId: string, userId: string, emoji: string) {
     await this.assertMember(channelId, userId);
-    const msg = await this.db.query.messages.findFirst({ where: and(eq(messages.id, messageId), eq(messages.channelId, channelId)), columns: { id: true, parentMessageId: true } });
+    const msg = await this.db.query.messages.findFirst({ where: and(eq(messages.id, messageId), eq(messages.channelId, channelId), isNull(messages.deletedAt)), columns: { id: true, parentMessageId: true } });
     if (!msg) throw new NotFoundException("Message not found");
     const clean = (emoji ?? "").trim().slice(0, 16);
     if (!clean) throw new BadRequestException("Pick an emoji");
@@ -350,7 +386,7 @@ export class ChatService {
     if (!body?.trim() && !attachmentIds.length) throw new BadRequestException("Message can't be empty");
     if (parentMessageId) {
       const parent = await this.db.query.messages.findFirst({
-        where: and(eq(messages.id, parentMessageId), eq(messages.channelId, channelId)),
+        where: and(eq(messages.id, parentMessageId), eq(messages.channelId, channelId), isNull(messages.deletedAt)),
         columns: { id: true, parentMessageId: true },
       });
       if (!parent) throw new BadRequestException("That message isn't in this channel");
@@ -617,12 +653,14 @@ export class ChatService {
     pinnedAt?: Date | null;
     kind?: "user" | "system";
     meta?: { type: string; link?: string; entityId?: string } | null;
+    deletedAt?: Date | null;
     author: { id: string; name: string; avatarUrl: string | null };
   }) {
     return {
       id: m.id,
       channelId: m.channelId,
-      body: m.body,
+      body: m.deletedAt ? "" : m.body,
+      deleted: Boolean(m.deletedAt),
       createdAt: m.createdAt,
       parentMessageId: m.parentMessageId,
       pinnedAt: m.pinnedAt ?? null,

@@ -620,6 +620,9 @@ export const messages = pgTable(
     pinnedAt: timestamp("pinned_at", { withTimezone: true }),
     pinnedById: uuid("pinned_by_id").references(() => users.id, { onDelete: "set null" }),
     editedAt: timestamp("edited_at", { withTimezone: true }),
+    /** Soft delete: the body is blanked, the row stays so a thread keeps its root. */
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    deletedById: uuid("deleted_by_id").references(() => users.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [index("messages_channel_created_idx").on(t.channelId, t.createdAt)],
